@@ -13,6 +13,7 @@ import {
 } from "react-icons/lu";
 import { CallDetail } from "@/components/call-detail";
 import { equipmentLabel } from "@/components/hold-card";
+import { SkeletonRows } from "@/components/inbox/carrier-list";
 import { Badge, CarrierStagePill } from "@/components/inbox/stage-pill";
 import { LoadPanel } from "@/components/load-panel";
 import { PulseDot } from "@/components/pulse-dot";
@@ -413,14 +414,7 @@ export function CarrierDetail({
         <div className="grid min-h-0 flex-1 grid-cols-[300px_minmax(0,1fr)]">
           <aside aria-label="Loads with this carrier" className="min-h-0 overflow-y-auto border-r border-line bg-bg">
             {data === null && loading ? (
-              <div aria-hidden className="space-y-3 p-4">
-                {Array.from({ length: 4 }, (_, i) => (
-                  <div key={i} className="space-y-2">
-                    <div className="h-4 w-3/4 animate-pulse rounded-md bg-panel-raised" />
-                    <div className="h-3 w-1/2 animate-pulse rounded-md bg-panel-raised" />
-                  </div>
-                ))}
-              </div>
+              <SkeletonRows rows={4} />
             ) : (
               <Timeline
                 calls={calls}

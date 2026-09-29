@@ -96,10 +96,10 @@ function CarrierRow({
 }
 
 // The cortex list skeleton: two bars per row.
-function SkeletonRows() {
+export function SkeletonRows({ rows = 5 }: { rows?: number }) {
   return (
     <div aria-hidden className="space-y-3 p-4">
-      {Array.from({ length: 5 }, (_, i) => (
+      {Array.from({ length: rows }, (_, i) => (
         <div key={i} className="space-y-2">
           <div className="h-4 w-3/4 animate-pulse rounded-md bg-panel-raised" />
           <div className="h-3 w-1/2 animate-pulse rounded-md bg-panel-raised" />

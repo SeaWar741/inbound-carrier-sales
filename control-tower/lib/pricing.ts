@@ -128,8 +128,8 @@ export function pricingBreakdown(input: {
   const headroom = maxBuy - postedRate;
   const first = path[0];
   const finalUsd = agreedRate ?? latestAsk;
-  const marginUsd = maxBuy - finalUsd;
-  const margin = { usd: marginUsd, pct: maxBuy > 0 ? (marginUsd / maxBuy) * 100 : 0 };
+  // Both numbers are present here, so the margin is never null.
+  const margin = marginKept(maxBuy, finalUsd)!;
   return {
     posted: line(postedRate),
     ceiling: line(maxBuy),

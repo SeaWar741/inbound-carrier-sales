@@ -6,8 +6,10 @@ import { LuInbox, LuLayoutDashboard, LuRadioTower, LuTriangleAlert } from "react
 import { AutonomySwitch } from "@/components/autonomy-switch";
 import { PulseDot } from "@/components/pulse-dot";
 import { TmsHealth } from "@/components/tms-health";
+import type { TowerWall } from "@/lib/contracts";
 import { formatClock, formatDay } from "@/lib/format";
-import { useWall, WallContext } from "@/lib/use-wall";
+import { usePoll } from "@/lib/use-poll";
+import { WallContext } from "@/lib/use-wall";
 
 const nav = [
   { href: "/", label: "Dashboard", Icon: LuLayoutDashboard },
@@ -17,8 +19,9 @@ const nav = [
 // The frame of every tower page: sidebar, header and the wall poll the pages share. The page body
 // fills what is left and scrolls inside its own panes; the window itself never scrolls.
 export default function TowerLayout({ children }: { children: React.ReactNode }) {
-  const wallState = useWall();
-  const { wall, error, updatedAt } = wallState;
+  // Polls /api/wall every 2 s while the tab is visible. A failed poll keeps the last good wall.
+  const wallState = usePoll<TowerWall>("/api/wall", 2_000, "wall");
+  const { data: wall, error, updatedAt } = wallState;
   const pathname = usePathname();
   const stale = error !== null;
 

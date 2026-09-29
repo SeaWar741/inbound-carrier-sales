@@ -3,6 +3,7 @@
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type { TowerLoad, TowerWall, TripStatus } from "@/lib/contracts";
 import { formatUsd } from "@/lib/format";
+import { emptyLoadFilters, statusCounts } from "@/lib/load-filters";
 
 // A number that rolls up when it changes, so a new booking is noticed without reading every cell.
 function Rolling({ value, className }: { value: string; className?: string }) {
@@ -52,20 +53,18 @@ export const tripTones: Record<TripStatus, { dot: string; pill: string }> = {
 const barOrder: TripStatus[] = ["upcoming", "in_transit", "arrived"];
 
 // How the booked loads split across their trip, as one proportion bar.
-function TripSplit({ loads }: { loads: TowerLoad[] | null }) {
-  const counts = { upcoming: 0, in_transit: 0, arrived: 0 };
-  for (const load of loads ?? []) counts[load.status] += 1;
-  const total = loads?.length ?? 0;
+function TripSplit({ counts }: { counts: Record<TripStatus | "all", number> | null }) {
+  const total = counts?.all ?? 0;
   return (
     <div className="flex min-w-0 flex-col gap-2.5 rounded-[var(--radius-panel)] border border-line bg-panel px-4 py-3">
       <div className="flex items-baseline justify-between gap-2">
         <span className="truncate text-xs text-fg-muted">Booked loads</span>
-        <span className="tabular text-xs text-fg-faint">{loads === null ? "-" : total}</span>
+        <span className="tabular text-xs text-fg-faint">{counts === null ? "-" : total}</span>
       </div>
       <div className="flex h-2 overflow-hidden rounded-full bg-panel-raised" aria-hidden>
         {total > 0 &&
           barOrder.map((status) =>
-            counts[status] > 0 ? (
+            counts !== null && counts[status] > 0 ? (
               <div key={status} className={`${tripTones[status].dot} border-r-2 border-panel last:border-r-0`} style={{ flexGrow: counts[status] }} />
             ) : null,
           )}
@@ -75,7 +74,7 @@ function TripSplit({ loads }: { loads: TowerLoad[] | null }) {
           <li key={status} className="flex items-center gap-1.5 text-xs text-fg-muted">
             <span className={`size-2 rounded-full ${tripTones[status].dot}`} aria-hidden />
             {tripLabels[status]}
-            <span className="tabular text-fg">{loads === null ? "-" : counts[status]}</span>
+            <span className="tabular text-fg">{counts === null ? "-" : counts[status]}</span>
           </li>
         ))}
       </ul>
@@ -84,23 +83,22 @@ function TripSplit({ loads }: { loads: TowerLoad[] | null }) {
 }
 
 export function KpiTiles({ loads, counters }: { loads: TowerLoad[] | null; counters: TowerWall["counters"] | null }) {
-  const inTransit = loads?.filter((load) => load.status === "in_transit") ?? [];
-  const upcoming = loads?.filter((load) => load.status === "upcoming").length ?? 0;
-  const dollarsInMotion = inTransit.reduce((sum, load) => sum + load.agreedRate, 0);
+  const counts = loads && statusCounts(loads, emptyLoadFilters);
+  const dollarsInMotion = (loads ?? []).reduce((sum, load) => sum + (load.status === "in_transit" ? load.agreedRate : 0), 0);
   const winRate = counters && counters.calls > 0 ? `${Math.round((counters.booked / counters.calls) * 100)}%` : "-";
 
   return (
     <section aria-label="Key numbers" aria-live="polite">
       <dl className="grid grid-cols-[repeat(4,minmax(0,1fr))_minmax(0,1.6fr)] gap-3">
         <Tile label="Dollars in motion" value={loads === null ? "-" : formatUsd(dollarsInMotion)} hint="Agreed rate of loads in transit" />
-        <Tile label="Loads in motion" value={loads === null ? "-" : String(inTransit.length)} hint={`${upcoming} more picking up soon`} />
+        <Tile label="Loads in motion" value={counts === null ? "-" : String(counts.in_transit)} hint={`${counts?.upcoming ?? 0} more picking up soon`} />
         <Tile
           label="Booked today"
           value={counters === null ? "-" : String(counters.booked)}
           hint={counters === null ? "" : `${formatUsd(counters.dollarsGenerated)} generated`}
         />
         <Tile label="Win rate today" value={winRate} hint={counters === null ? "" : `${counters.booked} booked of ${counters.calls} calls`} />
-        <TripSplit loads={loads} />
+        <TripSplit counts={counts} />
       </dl>
     </section>
   );

@@ -14,7 +14,7 @@ import { useSharedWall } from "@/lib/use-wall";
 const loadsPollMs = 15_000;
 
 export default function DashboardPage() {
-  const { wall } = useSharedWall();
+  const { data: wall } = useSharedWall();
   const { data, error } = usePoll<TowerLoads>("/api/loads", loadsPollMs, "load list");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [filters, setFilters] = useState<LoadFilters>(emptyLoadFilters);

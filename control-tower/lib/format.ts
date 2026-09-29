@@ -164,25 +164,6 @@ export function callSummary(call: Pick<TowerCall, "events" | "hold">): string | 
   }
 }
 
-export type LoadSection<T> = { loadId: string | null; calls: T[] };
-
-// A carrier's calls sectioned by load: a call belongs to the load of its latest offer, calls with no
-// offer share one "no load" section. Sections keep the order of their first call, and calls keep the
-// order they came in (newest first from the adapter).
-export function groupCallsByLoad<T extends { offers: { loadId: string }[] }>(calls: T[]): LoadSection<T>[] {
-  const sections = new Map<string | null, LoadSection<T>>();
-  for (const call of calls) {
-    const loadId = call.offers.at(-1)?.loadId ?? null;
-    let section = sections.get(loadId);
-    if (!section) {
-      section = { loadId, calls: [] };
-      sections.set(loadId, section);
-    }
-    section.calls.push(call);
-  }
-  return [...sections.values()];
-}
-
 export type LoadCard<T> = {
   // Null for the one card that collects calls without any offer.
   loadId: string | null;
@@ -199,13 +180,20 @@ type CardCall = { callId: string; createdAt: string; offers: { loadId: string; r
 // The timeline's cards: one per load (a call belongs to the load of its latest offer), newest
 // activity first, and the calls without a load folded into one card at the end.
 export function loadCards<T extends CardCall>(calls: T[]): LoadCard<T>[] {
-  const cards = groupCallsByLoad(calls).map((section) => {
-    const ordered = [...section.calls].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const byLoad = new Map<string | null, T[]>();
+  for (const call of calls) {
+    const loadId = call.offers.at(-1)?.loadId ?? null;
+    const group = byLoad.get(loadId);
+    if (group) group.push(call);
+    else byLoad.set(loadId, [call]);
+  }
+  const cards = [...byLoad].map(([loadId, group]) => {
+    const ordered = [...group].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     const rounds = Math.max(
       0,
-      ...ordered.flatMap((call) => call.offers.filter((offer) => offer.loadId === section.loadId).map((offer) => offer.round)),
+      ...ordered.flatMap((call) => call.offers.filter((offer) => offer.loadId === loadId).map((offer) => offer.round)),
     );
-    return { loadId: section.loadId, calls: ordered, rounds, lastAt: ordered[0]!.createdAt };
+    return { loadId, calls: ordered, rounds, lastAt: ordered[0]!.createdAt };
   });
   return cards.sort((a, b) => {
     if ((a.loadId === null) !== (b.loadId === null)) return a.loadId === null ? 1 : -1;

@@ -16,6 +16,7 @@ import {
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
+import { renderToStaticMarkup } from "react-dom/server";
 import { LuArrowRight, LuBuilding2, LuCalendarClock, LuCircleCheck, LuClock, LuContainer, LuDollarSign, LuMinus, LuPlus, LuScan, LuTruck } from "react-icons/lu";
 import { tripLabels, tripTones } from "@/components/dashboard/kpi-tiles";
 import type { TripStatus } from "@/lib/contracts";
@@ -304,7 +305,14 @@ function unmountLater(root: Root) {
   setTimeout(() => root.unmount(), 0);
 }
 
-type TruckMarker = { marker: Marker; element: HTMLDivElement; root: Root; glide: ReturnType<typeof setTimeout> | null };
+// Every truck marker shows the same static icon, so its markup is rendered once.
+const truckIcon = renderToStaticMarkup(
+  <span className="lane-truck__pill">
+    <LuTruck aria-hidden />
+  </span>,
+);
+
+type TruckMarker = { marker: Marker; element: HTMLDivElement; glide: ReturnType<typeof setTimeout> | null };
 
 function truckState(element: HTMLElement, load: Placed) {
   element.dataset.status = load.status;
@@ -579,7 +587,6 @@ export function LaneMap({
       for (const truck of truckMarkers.values()) {
         if (truck.glide) clearTimeout(truck.glide);
         truck.marker.remove();
-        unmountLater(truck.root);
       }
       truckMarkers.clear();
       if (popupRef.current) {
@@ -696,20 +703,14 @@ export function LaneMap({
       element.addEventListener("mouseenter", () => map.getSource("lane-arcs") && map.setFeatureState({ source: "lane-arcs", id: load.id }, { hover: true }));
       element.addEventListener("mouseleave", () => map.getSource("lane-arcs") && map.setFeatureState({ source: "lane-arcs", id: load.id }, { hover: false }));
       truckState(element, load);
-      const root = createRoot(element);
-      root.render(
-        <span className="lane-truck__pill">
-          <LuTruck aria-hidden />
-        </span>,
-      );
+      element.innerHTML = truckIcon;
       const marker = new Marker({ element, anchor: "center" }).setLngLat(load.truck).addTo(map);
-      markers.current.set(load.id, { marker, element, root, glide: null });
+      markers.current.set(load.id, { marker, element, glide: null });
     }
     for (const [id, truck] of markers.current) {
       if (seen.has(id)) continue;
       if (truck.glide) clearTimeout(truck.glide);
       truck.marker.remove();
-      unmountLater(truck.root);
       markers.current.delete(id);
     }
   }

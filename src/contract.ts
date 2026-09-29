@@ -413,14 +413,12 @@ export type CarrierStage = (typeof carrierStages)[number];
 export const inboxTabs = ["needs_you", "live", "active", "closed", "all"] as const;
 export const inboxSorts = ["priority", "recent", "rate", "pickup"] as const;
 
-// A repeated key (`stage=live&stage=booked`) arrives as an array and a single one as a string;
-// both may also carry a comma list. Empty entries are dropped, so `stage=` is no filter.
+// A repeated key (`stage=live&stage=booked`) arrives as an array and a single one as a string.
+// Empty entries are dropped, so `stage=` is no filter.
 const listParam = <T extends z.ZodType>(item: T, max: number) =>
   z.preprocess(
     (value) =>
-      (Array.isArray(value) ? value : value === undefined ? [] : [value])
-        .flatMap((v) => (typeof v === "string" ? v.split(",") : [v]))
-        .filter((v) => !(typeof v === "string" && v.trim() === "")),
+      (Array.isArray(value) ? value : value === undefined ? [] : [value]).filter((v) => !(typeof v === "string" && v.trim() === "")),
     z.array(item).max(max),
   );
 

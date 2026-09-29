@@ -8,39 +8,8 @@ import {
   formatPerMile,
   formatSignedUsd,
   formatTimeAgo,
-  groupCallsByLoad,
   loadCards,
 } from "./format.ts";
-
-const call = (id: string, ...loadIds: string[]) => ({ id, offers: loadIds.map((loadId) => ({ loadId })) });
-
-describe("groupCallsByLoad", () => {
-  it("puts each call in the load of its latest offer", () => {
-    const sections = groupCallsByLoad([call("c3", "LD2"), call("c2", "LD9", "LD1"), call("c1", "LD2")]);
-    assert.deepEqual(
-      sections.map((s) => [s.loadId, s.calls.map((c) => c.id)]),
-      [
-        ["LD2", ["c3", "c1"]],
-        ["LD1", ["c2"]],
-      ],
-    );
-  });
-
-  it("collects calls without offers in one no-load section", () => {
-    const sections = groupCallsByLoad([call("c3"), call("c2", "LD1"), call("c1")]);
-    assert.deepEqual(
-      sections.map((s) => [s.loadId, s.calls.map((c) => c.id)]),
-      [
-        [null, ["c3", "c1"]],
-        ["LD1", ["c2"]],
-      ],
-    );
-  });
-
-  it("answers no sections for no calls", () => {
-    assert.deepEqual(groupCallsByLoad([]), []);
-  });
-});
 
 describe("formatTimeAgo", () => {
   const now = Date.parse("2026-09-29T12:00:00Z");

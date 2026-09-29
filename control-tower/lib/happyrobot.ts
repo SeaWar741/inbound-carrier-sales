@@ -75,6 +75,18 @@ export async function listRunningRuns(): Promise<RunningRun[]> {
   );
 }
 
+// The adapter caps the running call ids it accepts.
+const maxLive = 200;
+
+// Adds the running calls to an adapter query as `live` ids and answers every running run by id, or
+// undefined when HappyRobot could not answer (the query then goes without `live`).
+export async function liveRuns(query: URLSearchParams): Promise<Map<string, RunningRun> | undefined> {
+  const runs = await listRunningRuns().catch(() => undefined);
+  if (!runs) return undefined;
+  for (const run of runs.slice(0, maxLive)) query.append("live", run.runId);
+  return new Map(runs.map((run) => [run.runId, run]));
+}
+
 // The newest session of a run, live or ended; HappyRobot keeps its messages after the call.
 export async function sessionForRun(runId: string): Promise<string | null> {
   return (await sessionOf(runId))?.id ?? null;

@@ -223,16 +223,16 @@ describe("GET /v1/operator/carriers", () => {
     ["an unknown sort", "?sort=name"],
     ["a malformed state", "?origin=Georgia"],
     ["an unknown since", "?since=1y"],
-    ["201 live ids", `?live=${Array.from({ length: 201 }, (_, i) => `run-${i}`).join(",")}`],
+    ["201 live ids", `?${Array.from({ length: 201 }, (_, i) => `live=run-${i}`).join("&")}`],
   ])("rejects %s", async (_, query) => {
     statements.length = 0;
     expect((await getCarriers(query)).statusCode).toBe(400);
     expect(statements).toHaveLength(0);
   });
 
-  it("accepts 200 live ids, repeated and comma list stages, and defaults the rest", () => {
-    const live = Array.from({ length: 200 }, (_, i) => `run-${i}`).join(",");
-    expect(operatorCarriersQuery.parse({ live, stage: ["live", "booked,lost"], equipment: "dry van" })).toMatchObject({
+  it("accepts 200 live ids, repeated stages, and defaults the rest", () => {
+    const live = Array.from({ length: 200 }, (_, i) => `run-${i}`);
+    expect(operatorCarriersQuery.parse({ live, stage: ["live", "booked", "lost"], equipment: "dry van" })).toMatchObject({
       tab: "all",
       since: "7d",
       sort: "priority",
@@ -308,7 +308,7 @@ describe("GET /v1/operator/carriers", () => {
         q: "50%_o'k",
         sort: "pickup",
         page: "3",
-        live: "run-1,run-2",
+        live: ["run-1", "run-2"],
       }),
     ).text;
     expect(text).toContain("k.latest_call_id IN (E'run-1', E'run-2') AS latest_live");
