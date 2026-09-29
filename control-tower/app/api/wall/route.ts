@@ -1,10 +1,7 @@
 import { NextResponse } from "next/server";
 import { getWall } from "@/lib/adapter";
-import type { AdapterWallCall, AdapterWallResponse, ErrorResponse, TowerCall, TowerWall } from "@/lib/contracts";
+import { toTowerCall, type AdapterWallResponse, type ErrorResponse, type TowerCall, type TowerWall } from "@/lib/contracts";
 import { listRunningRuns, type RunningRun } from "@/lib/happyrobot";
-
-// Stages the call data settles on its own; every other stage of a call that is no longer running is "ended".
-const settledStages = new Set<TowerCall["stage"]>(["holding", "booked", "released"]);
 
 // Shared by every open tab; with the 2 s browser poll it keeps the tower well inside the API quota.
 const cacheMs = 2_000;
@@ -37,22 +34,16 @@ function connectingCall(run: RunningRun): TowerCall {
 
 function merge(wall: AdapterWallResponse, runs: RunningRun[] | undefined): TowerWall {
   if (runs === undefined) {
-    const calls = wall.calls.map((call): TowerCall => ({ ...call, live: false, sessionId: null, channel: null }));
-    return { ...wall, calls, liveUnavailable: true };
+    return { ...wall, calls: wall.calls.map((call) => toTowerCall(call, undefined)), liveUnavailable: true };
   }
   const running = new Map(runs.map((run) => [run.runId, run]));
   const known = new Set(wall.calls.map((call) => call.callId));
-  const towerCall = (call: AdapterWallCall): TowerCall => {
-    const run = running.get(call.callId);
-    const stage = run === undefined && !settledStages.has(call.stage) ? "ended" : call.stage;
-    return { ...call, stage, live: run?.session != null, sessionId: run?.session?.id ?? null, channel: run?.session?.channel ?? null };
-  };
   // Newest first, like the adapter: calls not yet in the adapter started most recently.
   const connecting = runs
     .filter((run) => !known.has(run.runId))
     .sort((a, b) => b.startedAt.localeCompare(a.startedAt))
     .map(connectingCall);
-  return { ...wall, calls: [...connecting, ...wall.calls.map(towerCall)], liveUnavailable: false };
+  return { ...wall, calls: [...connecting, ...wall.calls.map((call) => toTowerCall(call, running))], liveUnavailable: false };
 }
 
 async function load(): Promise<WallAnswer> {

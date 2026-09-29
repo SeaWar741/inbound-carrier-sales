@@ -74,6 +74,8 @@ html,
 body {
   background: var(--bg);
   color: var(--fg);
+  /* Panes scroll inside themselves; the window never does. */
+  overflow: hidden;
 }
 
 body {

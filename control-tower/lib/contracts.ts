@@ -138,6 +138,89 @@ export type TowerWall = Omit<AdapterWallResponse, "calls"> & {
   liveUnavailable: boolean;
 };
 
+// The live state HappyRobot reports for one call, keyed by call id (run id).
+export type LiveRun = { session: { id: string; channel: Channel } | null };
+
+// Stages the call data settles on its own; every other stage of a call that is no longer running is "ended".
+const settledStages = new Set<CallStage>(["holding", "booked", "released"]);
+
+// Overlays the HappyRobot run on an adapter call. `running` undefined means HappyRobot could not
+// be reached: the call keeps its adapter stage and is not live.
+export function toTowerCall(call: AdapterWallCall, running: Map<string, LiveRun> | undefined): TowerCall {
+  if (running === undefined) return { ...call, live: false, sessionId: null, channel: null };
+  const run = running.get(call.callId);
+  const stage = run === undefined && !settledStages.has(call.stage) ? "ended" : call.stage;
+  return { ...call, stage, live: run?.session != null, sessionId: run?.session?.id ?? null, channel: run?.session?.channel ?? null };
+}
+
+export const tripStatuses = ["upcoming", "in_transit", "arrived"] as const;
+export type TripStatus = (typeof tripStatuses)[number];
+
+// Booked loads around now: ETA in the last 24 h through pickups in the next 7 days, earliest pickup first.
+// pickupAt and etaAt are instants; progress is 0..1 at response time.
+const adapterLoad = z.object({
+  holdId: z.string(),
+  loadId: z.string(),
+  callId: z.string(),
+  mcNumber: z.string().nullable(),
+  // The FMCSA name at verification; null for calls verified before it was stored.
+  carrierName: z.string().nullable(),
+  agreedRate: z.number(),
+  lane: wallLane,
+  pickupAt: z.iso.datetime(),
+  etaAt: z.iso.datetime(),
+  status: z.enum(tripStatuses),
+  progress: z.number().min(0).max(1),
+});
+export type TowerLoad = z.infer<typeof adapterLoad>;
+
+export const adapterLoadsResponse = z.object({ status: z.literal("ok"), loads: z.array(adapterLoad) });
+export type TowerLoads = z.infer<typeof adapterLoadsResponse>;
+
+export const carrierStages = ["live", "negotiating", "needs_approval", "booked", "in_transit", "arrived", "lost"] as const;
+export type CarrierStage = (typeof carrierStages)[number];
+export const inboxTabs = ["needs_you", "live", "active", "closed", "all"] as const;
+export const inboxSorts = ["priority", "recent", "rate", "pickup"] as const;
+
+const adapterCarrier = z.object({
+  // 'mc:<mc>', else 'dot:<dot>', else 'call:<call id>' of the carrier's calls. Encode it in URLs.
+  key: z.string(),
+  mcNumber: z.string().nullable(),
+  dotNumber: z.string().nullable(),
+  carrierName: z.string().nullable(),
+  callsCount: z.number().int(),
+  loadsCount: z.number().int(),
+  lastActivityAt: z.iso.datetime(),
+  carrierStage: z.enum(carrierStages),
+  needsHuman: z.boolean(),
+  nextTrip: z
+    .object({ pickupAt: z.iso.datetime().nullable(), etaAt: z.iso.datetime().nullable(), status: z.enum(tripStatuses).nullable() })
+    .nullable(),
+  latestCall: adapterWallCall,
+});
+
+export const adapterCarriersResponse = z.object({
+  status: z.literal("ok"),
+  rows: z.array(adapterCarrier),
+  // Carriers in the selected tab after the filters; counts are per tab after the same filters.
+  total: z.number().int(),
+  page: z.number().int(),
+  counts: z.object({ needsYou: z.number().int(), live: z.number().int(), active: z.number().int(), closed: z.number().int() }),
+});
+export type AdapterCarriersResponse = z.infer<typeof adapterCarriersResponse>;
+
+// A carrier as the tower serves it: its latest call carries the live HappyRobot session, like the wall.
+export type TowerCarrier = Omit<AdapterCarriersResponse["rows"][number], "latestCall"> & { latestCall: TowerCall };
+export type TowerCarriers = Omit<AdapterCarriersResponse, "rows"> & {
+  rows: TowerCarrier[];
+  // True when HappyRobot could not be reached; stages then ignore which calls are live.
+  liveUnavailable: boolean;
+};
+
+// Newest call first; an unknown key answers an empty list.
+export const adapterCarrierCallsResponse = z.object({ status: z.literal("ok"), calls: z.array(adapterWallCall) });
+export type AdapterCarrierCallsResponse = z.infer<typeof adapterCarrierCallsResponse>;
+
 export type ErrorResponse = { status: string; message: string };
 
 // Request bodies the browser sends to the tower.

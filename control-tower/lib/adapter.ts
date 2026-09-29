@@ -1,15 +1,21 @@
 import "server-only";
 import { z } from "zod";
 import {
+  adapterCarrierCallsResponse,
+  adapterCarriersResponse,
+  adapterLoadsResponse,
   adapterWallResponse,
   autonomyModes,
   confirmHoldResponse,
   releaseHoldResponse,
+  type AdapterCarrierCallsResponse,
+  type AdapterCarriersResponse,
   type AdapterWallResponse,
   type AutonomyMode,
   type ConfirmHoldResponse,
   type ErrorResponse,
   type ReleaseHoldResponse,
+  type TowerLoads,
 } from "./contracts";
 import { env } from "./env";
 
@@ -53,6 +59,35 @@ export async function getWall(): Promise<AdapterResult<AdapterWallResponse>> {
   const parsed = adapterWallResponse.safeParse(await json(response));
   if (!parsed.success) return unavailable("The call data is unavailable right now. Retry shortly.");
   return { ok: true, httpStatus: 200, body: parsed.data };
+}
+
+// A read of the operator API: 400 is the adapter refusing the query, anything else unexpected is a 503.
+async function read<T>(path: string, schema: z.ZodType<T>, unavailableMessage: string): Promise<AdapterResult<T>> {
+  const response = await call(path, { method: "GET", timeoutMs: readTimeoutMs });
+  if (response?.status === 400) {
+    return { ok: false, httpStatus: 400, body: { status: "invalid_request", message: "The adapter refused these filters." } };
+  }
+  if (!response?.ok) return unavailable(unavailableMessage);
+  const parsed = schema.safeParse(await json(response));
+  if (!parsed.success) return unavailable(unavailableMessage);
+  return { ok: true, httpStatus: 200, body: parsed.data };
+}
+
+export async function getLoads(): Promise<AdapterResult<TowerLoads>> {
+  return read("/v1/operator/loads", adapterLoadsResponse, "The load data is unavailable right now. Retry shortly.");
+}
+
+// query carries the inbox filters and the running call ids as the adapter reads them (tab, stage, ..., live).
+export async function getCarriers(query: URLSearchParams): Promise<AdapterResult<AdapterCarriersResponse>> {
+  return read(`/v1/operator/carriers?${query.toString()}`, adapterCarriersResponse, "The carrier data is unavailable right now. Retry shortly.");
+}
+
+export async function getCarrierCalls(key: string): Promise<AdapterResult<AdapterCarrierCallsResponse>> {
+  return read(
+    `/v1/operator/carriers/${encodeURIComponent(key)}/calls`,
+    adapterCarrierCallsResponse,
+    "The call data is unavailable right now. Retry shortly.",
+  );
 }
 
 export type InterventionRecord =

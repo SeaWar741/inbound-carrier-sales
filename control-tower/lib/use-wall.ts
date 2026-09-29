@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { createContext, useContext } from "react";
 import type { TowerWall } from "@/lib/contracts";
+import { usePoll } from "@/lib/use-poll";
 
 const pollMs = 2_000;
 
@@ -15,58 +16,13 @@ export type WallState = {
 
 // Polls /api/wall every 2 s while the tab is visible. A failed poll keeps the last good wall.
 export function useWall(): WallState {
-  const [state, setState] = useState<WallState>({ wall: null, error: null, loading: true, updatedAt: null });
+  const { data, error, loading, updatedAt } = usePoll<TowerWall>("/api/wall", pollMs, "wall");
+  return { wall: data, error, loading, updatedAt };
+}
 
-  useEffect(() => {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let controller: AbortController | undefined;
-    let stopped = false;
+// The tower layout polls the wall once and every page reads it from here.
+export const WallContext = createContext<WallState>({ wall: null, error: null, loading: true, updatedAt: null });
 
-    async function poll() {
-      clearTimeout(timer);
-      controller?.abort();
-      const current = new AbortController();
-      controller = current;
-      try {
-        const res = await fetch("/api/wall", { cache: "no-store", signal: current.signal });
-        if (res.status === 401) {
-          window.location.assign("/login");
-          return;
-        }
-        if (!res.ok) throw new Error(`The wall answered ${res.status}`);
-        const wall = (await res.json()) as TowerWall;
-        setState({ wall, error: null, loading: false, updatedAt: Date.now() });
-      } catch (err) {
-        if (current.signal.aborted) return;
-        const message = err instanceof Error && err.message.startsWith("The wall") ? err.message : "Could not reach the wall";
-        setState((prev) => ({ ...prev, error: message, loading: false }));
-      }
-      // Chain the next poll after this one settles, so slow answers never pile up.
-      if (!stopped && controller === current && document.visibilityState === "visible") {
-        timer = setTimeout(poll, pollMs);
-      }
-    }
-
-    function onVisibility() {
-      if (document.visibilityState === "visible") {
-        void poll();
-      } else {
-        clearTimeout(timer);
-        controller?.abort();
-      }
-    }
-
-    // The first load always runs so a tab opened in the background is not blank; only the
-    // repeat polling waits for visibility.
-    void poll();
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => {
-      stopped = true;
-      clearTimeout(timer);
-      controller?.abort();
-      document.removeEventListener("visibilitychange", onVisibility);
-    };
-  }, []);
-
-  return state;
+export function useSharedWall(): WallState {
+  return useContext(WallContext);
 }
