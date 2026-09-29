@@ -355,7 +355,8 @@ export const operatorWallResponse = z.object({
   counters: z.object({
     calls: z.number().int(),
     booked: z.number().int(),
-    fraudBlocked: z.number().int(),
+    // Refused at verification: not eligible, or OTP locked. A fact, not a fraud verdict.
+    blocked: z.number().int(),
     dollarsGenerated: z.number(),
     marginSaved: z.number(),
   }),

@@ -45,7 +45,7 @@ export function DayCounters({ counters }: { counters: Counters | null }) {
       <dl className="flex items-center divide-x divide-line">
         <Counter label="Calls" value={show(String(counters?.calls ?? 0))} />
         <Counter label="Booked" value={show(String(counters?.booked ?? 0))} />
-        <Counter label="Fraud blocked" value={show(String(counters?.fraudBlocked ?? 0))} />
+        <Counter label="Blocked" value={show(String(counters?.blocked ?? 0))} />
         <Counter label="$ generated" value={show(formatUsd(counters?.dollarsGenerated ?? 0))} />
         <Counter label="Margin saved" value={show(formatUsd(counters?.marginSaved ?? 0))} tone="ok" />
       </dl>

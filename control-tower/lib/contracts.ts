@@ -114,7 +114,7 @@ export const adapterWallResponse = z.object({
   counters: z.object({
     calls: z.number().int(),
     booked: z.number().int(),
-    fraudBlocked: z.number().int(),
+    blocked: z.number().int(),
     dollarsGenerated: z.number(),
     marginSaved: z.number(),
   }),
