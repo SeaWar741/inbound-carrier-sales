@@ -35,3 +35,10 @@ export const twinRequestTimeoutMs = 2_000;
 export const verificationRequestTimeoutMs = 2_000;
 // An MCS-150 contact change this recent is a common precursor of carrier identity fraud.
 export const contactChangeWindowDays = 30;
+
+// Operator wall: "today" is the brokerage's business day, not the server's or UTC's.
+export const operatorTimeZone = "America/Chicago";
+// The wall shows the tail of a call, not its full history.
+export const wallEventsPerCall = 20;
+// TMS health: 500 attempts is well over an hour of demo traffic, and sorting it per wall poll is trivial.
+export const tmsHealthLatencySamples = 500;

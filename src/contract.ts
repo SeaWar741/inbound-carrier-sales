@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { otpDigits } from "./constants.ts";
+import { callRisks, callStages } from "./domain/call-stage.ts";
 import { cityInput, equipmentInput, loadIdInput, stateInput, zipInput } from "./infra/tms/codec.ts";
 import { holdStatuses } from "./infra/twin-schemas.ts";
 
@@ -260,3 +261,80 @@ export const requestHumanResponse = z.object({
   message: z.string(),
 });
 export type RequestHumanResponse = z.infer<typeof requestHumanResponse>;
+
+// Operator only: posted rate and max buy are shown here and nowhere on the agent API.
+const wallOffer = z.object({
+  loadId: z.string(),
+  round: z.number().int(),
+  carrierAsk: z.number(),
+  decision: z.enum(["accept", "counter", "reject"]),
+  rateToSay: z.number().nullable(),
+  postedRate: z.number().nullable(),
+  maxBuy: z.number().nullable(),
+  createdAt: z.iso.datetime(),
+});
+
+const wallHold = z.object({
+  holdId: z.string(),
+  loadId: z.string(),
+  status: z.enum(holdStatuses),
+  agreedRate: z.number(),
+  postedRate: z.number().nullable(),
+  maxBuy: z.number().nullable(),
+  bookingRef: z.string().nullable(),
+  createdAt: z.iso.datetime(),
+});
+
+const wallEvent = z.object({
+  tool: z.string(),
+  summary: z.string().nullable(),
+  status: z.string().nullable(),
+  createdAt: z.iso.datetime(),
+});
+
+export const wallCall = z.object({
+  callId: z.string(),
+  mcNumber: z.string().nullable(),
+  dotNumber: z.string().nullable(),
+  eligible: z.boolean(),
+  verified: z.boolean(),
+  otp: z.object({ attempts: z.number().int(), locked: z.boolean(), expiresAt: z.iso.datetime().nullable() }),
+  stage: z.enum(callStages),
+  round: z.number().int().nullable(),
+  risk: z.enum(callRisks),
+  riskReason: z.string().nullable(),
+  offers: z.array(wallOffer),
+  hold: wallHold.nullable(),
+  // Oldest first, the last ones of the call only.
+  events: z.array(wallEvent),
+  createdAt: z.iso.datetime(),
+});
+export type WallCall = z.infer<typeof wallCall>;
+
+export const tmsHealth = z.object({
+  since: z.iso.datetime(),
+  attempts: z.number().int(),
+  retries: z.number().int(),
+  faultsAbsorbed: z.number().int(),
+  latencySamples: z.number().int(),
+  latencyP50Ms: z.number().nullable(),
+  latencyP95Ms: z.number().nullable(),
+});
+
+export const operatorWallResponse = z.object({
+  status: z.literal("ok"),
+  day: z.iso.date(),
+  counters: z.object({
+    calls: z.number().int(),
+    booked: z.number().int(),
+    fraudBlocked: z.number().int(),
+    dollarsGenerated: z.number(),
+    marginSaved: z.number(),
+  }),
+  tmsHealth,
+  // Newest call first.
+  calls: z.array(wallCall),
+});
+export type OperatorWallResponse = z.infer<typeof operatorWallResponse>;
+
+export const operatorWallUnavailableResponse = z.object({ status: z.literal("service_unavailable"), message: z.string() });

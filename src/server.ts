@@ -6,6 +6,7 @@ import { CensusClient } from "./infra/census-client.ts";
 import { FmcsaClient } from "./infra/fmcsa-client.ts";
 import { OtpDeliveryClient } from "./infra/otp-delivery-client.ts";
 import { TmsClient } from "./infra/tms/tms-client.ts";
+import { TmsHealthRecorder } from "./infra/tms/tms-health.ts";
 import { TwinClient } from "./infra/twin-client.ts";
 import { requireApiKey } from "./plugins/auth.ts";
 import { recordCallEvents, type CallEventDeps } from "./plugins/call-events.ts";
@@ -15,6 +16,7 @@ import { healthRoutes } from "./routes/health.ts";
 import { confirmHoldRoutes, holdRoutes, releaseHoldRoutes } from "./routes/holds.ts";
 import { loadRoutes } from "./routes/loads.ts";
 import { offerRoutes } from "./routes/offers.ts";
+import { operatorWallRoutes } from "./routes/operator.ts";
 import { otpRoutes } from "./routes/otp.ts";
 
 export type RouteSets = {
@@ -63,7 +65,13 @@ if (import.meta.main) {
     emailWorkflowId: config.OTP_EMAIL_WORKFLOW_ID,
     ...(config.OTP_SMS_WORKFLOW_ID && { smsWorkflowId: config.OTP_SMS_WORKFLOW_ID }),
   });
-  const tms = new TmsClient({ host: config.TMS_HOST, port: config.TMS_PORT, token: config.TMS_TOKEN });
+  const tmsHealth = new TmsHealthRecorder();
+  const tms = new TmsClient({
+    host: config.TMS_HOST,
+    port: config.TMS_PORT,
+    token: config.TMS_TOKEN,
+    onExchange: (exchange) => tmsHealth.record(exchange),
+  });
   const app = buildServer(config, {
     agentRoutes: [
       carrierRoutes({ fmcsa, census, twin }),
@@ -73,7 +81,7 @@ if (import.meta.main) {
       holdRoutes({ tms, twin }),
       handoffRoutes({ twin }),
     ],
-    operatorRoutes: [confirmHoldRoutes({ tms, twin }), releaseHoldRoutes({ twin })],
+    operatorRoutes: [confirmHoldRoutes({ tms, twin }), releaseHoldRoutes({ twin }), operatorWallRoutes({ twin, tmsHealth })],
   }, { twin });
   await app.listen({ host: "0.0.0.0", port: config.PORT });
 }
