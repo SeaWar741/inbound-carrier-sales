@@ -44,3 +44,7 @@ export const wallEventsPerCall = 20;
 export const maxAuthorizationUsd = 1_000;
 // TMS health: 500 attempts is well over an hour of demo traffic, and sorting it per wall poll is trivial.
 export const tmsHealthLatencySamples = 500;
+
+// Trip ETA: there is no delivery time in the TMS, so ETA = pickup + miles at a long-haul average
+// that already absorbs stops and hours-of-service breaks. Cycle 4 replaces it with a routed time.
+export const avgTransitMph = 50;

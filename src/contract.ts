@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { maxAuthorizationUsd, otpDigits } from "./constants.ts";
 import { callRisks, callStages } from "./domain/call-stage.ts";
+import { tripStatuses } from "./domain/trip.ts";
 import { cityInput, equipmentInput, loadIdInput, stateInput, zipInput } from "./infra/tms/codec.ts";
 import { autonomyModes, holdStatuses } from "./infra/twin-schemas.ts";
 
@@ -387,3 +388,24 @@ export const createInterventionResponse = z.object({ status: z.literal("recorded
 
 export const setAutonomyBody = z.strictObject({ mode: z.enum(autonomyModes) });
 export const setAutonomyResponse = z.object({ status: z.literal("ok"), mode: z.enum(autonomyModes) });
+
+// Booked loads around now: ETA in the last 24 h through pickups in the next 7 days, earliest pickup first.
+// pickupAt and etaAt are instants; status is decided by the adapter (tripSql), progress is 0..1 at response time.
+const operatorLoad = z.object({
+  holdId: z.string(),
+  loadId: z.string(),
+  callId: z.string(),
+  mcNumber: z.string().nullable(),
+  // The FMCSA name at verification; null for calls verified before it was stored.
+  carrierName: z.string().nullable(),
+  agreedRate: z.number(),
+  lane: wallLane,
+  pickupAt: z.iso.datetime(),
+  etaAt: z.iso.datetime(),
+  status: z.enum(tripStatuses),
+  progress: z.number().min(0).max(1),
+});
+export type OperatorLoad = z.infer<typeof operatorLoad>;
+
+export const operatorLoadsResponse = z.object({ status: z.literal("ok"), loads: z.array(operatorLoad) });
+export type OperatorLoadsResponse = z.infer<typeof operatorLoadsResponse>;
