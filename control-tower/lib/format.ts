@@ -1,4 +1,4 @@
-import type { TowerCall } from "./contracts";
+import type { CarrierStage, TowerCall } from "./contracts";
 
 // Display helpers for money, durations and times. The desk runs on Chicago time.
 const deskTimeZone = "America/Chicago";
@@ -12,6 +12,7 @@ const clockSeconds = new Intl.DateTimeFormat("en-US", {
   second: "2-digit",
 });
 // wall.day is already the Chicago calendar date, so it is formatted as a plain date in UTC.
+const dateTime = new Intl.DateTimeFormat("en-US", { timeZone: deskTimeZone, month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 const dayLabel = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "short", month: "short", day: "numeric" });
 
 export function formatUsd(amount: number): string {
@@ -53,4 +54,72 @@ export function carrierState(call: TowerCall): { text: string; tone: string } | 
   if (!call.eligible) return { text: "Not eligible", tone: "text-risk" };
   if (call.mcNumber || call.dotNumber) return { text: "Unverified", tone: "text-fg-muted" };
   return null;
+}
+
+// Day and time on the desk clock, for instants that may not be today ("Oct 1, 3:05 PM").
+export function formatDateTime(iso: string): string {
+  return dateTime.format(new Date(iso));
+}
+
+// "now", "5m", "3h", "2d": how long ago, for list rows.
+export function formatTimeAgo(iso: string, now: number): string {
+  const minutes = Math.floor((now - Date.parse(iso)) / 60_000);
+  if (minutes < 1) return "now";
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  return `${Math.floor(hours / 24)}d`;
+}
+
+export const carrierStageLabels: Record<CarrierStage, string> = {
+  needs_approval: "Needs approval",
+  negotiating: "Negotiating",
+  live: "Live",
+  booked: "Booked",
+  in_transit: "In transit",
+  arrived: "Arrived (est.)",
+  lost: "Lost",
+};
+
+// How a carrier is named in the inbox: its FMCSA name when stored, else its numbers.
+export function carrierName(carrier: { carrierName: string | null; mcNumber: string | null; dotNumber: string | null }): string {
+  if (carrier.carrierName) return carrier.carrierName;
+  if (carrier.mcNumber) return `MC ${carrier.mcNumber}`;
+  if (carrier.dotNumber) return `DOT ${carrier.dotNumber}`;
+  return "Unidentified carrier";
+}
+
+export function callStageLabel(call: Pick<TowerCall, "stage" | "round">): string {
+  switch (call.stage) {
+    case "otp":
+      return "OTP";
+    case "negotiating":
+      return call.round === null ? "Negotiating" : `Round ${call.round}`;
+    default:
+      return call.stage.charAt(0).toUpperCase() + call.stage.slice(1);
+  }
+}
+
+// The newest summary the agent wrote on a call.
+export function lastSummary(call: Pick<TowerCall, "events">): string | null {
+  return call.events.findLast((event) => event.summary)?.summary ?? null;
+}
+
+export type LoadSection<T> = { loadId: string | null; calls: T[] };
+
+// A carrier's calls sectioned by load: a call belongs to the load of its latest offer, calls with no
+// offer share one "no load" section. Sections keep the order of their first call, and calls keep the
+// order they came in (newest first from the adapter).
+export function groupCallsByLoad<T extends { offers: { loadId: string }[] }>(calls: T[]): LoadSection<T>[] {
+  const sections = new Map<string | null, LoadSection<T>>();
+  for (const call of calls) {
+    const loadId = call.offers.at(-1)?.loadId ?? null;
+    let section = sections.get(loadId);
+    if (!section) {
+      section = { loadId, calls: [] };
+      sections.set(loadId, section);
+    }
+    section.calls.push(call);
+  }
+  return [...sections.values()];
 }

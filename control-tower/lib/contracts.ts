@@ -220,6 +220,12 @@ export type TowerCarriers = Omit<AdapterCarriersResponse, "rows"> & {
 // Newest call first; an unknown key answers an empty list.
 export const adapterCarrierCallsResponse = z.object({ status: z.literal("ok"), calls: z.array(adapterWallCall) });
 export type AdapterCarrierCallsResponse = z.infer<typeof adapterCarrierCallsResponse>;
+// One carrier's calls as the tower serves them: each carries the live HappyRobot session, like the wall.
+export type TowerCarrierCalls = Omit<AdapterCarrierCallsResponse, "calls"> & {
+  calls: TowerCall[];
+  // True when HappyRobot could not be reached; calls then carry the adapter stage and live: false.
+  liveUnavailable: boolean;
+};
 
 export type ErrorResponse = { status: string; message: string };
 

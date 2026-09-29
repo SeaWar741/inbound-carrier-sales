@@ -18,7 +18,7 @@ function currentOffer(call: TowerCall): WallOffer | null {
   return call.offers.at(-1) ?? null;
 }
 
-export function LoadPanel({ selectedCall }: { calls: TowerCall[]; selectedCall: TowerCall | null }) {
+export function LoadPanel({ selectedCall }: { selectedCall: TowerCall | null }) {
   const offer = selectedCall ? currentOffer(selectedCall) : null;
   const hold = selectedCall?.hold ?? null;
   const lane = offer?.lane ?? null;
