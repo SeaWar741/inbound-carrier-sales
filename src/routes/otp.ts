@@ -12,7 +12,7 @@ import { sql, type TwinClient } from "../infra/twin-client.ts";
 import { invalidRequestHandler } from "../plugins/invalid-request.ts";
 
 export type OtpRouteDeps = {
-  config: Pick<Config, "OTP_DELIVERY_MODE" | "OTP_DEMO_EMAIL" | "OTP_DEMO_PHONE" | "OTP_HASH_SECRET">;
+  config: Pick<Config, "OTP_DELIVERY_MODE" | "OTP_DEMO_EMAIL" | "OTP_DEMO_PHONE" | "OTP_HASH_SECRET" | "OTP_FIXED_CODE">;
   census: Pick<CensusClient, "contactByDot">;
   delivery: Pick<OtpDeliveryClient, "send" | "supports">;
   twin: Pick<TwinClient, "query">;
@@ -111,7 +111,7 @@ export function otpRoutes(deps: OtpRouteDeps): FastifyPluginAsync {
         const destination = await destinationFor(channel, call.dot_number);
         if (!destination) return notSent("no_contact_on_file", messages.noContact);
 
-        const code = generateCode();
+        const code = deps.config.OTP_FIXED_CODE ?? generateCode();
         await deps.twin.query(
           sql`UPDATE calls SET otp_hash = ${hashCode(deps.config.OTP_HASH_SECRET, callId, code)},
                 otp_expires_at = now() + ${otpTtlSeconds} * interval '1 second',
