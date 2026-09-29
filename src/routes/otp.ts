@@ -105,7 +105,10 @@ export function otpRoutes(deps: OtpRouteDeps): FastifyPluginAsync {
           sendStateRow,
         );
         if (!call?.eligible || !call.dot_number) return notSent("not_eligible", messages.notEligible);
-        if (call.sends_last_hour >= otpMaxSendsPerDotPerHour) return notSent("too_many_requests", messages.tooMany);
+        // The per-DOT limit protects a carrier's inbox; the local simulator (fixed code, demo delivery) has none to protect.
+        if (!deps.config.OTP_FIXED_CODE && call.sends_last_hour >= otpMaxSendsPerDotPerHour) {
+          return notSent("too_many_requests", messages.tooMany);
+        }
         if (!deps.delivery.supports(channel)) return notSent("channel_unavailable", messages.channelUnavailable);
 
         const destination = await destinationFor(channel, call.dot_number);

@@ -184,6 +184,12 @@ describe("OTP routes", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
+  it("skips the per-DOT limit only with a fixed code", async () => {
+    routeConfig.OTP_FIXED_CODE = "424242";
+    calls.set("call-1", { ...eligibleCall(), sendsLastHour: 3 });
+    expect((await post("/v1/otp/send", { callId: "call-1", channel: "email" })).json()).toMatchObject({ status: "ok" });
+  });
+
   it("limits sends per DOT per hour", async () => {
     calls.set("call-1", { ...eligibleCall(), sendsLastHour: 3 });
     expect((await post("/v1/otp/send", { callId: "call-1", channel: "email" })).json()).toMatchObject({ status: "too_many_requests" });
