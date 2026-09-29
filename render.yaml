@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: inbound-carrier-sales
+    runtime: docker
+    plan: free
+    healthCheckPath: /healthz
+    envVars:
+      - key: OTP_DELIVERY_MODE
+        value: demo
+      - key: TMS_HOST
+        sync: false
+      - key: TMS_PORT
+        sync: false
+      - key: TMS_TOKEN
+        sync: false
+      - key: FMCSA_API_KEY
+        sync: false
+      - key: HAPPYROBOT_API_KEY
+        sync: false
+      - key: AGENT_API_KEY
+        sync: false
+      - key: OPERATOR_API_KEY
+        sync: false
+      - key: OTP_DEMO_EMAIL
+        sync: false
+      - key: OTP_DEMO_PHONE
+        sync: false
