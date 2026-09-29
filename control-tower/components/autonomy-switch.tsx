@@ -1,6 +1,6 @@
 "use client";
 
-import { Robot, UserFocus } from "@phosphor-icons/react";
+import { LuBot, LuUserRound } from "react-icons/lu";
 import { useEffect, useState } from "react";
 import type { AutonomyMode } from "@/lib/contracts";
 
@@ -40,7 +40,7 @@ export function AutonomySwitch({ mode }: { mode: AutonomyMode | null }) {
       <div role="radiogroup" aria-label="Booking mode" className="flex rounded-full border border-line-strong bg-bg p-0.5">
         {options.map((option) => {
           const active = shown === option.mode;
-          const Icon = option.mode === "human" ? UserFocus : Robot;
+          const Icon = option.mode === "human" ? LuUserRound : LuBot;
           return (
             <button
               key={option.mode}
@@ -54,7 +54,7 @@ export function AutonomySwitch({ mode }: { mode: AutonomyMode | null }) {
                 active ? (option.mode === "autonomous" ? "bg-accent text-white" : "bg-panel-raised text-fg") : "text-fg-muted hover:text-fg"
               }`}
             >
-              <Icon size={13} weight={active ? "bold" : "regular"} />
+              <Icon size={13} />
               {option.label}
             </button>
           );

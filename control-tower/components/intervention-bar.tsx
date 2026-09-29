@@ -1,6 +1,6 @@
 "use client";
 
-import { Ear, EarSlash, Microphone, PaperPlaneRight, PhoneDisconnect, Warning } from "@phosphor-icons/react";
+import { LuEar, LuEarOff, LuMic, LuPhoneOff, LuSendHorizontal, LuTriangleAlert } from "react-icons/lu";
 import { useState } from "react";
 import type { TowerCall } from "@/lib/contracts";
 import type { Voice } from "@/lib/use-voice";
@@ -74,7 +74,7 @@ export function InterventionBar({
         {onCall ? (
           <>
             <span className="flex items-center gap-1.5 rounded-full bg-accent px-2.5 py-1 text-xs font-medium text-white">
-              <Microphone size={12} weight="fill" aria-hidden />
+              <LuMic size={12} aria-hidden />
               You are on the call
             </span>
             <button
@@ -82,7 +82,7 @@ export function InterventionBar({
               onClick={() => void voice.stop()}
               className={pillQuiet}
             >
-              <PhoneDisconnect size={13} weight="bold" aria-hidden />
+              <LuPhoneOff size={13} aria-hidden />
               Hang up
             </button>
           </>
@@ -90,7 +90,7 @@ export function InterventionBar({
           <>
             {voice.mode === "listening" ? (
               <button type="button" onClick={() => void voice.stop()} className={`${pill} border-accent/60 bg-accent-soft text-accent`}>
-                <EarSlash size={13} weight="bold" aria-hidden />
+                <LuEarOff size={13} aria-hidden />
                 Stop listening
               </button>
             ) : (
@@ -101,7 +101,7 @@ export function InterventionBar({
                 title={listenBlocked ?? undefined}
                 className={pillQuiet}
               >
-                <Ear size={13} weight="bold" aria-hidden />
+                <LuEar size={13} aria-hidden />
                 {voice.pending === "listen" ? "Joining..." : "Listen"}
               </button>
             )}
@@ -112,7 +112,7 @@ export function InterventionBar({
               title={voice.mode === "listening" ? "Speak to the carrier yourself" : "Listen first"}
               className={pillQuiet}
             >
-              <Microphone size={13} weight="bold" aria-hidden />
+              <LuMic size={13} aria-hidden />
               {voice.pending === "takeover" ? "Taking over..." : "Take over"}
             </button>
             {listenBlocked && <span className="text-xs text-fg-faint">{listenBlocked}</span>}
@@ -166,13 +166,13 @@ export function InterventionBar({
           aria-label="Send whisper"
           className="grid size-8 place-items-center rounded-[var(--radius-panel)] bg-accent text-white outline-none focus-visible:ring-2 focus-visible:ring-fg disabled:cursor-not-allowed disabled:opacity-40"
         >
-          <PaperPlaneRight size={14} weight="fill" aria-hidden />
+          <LuSendHorizontal size={14} aria-hidden />
         </button>
       </form>
 
       {voice.error && (
         <p role="alert" className="flex items-center gap-1.5 text-xs text-risk">
-          <Warning size={12} weight="bold" aria-hidden />
+          <LuTriangleAlert size={12} aria-hidden />
           {voice.error}
         </p>
       )}

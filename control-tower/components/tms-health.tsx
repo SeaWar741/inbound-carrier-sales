@@ -1,6 +1,6 @@
 "use client";
 
-import { Plugs } from "@phosphor-icons/react";
+import { LuPlug } from "react-icons/lu";
 import { useEffect, useRef, useState } from "react";
 import type { TowerWall } from "@/lib/contracts";
 import { formatMs } from "@/lib/format";
@@ -49,7 +49,7 @@ export function TmsHealth({ health }: { health: Health | null }) {
           title={statusLabel}
           className={`size-2 rounded-full ${noTraffic ? "bg-fg-faint" : healthy ? "bg-ok" : "bg-warn"}`}
         />
-        <Plugs size={16} weight="regular" aria-hidden />
+        <LuPlug size={16} aria-hidden />
         <span className="text-[11px] font-medium uppercase tracking-wide text-fg-faint">TMS</span>
       </div>
       {noTraffic ? (

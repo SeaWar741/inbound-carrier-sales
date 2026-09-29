@@ -1,6 +1,6 @@
 "use client";
 
-import { Broadcast, CursorClick, Warning } from "@phosphor-icons/react";
+import { LuMousePointerClick, LuRadioTower, LuTriangleAlert } from "react-icons/lu";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { AutonomySwitch } from "@/components/autonomy-switch";
@@ -65,7 +65,7 @@ export function TowerShell() {
       <header className="flex flex-wrap items-center gap-x-8 gap-y-3 border-b border-line bg-panel px-4 py-2.5">
         <div className="flex items-center gap-3">
           <span className="grid size-7 place-items-center rounded-full bg-accent-soft text-accent">
-            <Broadcast size={14} weight="bold" />
+            <LuRadioTower size={14} />
           </span>
           <h1 className="text-sm font-semibold tracking-tight">Control Tower</h1>
           <LiveIndicator stale={stale || (error !== null && wall === null)} />
@@ -80,7 +80,7 @@ export function TowerShell() {
 
       {error !== null && (
         <div role="status" className="flex items-center gap-2 border-b border-line bg-risk-soft px-4 py-1.5 text-xs text-risk">
-          <Warning size={14} weight="bold" aria-hidden />
+          <LuTriangleAlert size={14} aria-hidden />
           <span>{error}.</span>
           {updatedAt !== null && (
             <span className="text-fg-muted">
@@ -96,7 +96,7 @@ export function TowerShell() {
             <h2 className="text-xs font-medium uppercase tracking-wide text-fg-faint">Calls</h2>
             {wall?.liveUnavailable && (
               <span className="flex items-center gap-1 text-xs text-warn">
-                <Warning size={12} weight="bold" aria-hidden />
+                <LuTriangleAlert size={12} aria-hidden />
                 Live status unavailable
               </span>
             )}
@@ -124,7 +124,7 @@ export function TowerShell() {
               <PanelHeading>Call</PanelHeading>
               <EmptyState
                 className="flex-1 py-16"
-                icon={<CursorClick size={20} weight="regular" />}
+                icon={<LuMousePointerClick size={20} />}
                 title="Select a call to follow it"
                 hint="Pick a row on the wall or use the arrow keys"
               />

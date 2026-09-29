@@ -1,6 +1,6 @@
 "use client";
 
-import { ChatText, Phone } from "@phosphor-icons/react";
+import { LuMessageSquareText, LuPhone } from "react-icons/lu";
 import { motion, useReducedMotion } from "motion/react";
 import { useRef } from "react";
 import { PulseDot } from "@/components/pulse-dot";
@@ -78,7 +78,7 @@ function CallRow({
   const number = currentNumber(call);
   const state = carrierState(call);
   const dimmed = call.stage === "ended" && !call.live;
-  const ChannelIcon = call.channel === "text" ? ChatText : Phone;
+  const ChannelIcon = call.channel === "text" ? LuMessageSquareText : LuPhone;
 
   return (
     <motion.li layout={reduce ? false : "position"} transition={{ duration: 0.3, ease: [0.2, 0.8, 0.2, 1] }}>
@@ -90,7 +90,7 @@ function CallRow({
         aria-label={`${carrierId(call)}, ${stageLabel(call)}, ${riskLabel[call.risk]}${call.live ? ", live" : ""}`}
         className={`flex w-full flex-col gap-1 border-l-2 px-3 py-2 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset ${
           takenOver
-            ? "border-accent bg-accent/35"
+            ? "border-accent bg-accent-soft"
             : selected
               ? "border-accent bg-panel-raised"
               : "border-transparent hover:bg-panel-raised/60"
@@ -108,7 +108,6 @@ function CallRow({
             {call.channel && (
               <ChannelIcon
                 size={14}
-                weight="regular"
                 className="text-fg-faint"
                 aria-label={call.channel === "text" ? "Text call" : "Voice call"}
               />

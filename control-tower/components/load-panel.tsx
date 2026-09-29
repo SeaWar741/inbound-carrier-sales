@@ -1,6 +1,6 @@
 "use client";
 
-import { CursorClick, Truck } from "@phosphor-icons/react";
+import { LuMousePointerClick, LuTruck } from "react-icons/lu";
 import { EmptyState } from "@/components/empty-state";
 import { equipmentLabel, HoldCard, LaneText } from "@/components/hold-card";
 import { MarginMeter } from "@/components/margin-meter";
@@ -74,9 +74,9 @@ export function LoadPanel({ calls, selectedCall }: { calls: TowerCall[]; selecte
       </div>
 
       {selectedCall === null ? (
-        <EmptyState className="py-10" icon={<CursorClick size={20} />} title="Select a call to see its load" hint="Map, margin and hold follow the selection" />
+        <EmptyState className="py-10" icon={<LuMousePointerClick size={20} />} title="Select a call to see its load" hint="Map, margin and hold follow the selection" />
       ) : offer === null ? (
-        <EmptyState className="py-10" icon={<Truck size={20} />} title="No load on the table yet" hint="The lane and margin appear with the first offer" />
+        <EmptyState className="py-10" icon={<LuTruck size={20} />} title="No load on the table yet" hint="The lane and margin appear with the first offer" />
       ) : (
         <div className="border-b border-line">
           <MarginMeter key={offer.loadId} offer={offer} authorizedUsd={authorizedUsd} agreedRate={agreedRate} />

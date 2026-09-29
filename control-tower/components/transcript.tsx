@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, ChatCircleDots, Check, CurrencyDollar, Ear, Microphone, Waveform } from "@phosphor-icons/react";
+import { LuArrowDown, LuAudioWaveform, LuCheck, LuDollarSign, LuEar, LuMessageCircleMore, LuMic } from "react-icons/lu";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useLayoutEffect, useRef, useState } from "react";
 import { EmptyState } from "@/components/empty-state";
@@ -75,7 +75,7 @@ function buildTimeline(stream: CallStream, interventions: Intervention[], sent: 
   return entries.sort((a, b) => a.at - b.at);
 }
 
-const operatorIcon = { whisper: ChatCircleDots, authorization: CurrencyDollar, listen: Ear, takeover: Microphone };
+const operatorIcon = { whisper: LuMessageCircleMore, authorization: LuDollarSign, listen: LuEar, takeover: LuMic };
 
 // Publishing a signal takes about eleven seconds; the bar fills over that time so the wait reads as expected.
 const expectedDeliveryS = 11;
@@ -101,7 +101,7 @@ function Delivery({ sent }: { sent: SentIntervention }) {
     case "delivered":
       return (
         <span className="flex items-center gap-1 text-[11px] text-fg-muted">
-          <Check size={11} weight="bold" aria-hidden />
+          <LuCheck size={11} aria-hidden />
           Delivered
         </span>
       );
@@ -127,7 +127,7 @@ function EntryRow({ entry }: { entry: Entry }) {
     return (
       <div className="flex flex-col gap-1 rounded-[var(--radius-panel)] border border-line-strong px-2.5 py-1.5">
         <span className="flex items-start gap-2 text-xs text-fg">
-          <Icon size={13} weight="bold" className="mt-0.5 shrink-0 text-fg-muted" aria-hidden />
+          <Icon size={13} className="mt-0.5 shrink-0 text-fg-muted" aria-hidden />
           <span className="min-w-0 flex-1">{entry.text}</span>
           <span className="tabular shrink-0 text-[10px] text-fg-faint">{formatClock(entry.at, true)}</span>
         </span>
@@ -156,7 +156,7 @@ function EntryRow({ entry }: { entry: Entry }) {
 }
 
 function Quiet({ title, hint }: { title: string; hint?: string }) {
-  return <EmptyState className="h-full" icon={<Waveform size={20} />} title={title} hint={hint} />;
+  return <EmptyState className="h-full" icon={<LuAudioWaveform size={20} />} title={title} hint={hint} />;
 }
 
 const stickThresholdPx = 32;
@@ -246,7 +246,7 @@ export function Transcript({
           onClick={jumpToLive}
           className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full bg-accent px-3 py-1 text-xs font-medium text-white shadow-lg outline-none focus-visible:ring-2 focus-visible:ring-fg"
         >
-          <ArrowDown size={12} weight="bold" aria-hidden />
+          <LuArrowDown size={12} aria-hidden />
           Jump to live
         </button>
       )}

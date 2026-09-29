@@ -1,6 +1,6 @@
 "use client";
 
-import { ChatText, Phone } from "@phosphor-icons/react";
+import { LuMessageSquareText, LuPhone } from "react-icons/lu";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityChips } from "@/components/activity-chips";
 import { InterventionBar, type SentIntervention } from "@/components/intervention-bar";
@@ -105,7 +105,7 @@ export function CallDetail({
   const voice = useVoice(call.callId, call.sessionId !== null);
   const { sent, whisper, authorize } = useSentInterventions(call.callId, call.sessionId !== null, stream.signals.length);
   const state = carrierState(call);
-  const ChannelIcon = call.channel === "text" ? ChatText : Phone;
+  const ChannelIcon = call.channel === "text" ? LuMessageSquareText : LuPhone;
   const takenOver = voice.mode === "takeover";
 
   useEffect(() => {

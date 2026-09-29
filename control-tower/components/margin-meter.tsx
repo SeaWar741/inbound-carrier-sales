@@ -1,6 +1,6 @@
 "use client";
 
-import { CaretLeft, CaretRight } from "@phosphor-icons/react";
+import { LuChevronLeft, LuChevronRight } from "react-icons/lu";
 import { motion, useReducedMotion } from "motion/react";
 import { finalRound, type WallOffer } from "@/lib/contracts";
 import { formatUsd } from "@/lib/format";
@@ -63,12 +63,12 @@ export function MarginMeter({
       <div className="relative pt-5 pb-5">
         {/* Carrier ask above the track; clamped with an arrow when it is off the scale. */}
         <Pinned at={askPct} className="top-0 flex items-center gap-0.5 text-warn">
-          {askBelow && <CaretLeft size={10} weight="bold" aria-hidden />}
+          {askBelow && <LuChevronLeft size={10} aria-hidden />}
           <span>
             Ask <span className="tabular">{formatUsd(offer.carrierAsk)}</span>
             {askAbove && " over max"}
           </span>
-          {askAbove && <CaretRight size={10} weight="bold" aria-hidden />}
+          {askAbove && <LuChevronRight size={10} aria-hidden />}
         </Pinned>
 
         <div className="relative h-2 overflow-hidden rounded-full bg-line">
