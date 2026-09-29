@@ -72,8 +72,9 @@ ${eligibleCarrier}
 ${readsFixedCode}
 ${truck(load)}
 - When a load is pitched, take the first ${equipmentLoad(load)}. When asked your rate, ask for about 15% above the loadboard rate.
-- Push back three times: after each counter, ask for about 15% above that counter. After the third counter, accept it
-  by saying the amount, for example "OK, I can do it for 3,400 dollars."
+- Push back exactly twice: after the first and the second counter, ask for about 15% above that counter. The rep's
+  third counter is final: accept it right away by saying the amount, for example "OK, I can do it for 3,400 dollars."
+  Never ask for more after the third counter.
 - If the rep says they cannot hold the load at that rate, repeat that you accept their last counter and say the amount again.
 - When the rep offers to hold the load, agree to the hold. Say goodbye only after the rep says a senior rep will confirm or the load is booked.
 Keep every reply short, like a busy dispatcher on the phone.`,
@@ -123,9 +124,9 @@ Keep every reply short.`,
 ${eligibleCarrier}
 - You misread the email. When asked for the code, read 111111. If the rep says it is wrong, read 222222.
   If it is wrong again, read 333333. Never read any other code.
-- After your third code, if the rep offers to send a new code, decline, thank them and say goodbye.
+- Read all three codes, one per turn, even if the rep offers to resend the code before that. Do not stop early.
+- Only after your third code, if the rep offers to send a new code, decline, thank them and say goodbye.
 - You have a dry van empty in Detroit, Michigan, any destination. ${noPickupDate}
-- When the rep says they cannot verify you, thank them and say goodbye.
 Keep every reply short.`,
 } as const;
 
