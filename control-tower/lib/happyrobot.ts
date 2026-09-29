@@ -58,7 +58,7 @@ async function sessionOf(runId: string): Promise<{ id: string; channel: Channel 
 }
 
 // Every running run of the workflow with its session. Throws when HappyRobot is unreachable.
-export async function listRunningRuns(): Promise<RunningRun[]> {
+async function listRunningRuns(): Promise<RunningRun[]> {
   const { WORKFLOW_ID } = env();
   const runs = runsPage.parse(await happyRobot().workflows.listRuns(WORKFLOW_ID, { status: "running" }));
   return Promise.all(
@@ -78,10 +78,11 @@ export async function listRunningRuns(): Promise<RunningRun[]> {
 // The adapter caps the running call ids it accepts.
 const maxLive = 200;
 
-// Adds the running calls to an adapter query as `live` ids and answers every running run by id, or
+// Replaces any `live` ids on an adapter query with the running calls and answers every running run by id, or
 // undefined when HappyRobot could not answer (the query then goes without `live`).
 export async function liveRuns(query: URLSearchParams): Promise<Map<string, RunningRun> | undefined> {
   const runs = await listRunningRuns().catch(() => undefined);
+  query.delete("live");
   if (!runs) return undefined;
   for (const run of runs.slice(0, maxLive)) query.append("live", run.runId);
   return new Map(runs.map((run) => [run.runId, run]));

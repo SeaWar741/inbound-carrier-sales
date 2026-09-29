@@ -16,7 +16,6 @@ import {
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
-import { renderToStaticMarkup } from "react-dom/server";
 import { LuArrowRight, LuBuilding2, LuCalendarClock, LuCircleCheck, LuClock, LuContainer, LuDollarSign, LuMinus, LuPlus, LuScan, LuTruck } from "react-icons/lu";
 import { tripLabels, tripTones } from "@/components/dashboard/kpi-tiles";
 import type { TripStatus } from "@/lib/contracts";
@@ -305,13 +304,6 @@ function unmountLater(root: Root) {
   setTimeout(() => root.unmount(), 0);
 }
 
-// Every truck marker shows the same static icon, so its markup is rendered once.
-const truckIcon = renderToStaticMarkup(
-  <span className="lane-truck__pill">
-    <LuTruck aria-hidden />
-  </span>,
-);
-
 type TruckMarker = { marker: Marker; element: HTMLDivElement; glide: ReturnType<typeof setTimeout> | null };
 
 function truckState(element: HTMLElement, load: Placed) {
@@ -459,6 +451,8 @@ export function LaneMap({
   const overviewRef = useRef(overview);
   const fittedKey = useRef<string | null>(null);
   const markers = useRef(new Map<string, TruckMarker>());
+  // Every truck marker shows the same static icon: React renders it once here and markers clone it.
+  const truckIcon = useRef<HTMLSpanElement>(null);
   const popupRef = useRef<{ popup: Popup; root: Root; id: string | null } | null>(null);
   // The id last picked on the map itself; the camera stays put for those.
   const mapPick = useRef<string | null>(null);
@@ -703,7 +697,7 @@ export function LaneMap({
       element.addEventListener("mouseenter", () => map.getSource("lane-arcs") && map.setFeatureState({ source: "lane-arcs", id: load.id }, { hover: true }));
       element.addEventListener("mouseleave", () => map.getSource("lane-arcs") && map.setFeatureState({ source: "lane-arcs", id: load.id }, { hover: false }));
       truckState(element, load);
-      element.innerHTML = truckIcon;
+      if (truckIcon.current) element.append(truckIcon.current.cloneNode(true));
       const marker = new Marker({ element, anchor: "center" }).setLngLat(load.truck).addTo(map);
       markers.current.set(load.id, { marker, element, glide: null });
     }
@@ -720,6 +714,11 @@ export function LaneMap({
   return (
     <div className="relative h-full w-full">
       <div ref={container} className="h-full w-full" />
+      <div hidden>
+        <span ref={truckIcon} className="lane-truck__pill">
+          <LuTruck aria-hidden />
+        </span>
+      </div>
       {overview && wide && (
         <>
           <Legend loads={loads} />
