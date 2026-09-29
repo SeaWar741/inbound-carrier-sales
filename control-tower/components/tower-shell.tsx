@@ -1,12 +1,13 @@
 "use client";
 
-import { Broadcast, CursorClick, MapTrifold, Warning } from "@phosphor-icons/react";
+import { Broadcast, CursorClick, Warning } from "@phosphor-icons/react";
 import { motion, useReducedMotion } from "motion/react";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { CallDetail } from "@/components/call-detail";
 import { CallWall } from "@/components/call-wall";
 import { DayCounters } from "@/components/day-counters";
+import { LoadPanel } from "@/components/load-panel";
 import { TmsHealth } from "@/components/tms-health";
 import { formatClock, formatDay } from "@/lib/format";
 import { useWall } from "@/lib/use-wall";
@@ -149,13 +150,11 @@ export function TowerShell() {
           )}
         </section>
 
-        <section aria-label="Load context" className="flex flex-col rounded-[var(--radius-panel)] border border-line bg-panel">
-          <PanelHeading>Load</PanelHeading>
-          <QuietPanel
-            icon={<MapTrifold size={20} weight="regular" />}
-            title="Map, margin and hold"
-            hint="These panels arrive with the selected call"
-          />
+        <section
+          aria-label="Load context"
+          className="flex min-h-0 flex-col overflow-y-auto rounded-[var(--radius-panel)] border border-line bg-panel lg:h-[calc(100dvh-4.75rem)]"
+        >
+          <LoadPanel calls={wall?.calls ?? []} selectedCall={selectedCall} />
         </section>
       </main>
     </div>

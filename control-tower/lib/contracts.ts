@@ -19,6 +19,19 @@ export const loadIdInput = z.string().trim().toUpperCase().regex(/^[A-Z0-9]{1,12
 export const callIdInput = z.string().trim().min(1).max(128);
 export const messageInput = z.string().trim().max(500);
 
+const wallPlace = z.object({ city: z.string(), state: z.string(), zip: z.string() });
+
+// Null for offers recorded before lanes were kept, and when an adapter that predates lanes omits it.
+// pickupAt is the TMS wall clock, YYYYMMDDHHMMSS.
+const wallLane = z.object({
+  origin: wallPlace,
+  destination: wallPlace,
+  equipment: z.string(),
+  miles: z.number().int(),
+  pickupAt: z.string(),
+});
+export type WallLane = z.infer<typeof wallLane>;
+
 const wallOffer = z.object({
   loadId: z.string(),
   round: z.number().int(),
@@ -27,8 +40,10 @@ const wallOffer = z.object({
   rateToSay: z.number().nullable(),
   postedRate: z.number().nullable(),
   maxBuy: z.number().nullable(),
+  lane: wallLane.nullable().default(null),
   createdAt: z.iso.datetime(),
 });
+export type WallOffer = z.infer<typeof wallOffer>;
 
 const wallHold = z.object({
   holdId: z.string(),
@@ -38,6 +53,7 @@ const wallHold = z.object({
   postedRate: z.number().nullable(),
   maxBuy: z.number().nullable(),
   bookingRef: z.string().nullable(),
+  lane: wallLane.nullable().default(null),
   createdAt: z.iso.datetime(),
 });
 

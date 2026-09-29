@@ -72,7 +72,8 @@ function currentNumber(call: TowerCall): { ask: number; say: number | null } | n
 }
 
 function elapsedLabel(call: TowerCall, now: number): string {
-  if (call.stage === "ended" || call.stage === "released" || (!call.live && call.stage === "booked")) {
+  // Once the carrier hung up the clock stops, whatever stage the call reached (a hold waits for the rep).
+  if (!call.live && call.stage !== "connecting") {
     return formatClock(call.createdAt);
   }
   return formatElapsed(now - Date.parse(call.createdAt));
