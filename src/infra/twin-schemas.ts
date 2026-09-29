@@ -51,6 +51,10 @@ export type TableName = keyof typeof tableDdl;
 // Changes to tables that already exist; each statement is idempotent and runs on every bootstrap.
 export const migrations = [
   "ALTER TABLE calls ADD COLUMN IF NOT EXISTS eligible boolean NOT NULL DEFAULT FALSE",
+  // A replayed confirm must return the same reason, so it is stored with the hold.
+  "ALTER TABLE holds ADD COLUMN IF NOT EXISTS release_reason text",
+  // Two calls racing to hold one load: the index, not a read-then-insert, picks the winner.
+  "CREATE UNIQUE INDEX IF NOT EXISTS holds_one_active_per_load ON holds (load_id) WHERE status <> 'released'",
 ] as const;
 
 export const callRowSchema = z

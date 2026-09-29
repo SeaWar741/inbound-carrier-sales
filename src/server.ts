@@ -10,6 +10,7 @@ import { TwinClient } from "./infra/twin-client.ts";
 import { requireApiKey } from "./plugins/auth.ts";
 import { carrierRoutes } from "./routes/carriers.ts";
 import { healthRoutes } from "./routes/health.ts";
+import { confirmHoldRoutes, holdRoutes } from "./routes/holds.ts";
 import { loadRoutes } from "./routes/loads.ts";
 import { offerRoutes } from "./routes/offers.ts";
 import { otpRoutes } from "./routes/otp.ts";
@@ -67,8 +68,9 @@ if (import.meta.main) {
       otpRoutes({ config, census, delivery, twin }),
       loadRoutes({ tms, twin }),
       offerRoutes({ tms, twin }),
+      holdRoutes({ tms, twin }),
     ],
-    operatorRoutes: [],
+    operatorRoutes: [confirmHoldRoutes({ tms, twin })],
   });
   await app.listen({ host: "0.0.0.0", port: config.PORT });
 }

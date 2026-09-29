@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { otpDigits } from "./constants.ts";
 import { equipmentTypes, loadIdInput } from "./infra/tms/codec.ts";
+import { holdStatuses } from "./infra/twin-schemas.ts";
 
 // Request and response schemas for the agent and operator APIs.
 
@@ -145,3 +146,55 @@ export const checkOtpResponse = z.object({
   attemptsLeft: z.number().int().nullable(),
 });
 export type CheckOtpResponse = z.infer<typeof checkOtpResponse>;
+
+export const createHoldBody = z.object({
+  callId,
+  loadId: loadIdInput,
+  agreedRate: z.number().int().positive().max(1_000_000),
+});
+export type CreateHoldBody = z.output<typeof createHoldBody>;
+
+export const createHoldResponse = z.object({
+  status: z.enum([
+    "ok",
+    "not_verified",
+    "no_agreement",
+    "mc_number_required",
+    "load_unavailable",
+    "load_on_hold",
+    "tms_unavailable",
+    "service_unavailable",
+    "invalid_request",
+  ]),
+  message: z.string(),
+  holdId: z.string().nullable(),
+  holdStatus: z.enum(holdStatuses).nullable(),
+});
+export type CreateHoldResponse = z.infer<typeof createHoldResponse>;
+
+export const confirmHoldParams = z.object({ holdId: z.uuid() });
+
+// Other headers pass through untouched; only the key is required.
+export const confirmHoldHeaders = z.looseObject({ "idempotency-key": z.string().trim().min(1).max(128) });
+
+export const confirmHoldResponse = z.object({
+  status: z.enum([
+    "booked",
+    "booked_unconfirmed",
+    "released",
+    "in_progress",
+    "already_processed",
+    "tms_unavailable",
+    "not_found",
+    "service_unavailable",
+    "invalid_request",
+  ]),
+  message: z.string(),
+  holdId: z.string().nullable(),
+  holdStatus: z.enum(holdStatuses).nullable(),
+  bookingRef: z.string().nullable(),
+  reason: z.string().nullable(),
+});
+export type ConfirmHoldResponse = z.infer<typeof confirmHoldResponse>;
+
+export const idempotencyConflictResponse = z.object({ status: z.literal("conflict"), message: z.string() });
