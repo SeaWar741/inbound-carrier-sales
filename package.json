@@ -7,7 +7,8 @@
     "start": "node src/server.ts",
     "dev": "node --watch --env-file-if-exists=.env src/server.ts",
     "typecheck": "tsc",
-    "bootstrap:twin": "node --env-file-if-exists=.env scripts/bootstrap-twin.ts"
+    "bootstrap:twin": "node --env-file-if-exists=.env scripts/bootstrap-twin.ts",
+    "smoke:tms": "node --env-file-if-exists=.env scripts/tms-smoke.ts"
   },
   "type": "module",
   "dependencies": {
