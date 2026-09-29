@@ -16,9 +16,10 @@ const toolNames: Record<string, string> = {
   "/loads/search": "search_loads",
   "/offers/evaluate": "evaluate_offer",
   "/holds": "create_hold",
+  "/calls/request-human": "request_human",
 };
 
-// A route without a name above is named by its path: "/v1/request-human" -> "request_human".
+// A route without a name above is named by its path: "/v1/notes/add" -> "notes_add".
 export function toolName(routeUrl: string): string {
   const path = routeUrl.replace(/^\/v1(?=\/)/, "");
   return toolNames[path] ?? path.replace(/^\/+/, "").replace(/[^a-z0-9]+/gi, "_").toLowerCase();
@@ -63,6 +64,10 @@ export function summarize(tool: string, body: Fields, response: Fields): string 
       const load = text(body.loadId) ?? "a load";
       const rate = usd(body.agreedRate);
       return rate ? `Holding load ${load} at ${rate}` : `Holding load ${load}`;
+    }
+    case "request_human": {
+      const reason = text(body.reason);
+      return reason ? `Carrier asked for a human: ${reason}` : "Carrier asked for a human";
     }
     default:
       return null;

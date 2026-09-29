@@ -9,7 +9,7 @@ import { testConfig } from "./test-config.ts";
 const agentRoutes: FastifyPluginAsync = async (app) => {
   app.post("/offers/evaluate", async () => ({ status: "ok", message: "I can do $2,100 on this load.", decision: "counter", rateToSay: 2100, round: 2, isFinalRound: false }));
   app.post("/holds", async () => ({ status: "ok", message: "That load is on hold for you.", holdId: "h1", holdStatus: "held" }));
-  app.post("/request-human", async () => ({ status: "ok", message: "One moment." }));
+  app.post("/notes/add", async () => ({ status: "ok", message: "Noted." }));
 };
 const operatorRoutes: FastifyPluginAsync = async (app) => {
   app.post("/operator-action", async () => ({ status: "ok" }));
@@ -52,9 +52,9 @@ describe("call events hook", () => {
       statements.push(statement.text);
       return [];
     });
-    await post(app, "/v1/request-human", { callId: "call-1" });
+    await post(app, "/v1/notes/add", { callId: "call-1" });
     await vi.waitFor(() => expect(statements).toHaveLength(1));
-    expect(statements[0]).toContain("VALUES (E'call-1', E'request_human', NULL, E'ok')");
+    expect(statements[0]).toContain("VALUES (E'call-1', E'notes_add', NULL, E'ok')");
   });
 
   it("answers the agent without waiting for the write", async () => {
@@ -114,6 +114,8 @@ describe("toolName and summarize", () => {
     );
     expect(summarize("evaluate_offer", { carrierAsk: "abc" }, { decision: "accept", round: 1 })).toBe("Accept round 1");
     expect(summarize("create_hold", { loadId: "LD00841", agreedRate: 2100 }, {})).toBe("Holding load LD00841 at $2,100");
-    expect(summarize("request_human", { callId: "c" }, {})).toBeNull();
+    expect(summarize("request_human", { callId: "c" }, {})).toBe("Carrier asked for a human");
+    expect(summarize("request_human", { reason: " wants to talk rates " }, {})).toBe("Carrier asked for a human: wants to talk rates");
+    expect(summarize("unknown_tool", { callId: "c" }, {})).toBeNull();
   });
 });

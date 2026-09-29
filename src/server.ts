@@ -10,6 +10,7 @@ import { TwinClient } from "./infra/twin-client.ts";
 import { requireApiKey } from "./plugins/auth.ts";
 import { recordCallEvents, type CallEventDeps } from "./plugins/call-events.ts";
 import { carrierRoutes } from "./routes/carriers.ts";
+import { handoffRoutes } from "./routes/handoff.ts";
 import { healthRoutes } from "./routes/health.ts";
 import { confirmHoldRoutes, holdRoutes, releaseHoldRoutes } from "./routes/holds.ts";
 import { loadRoutes } from "./routes/loads.ts";
@@ -70,6 +71,7 @@ if (import.meta.main) {
       loadRoutes({ tms, twin }),
       offerRoutes({ tms, twin }),
       holdRoutes({ tms, twin }),
+      handoffRoutes,
     ],
     operatorRoutes: [confirmHoldRoutes({ tms, twin }), releaseHoldRoutes({ twin })],
   }, { twin });

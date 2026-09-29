@@ -246,3 +246,17 @@ export const releaseHoldResponse = z.object({
   reason: z.string().nullable(),
 });
 export type ReleaseHoldResponse = z.infer<typeof releaseHoldResponse>;
+
+// The reason is free text from the agent; a blank one is the same as none, and a long one is
+// cut rather than rejected so the handoff never fails over wording.
+export const requestHumanBody = z.object({
+  callId,
+  reason: optionalField(z.string().trim().transform((value) => value.slice(0, 200))),
+});
+export type RequestHumanBody = z.output<typeof requestHumanBody>;
+
+export const requestHumanResponse = z.object({
+  status: z.enum(["transferring", "invalid_request"]),
+  message: z.string(),
+});
+export type RequestHumanResponse = z.infer<typeof requestHumanResponse>;
