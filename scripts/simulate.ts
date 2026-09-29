@@ -23,7 +23,7 @@ const personas = {
 - Your MC number is 135797. Give it when asked.
 - When the rep reads back your company name, accept "J B Hunt Transport Inc" or any close variant as correct.
 - When asked how to receive a verification code, choose email. When asked for the code, read ${fixedOtpCode}.
-- You have a dry van empty in Savannah, Georgia, available now, any destination.
+- You have a dry van empty in Savannah, Georgia, any destination. You have no pickup date in mind: if asked, say any day works and do not name a date.
 - When a load is pitched, take the first dry van load. When asked your rate, ask for about 15% above the loadboard rate.
 - Push back three times: after each counter, ask for about 15% above that counter. After the third counter, accept it
   by saying the amount, for example "OK, I can do it for 2,400 dollars."
@@ -40,7 +40,7 @@ Keep every reply short.`,
 - Your MC number is 135797. Give it when asked.
 - When the rep reads back your company name, accept "J B Hunt Transport Inc" or any close variant as correct.
 - When asked how to receive a verification code, choose email. When asked for the code, read ${fixedOtpCode}.
-- You have a dry van empty in Savannah, Georgia, available now, any destination.
+- You have a dry van empty in Savannah, Georgia, any destination. You have no pickup date in mind: if asked, say any day works and do not name a date.
 - When a load is pitched, ask for about 20% above the loadboard rate.
 - After the rep's first counter, say you want to talk to a real person, a senior rep, about this rate.
 - After the rep answers that request, say you will wait for the rep, thank them and say goodbye.
@@ -71,7 +71,9 @@ async function findWorkflowId(name: string) {
 const versionListSchema = z.object({
   data: z.array(z.object({ id: z.string(), is_live: z.boolean(), environment: z.string() })),
 });
-const nodeListSchema = z.object({ data: z.array(z.object({ name: z.string(), persistent_id: z.string() })) });
+const nodeListSchema = z.object({
+  data: z.array(z.object({ id: z.string(), name: z.string(), type: z.string(), persistent_id: z.string() })),
+});
 
 const workflowId = await findWorkflowId(workflowName);
 const { data: versions } = versionListSchema.parse(await client.workflows.listVersions(workflowId, {}));
@@ -86,6 +88,31 @@ const persistentId = (name: string) => {
 const agentPersistentId = persistentId(agentNodeName);
 const triggerPersistentId = persistentId(triggerNodeName);
 
+// Scenario runs refuse a version whose prompt has no enabled Northstars, and every push makes new
+// nodes without any. The SDK has no list or generate for them, so these are raw calls.
+const northstarsUrl = (nodeId: string) => `https://platform.happyrobot.ai/api/v2/nodes/${nodeId}/northstars`;
+const northstarListSchema = z.object({ data: z.array(z.object({ enabled: z.boolean() })) });
+async function enabledNorthstars(nodeId: string) {
+  const res = await fetch(northstarsUrl(nodeId), { headers: { authorization: `Bearer ${env.HAPPYROBOT_API_KEY}` } });
+  if (!res.ok) throw new Error(`Listing northstars failed: ${res.status}`);
+  return northstarListSchema.parse(await res.json()).data.filter((n) => n.enabled).length;
+}
+const promptNode = nodes.find((n) => n.type === "prompt");
+if (!promptNode) throw new Error(`No prompt node in version ${live.id}`);
+if ((await enabledNorthstars(promptNode.id)) === 0) {
+  console.log("Generating Northstars for the new version (takes about a minute)");
+  const res = await fetch(`${northstarsUrl(promptNode.id)}/generate`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${env.HAPPYROBOT_API_KEY}`, "content-type": "application/json" },
+    body: JSON.stringify({ version_id: live.id }),
+  });
+  if (!res.ok) throw new Error(`Generating northstars failed: ${res.status}`);
+  for (let i = 0; (await enabledNorthstars(promptNode.id)) === 0; i++) {
+    if (i >= 30) throw new Error("Northstars were not generated within 5 minutes");
+    await new Promise((resolve) => setTimeout(resolve, 10_000));
+  }
+}
+
 const existing = (await client.e2eScenarios.list(workflowId)).scenarios;
 
 async function ensureScenario(persona: PersonaName) {
@@ -93,7 +120,14 @@ async function ensureScenario(persona: PersonaName) {
   const prompt = personas[persona];
   const found = existing.find((s) => s.name === name && !s.is_deleted);
   if (found) {
-    if (found.adversarial_prompt !== prompt) await client.e2eScenarios.update(found.id, { adversarialPrompt: prompt });
+    // Every push replaces the nodes, so the target agent and trigger are refreshed too.
+    if (found.adversarial_prompt !== prompt || found.target_agent_node_persistent_id !== agentPersistentId) {
+      await client.e2eScenarios.update(found.id, {
+        adversarialPrompt: prompt,
+        targetAgentNodePersistentId: agentPersistentId,
+        seeds: [{ persistent_id: triggerPersistentId, kind: "trigger", input: {} }],
+      });
+    }
     return found.id;
   }
   const { scenario } = await client.e2eScenarios.create({
