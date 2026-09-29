@@ -101,11 +101,11 @@ export async function confirmHold(holdId: string, idempotencyKey: string): Promi
   return holdAnswer(response, confirmHoldResponse, "The hold service did not answer. Retry with the same Idempotency-Key.");
 }
 
-export async function releaseHold(holdId: string, reason: string | undefined): Promise<AdapterResult<ReleaseHoldResponse>> {
+export async function releaseHold(holdId: string): Promise<AdapterResult<ReleaseHoldResponse>> {
   const response = await call(`/v1/holds/${encodeURIComponent(holdId)}/release`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(reason === undefined ? {} : { reason }),
+    body: "{}",
     timeoutMs: readTimeoutMs,
   });
   return holdAnswer(response, releaseHoldResponse, "The hold service did not answer. Retry the release.");

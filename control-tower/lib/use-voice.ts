@@ -85,7 +85,9 @@ export function useVoice(callId: string, hasSession: boolean): Voice {
         const client = new HappyRobotVoiceClient({ url: token.url, token: token.token });
         let self: Connection | null = null;
         const options = { onDisconnected: () => onDropped(() => self) };
-        const joined = kind === "listen" ? await client.listen(options) : await client.connect(options);
+        // The listener stays typed as such so startAudio is checked by the compiler.
+        const listener = kind === "listen" ? await client.listen(options) : null;
+        const joined = listener ?? (await client.connect(options));
         self = joined;
         if (generation.current !== current) {
           await joined.disconnect();
@@ -93,14 +95,14 @@ export function useVoice(callId: string, hasSession: boolean): Voice {
         }
         if (kind === "listen") {
           // Browsers only start audio from a user gesture; this still runs inside the click that asked to listen.
-          if ("startAudio" in joined) await joined.startAudio().catch(() => undefined);
+          await listener?.startAudio().catch(() => undefined);
           connection.current = joined;
           setMode("listening");
         } else {
           // The speaking connection hears the call too, so the silent listener is closed to avoid double audio.
-          const listener = connection.current;
+          const previous = connection.current;
           connection.current = joined;
-          await listener?.disconnect().catch(() => undefined);
+          await previous?.disconnect().catch(() => undefined);
           setMode("takeover");
         }
       } catch (err) {

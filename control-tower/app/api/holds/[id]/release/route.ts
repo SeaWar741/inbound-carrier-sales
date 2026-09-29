@@ -11,6 +11,6 @@ export async function POST(_request: Request, context: { params: Promise<{ id: s
   if (!parsedParams.success) {
     return NextResponse.json({ status: "invalid_request", message: "Send a hold id." }, { status: 400 });
   }
-  const result = await releaseHold(parsedParams.data.id, undefined);
+  const result = await releaseHold(parsedParams.data.id);
   return NextResponse.json(result.body, { status: result.httpStatus });
 }
