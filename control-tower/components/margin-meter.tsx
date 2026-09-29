@@ -2,10 +2,8 @@
 
 import { CaretLeft, CaretRight } from "@phosphor-icons/react";
 import { motion, useReducedMotion } from "motion/react";
-import type { WallOffer } from "@/lib/contracts";
+import { finalRound, type WallOffer } from "@/lib/contracts";
 import { formatUsd } from "@/lib/format";
-
-const maxRounds = 3;
 
 // Position on the posted-to-max-buy scale as a percentage, clamped to the track.
 function percentOf(value: number, min: number, max: number): number {
@@ -124,8 +122,8 @@ export function MarginMeter({
           Margin kept{" "}
           <span className="tabular text-sm font-semibold text-ok">{marginKept === null ? "-" : formatUsd(marginKept)}</span>
         </span>
-        <span className="flex items-center gap-1" aria-label={`Round ${offer.round} of ${maxRounds}`}>
-          {Array.from({ length: maxRounds }, (_, index) => index + 1).map((round) => (
+        <span className="flex items-center gap-1" aria-label={`Round ${offer.round} of ${finalRound}`}>
+          {Array.from({ length: finalRound }, (_, index) => index + 1).map((round) => (
             <span
               key={round}
               className={`tabular rounded-full px-1.5 py-0.5 text-[10px] leading-none ${

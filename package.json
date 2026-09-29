@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "TMS adapter and HappyRobot workflow for inbound carrier sales",
   "scripts": {
-    "test": "vitest run",
+    "test": "vitest run --dir test",
     "start": "node src/server.ts",
     "dev": "node --watch --env-file-if-exists=.env src/server.ts",
     "typecheck": "tsc",

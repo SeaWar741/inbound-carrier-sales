@@ -21,7 +21,7 @@ export type SentIntervention = {
 const authorizationUsd = 50;
 
 const quickWhispers = [
-  { label: "Offer quick pay", message: "Offer quick pay (paid in 48 hours) if it helps close." },
+  { label: "Offer quick pay", message: "Offer quick pay if it helps close." },
   { label: "Offer the backhaul", message: "Mention we may have a backhaul out of their destination; a senior rep will follow up." },
   { label: "Close it kindly", message: "Wrap up politely and end the call." },
 ] as const;

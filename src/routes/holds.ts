@@ -91,9 +91,13 @@ export function holdRoutes(deps: HoldRouteDeps): FastifyPluginAsync {
 
     app.post("/holds", { schema: { body: createHoldBody, response: { 200: createHoldResponse } } }, async (request) => {
       const { callId, loadId, agreedRate } = request.body;
-      // The same call asking again gets its hold back; any other call is refused.
+      // The same call asking again gets its hold back, booked or not; any other call is refused.
       const existingOutcome = (hold: HoldRow) =>
-        hold.callId === callId ? holdPlaced(hold) : noHold("load_on_hold", createMessages.loadOnHold);
+        hold.callId === callId
+          ? hold.status === "booked"
+            ? bookedNow(hold)
+            : holdPlaced(hold)
+          : noHold("load_on_hold", createMessages.loadOnHold);
       try {
         // Only a rate the negotiation itself produced can be held: one evaluate_offer accepted, or
         // our latest counter on this load, which the carrier took. The agent cannot invent one.

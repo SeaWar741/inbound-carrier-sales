@@ -1,12 +1,10 @@
 "use client";
 
 import { Check } from "@phosphor-icons/react";
-import type { TowerCall } from "@/lib/contracts";
+import { finalRound, type TowerCall } from "@/lib/contracts";
 
 const steps = ["Verify", "Code", "Search", "Negotiate", "Hold", "Booked"] as const;
 type Step = (typeof steps)[number];
-// Mirrors the adapter's three-step concession schedule.
-const finalRound = 3;
 
 // The furthest step the call's data proves it reached; used once the call is no longer moving.
 function reachedStep(call: TowerCall): number {

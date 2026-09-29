@@ -15,6 +15,8 @@ export type Channel = (typeof channels)[number];
 
 // Same bounds the adapter enforces, so the tower rejects what the adapter would refuse.
 export const maxAuthorizationUsd = 1_000;
+// Mirrors the length of the adapter's concessionSchedule: the last round of a negotiation.
+export const finalRound = 3;
 export const loadIdInput = z.string().trim().toUpperCase().regex(/^[A-Z0-9]{1,12}$/);
 export const callIdInput = z.string().trim().min(1).max(128);
 export const messageInput = z.string().trim().max(500);
@@ -140,15 +142,15 @@ export type TowerWall = Omit<AdapterWallResponse, "calls"> & {
 export type ErrorResponse = { status: string; message: string };
 
 // Request bodies the browser sends to the tower.
-export const voiceTokenBody = z.strictObject({ mode: z.enum(["listen", "takeover"]), sessionId: z.uuid() });
+// The session is resolved on the server from the call id in the path, never taken from the browser.
+export const voiceTokenBody = z.strictObject({ mode: z.enum(["listen", "takeover"]) });
 export type VoiceTokenBody = z.infer<typeof voiceTokenBody>;
 export type VoiceTokenResponse = { url: string; token: string; roomName: string };
 
 export const interventionBody = z.discriminatedUnion("kind", [
-  z.strictObject({ kind: z.literal("whisper"), sessionId: z.uuid(), message: messageInput.min(1) }),
+  z.strictObject({ kind: z.literal("whisper"), message: messageInput.min(1) }),
   z.strictObject({
     kind: z.literal("authorization"),
-    sessionId: z.uuid(),
     loadId: loadIdInput,
     amountUsd: z.number().int().positive().max(maxAuthorizationUsd),
     message: messageInput.default(""),

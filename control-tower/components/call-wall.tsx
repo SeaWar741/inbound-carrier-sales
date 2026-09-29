@@ -4,7 +4,7 @@ import { ChatText, Phone } from "@phosphor-icons/react";
 import { motion, useReducedMotion } from "motion/react";
 import { useRef } from "react";
 import type { CallStage, TowerCall } from "@/lib/contracts";
-import { formatClock, formatElapsed, formatUsd } from "@/lib/format";
+import { carrierId, carrierState, formatClock, formatElapsed, formatUsd } from "@/lib/format";
 
 const riskRank: Record<TowerCall["risk"], number> = { red: 0, amber: 1, green: 2 };
 
@@ -41,19 +41,6 @@ function stageLabel(call: TowerCall): string {
     default:
       return call.stage.charAt(0).toUpperCase() + call.stage.slice(1);
   }
-}
-
-function carrierId(call: TowerCall): string {
-  if (call.mcNumber) return `MC ${call.mcNumber}`;
-  if (call.dotNumber) return `DOT ${call.dotNumber}`;
-  return "Unidentified";
-}
-
-function carrierState(call: TowerCall): string {
-  if (call.otp.locked) return "OTP locked";
-  if (call.verified) return call.eligible ? "Verified" : "Not eligible";
-  if (call.mcNumber || call.dotNumber) return "Unverified";
-  return "";
 }
 
 function latest<T extends { createdAt: string }>(items: T[]): T | undefined {
@@ -139,7 +126,7 @@ function CallRow({
             title={call.riskReason ?? riskLabel[call.risk]}
           />
           <span className="tabular truncate font-medium text-fg">{carrierId(call)}</span>
-          {state && <span className="truncate text-xs text-fg-faint">{state}</span>}
+          {state && <span className="truncate text-xs text-fg-faint">{state.text}</span>}
           <span className="ml-auto flex shrink-0 items-center gap-2">
             {call.live && <LivePulse />}
             {call.channel && (

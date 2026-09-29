@@ -9,6 +9,8 @@ const envSchema = z.object({
   OPERATOR_API_KEY: z.string().min(16),
   HAPPYROBOT_API_KEY: z.string().min(1),
   WORKFLOW_ID: z.uuid(),
+  // The HappyRobot environment the workflow's signals are published to.
+  HAPPYROBOT_ENVIRONMENT: z.enum(["development", "staging", "production"]).default("development"),
 });
 
 export type TowerEnv = z.infer<typeof envSchema>;

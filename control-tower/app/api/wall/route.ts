@@ -9,7 +9,7 @@ const settledStages = new Set<TowerCall["stage"]>(["holding", "booked", "release
 // Shared by every open tab; with the 2 s browser poll it keeps the tower well inside the API quota.
 const cacheMs = 2_000;
 type WallAnswer = { httpStatus: number; body: TowerWall | ErrorResponse };
-// One upstream fetch per second, shared by every open tab; concurrent requests share the in-flight one.
+// At most one upstream fetch per cacheMs (every 2 s); concurrent requests share the in-flight one.
 let cached: { at: number; answer: Promise<WallAnswer> } | undefined;
 
 function connectingCall(run: RunningRun): TowerCall {

@@ -1,3 +1,5 @@
+import type { TowerCall } from "./contracts";
+
 // Display helpers for money, durations and times. The desk runs on Chicago time.
 const deskTimeZone = "America/Chicago";
 
@@ -36,4 +38,19 @@ export function formatDay(isoDate: string): string {
 
 export function formatMs(ms: number | null): string {
   return ms === null ? "-" : `${Math.round(ms)}`;
+}
+
+// How the carrier on a call is named everywhere in the tower.
+export function carrierId(call: TowerCall): string {
+  if (call.mcNumber) return `MC ${call.mcNumber}`;
+  if (call.dotNumber) return `DOT ${call.dotNumber}`;
+  return "Unidentified carrier";
+}
+
+export function carrierState(call: TowerCall): { text: string; tone: string } | null {
+  if (call.otp.locked) return { text: "OTP locked", tone: "text-risk" };
+  if (call.verified) return call.eligible ? { text: "Verified", tone: "text-ok" } : { text: "Not eligible", tone: "text-risk" };
+  if (!call.eligible) return { text: "Not eligible", tone: "text-risk" };
+  if (call.mcNumber || call.dotNumber) return { text: "Unverified", tone: "text-fg-muted" };
+  return null;
 }

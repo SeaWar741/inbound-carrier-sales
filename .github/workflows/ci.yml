@@ -14,3 +14,18 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+  control-tower:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: control-tower
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 25
+          cache: npm
+          cache-dependency-path: control-tower/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test

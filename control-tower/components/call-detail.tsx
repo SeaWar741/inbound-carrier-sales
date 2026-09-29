@@ -8,23 +8,9 @@ import { InterventionBar, type SentIntervention } from "@/components/interventio
 import { StageRail } from "@/components/stage-rail";
 import { Transcript } from "@/components/transcript";
 import type { ErrorResponse, InterventionBody, InterventionResponse, TowerCall } from "@/lib/contracts";
-import { formatClock, formatElapsed } from "@/lib/format";
+import { carrierId, carrierState, formatClock, formatElapsed } from "@/lib/format";
 import { useCallStream } from "@/lib/use-call-stream";
 import { useVoice } from "@/lib/use-voice";
-
-function carrierId(call: TowerCall): string {
-  if (call.mcNumber) return `MC ${call.mcNumber}`;
-  if (call.dotNumber) return `DOT ${call.dotNumber}`;
-  return "Unidentified carrier";
-}
-
-function carrierState(call: TowerCall): { text: string; tone: string } | null {
-  if (call.otp.locked) return { text: "OTP locked", tone: "text-risk" };
-  if (call.verified) return call.eligible ? { text: "Verified", tone: "text-ok" } : { text: "Not eligible", tone: "text-risk" };
-  if (!call.eligible) return { text: "Not eligible", tone: "text-risk" };
-  if (call.mcNumber || call.dotNumber) return { text: "Unverified", tone: "text-fg-muted" };
-  return null;
-}
 
 function LivePulse() {
   const reduce = useReducedMotion();
@@ -46,7 +32,7 @@ function LivePulse() {
 }
 
 // Whispers and authorizations this browser sent, with delivery tracked from the stream's signal events.
-function useSentInterventions(callId: string, sessionId: string | null, signalCount: number) {
+function useSentInterventions(callId: string, hasSession: boolean, signalCount: number) {
   const [sent, setSent] = useState<SentIntervention[]>([]);
   const seenSignals = useRef(signalCount);
 
@@ -104,21 +90,21 @@ function useSentInterventions(callId: string, sessionId: string | null, signalCo
 
   const whisper = useCallback(
     (message: string) => {
-      if (sessionId === null) return;
-      void send({ kind: "whisper", sessionId, message }, { kind: "whisper", message, loadId: null, amountUsd: null });
+      if (!hasSession) return;
+      void send({ kind: "whisper", message }, { kind: "whisper", message, loadId: null, amountUsd: null });
     },
-    [send, sessionId],
+    [send, hasSession],
   );
 
   const authorize = useCallback(
     (loadId: string, amountUsd: number) => {
-      if (sessionId === null) return;
+      if (!hasSession) return;
       void send(
-        { kind: "authorization", sessionId, loadId, amountUsd, message: "" },
+        { kind: "authorization", loadId, amountUsd, message: "" },
         { kind: "authorization", message: null, loadId, amountUsd },
       );
     },
-    [send, sessionId],
+    [send, hasSession],
   );
 
   return { sent, whisper, authorize };
@@ -135,8 +121,8 @@ export function CallDetail({
 }) {
   // The transcript is looked up by call, so it stays readable after the call ends.
   const stream = useCallStream(call.callId);
-  const voice = useVoice(call.callId, call.sessionId);
-  const { sent, whisper, authorize } = useSentInterventions(call.callId, call.sessionId, stream.signals.length);
+  const voice = useVoice(call.callId, call.sessionId !== null);
+  const { sent, whisper, authorize } = useSentInterventions(call.callId, call.sessionId !== null, stream.signals.length);
   const state = carrierState(call);
   const ChannelIcon = call.channel === "text" ? ChatText : Phone;
   const takenOver = voice.mode === "takeover";

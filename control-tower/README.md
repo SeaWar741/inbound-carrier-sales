@@ -61,6 +61,7 @@ All of them are server only; none is prefixed `NEXT_PUBLIC_`.
 | `OPERATOR_API_KEY` | The adapter's operator key (16+ characters). Never the agent key. |
 | `HAPPYROBOT_API_KEY` | HappyRobot API key used for runs, sessions, signals and voice tokens. |
 | `WORKFLOW_ID` | Id of the `inbound-carrier-sales` workflow (a UUID). |
+| `HAPPYROBOT_ENVIRONMENT` | HappyRobot environment that whispers and authorizations are published to: `development`, `staging` or `production`. Optional, defaults to `development`. |
 
 Use a separate HappyRobot API key for the tower. The public API allows 300 requests per minute per key, and the adapter's tool calls use the same budget when the key is shared. The tower polls every 2 s and fetches each run's session once, about 60 requests per minute with any number of open tabs.
 
@@ -82,7 +83,7 @@ git push <your-github-remote> control-tower-app:main
 
 Then in HappyRobot: **Apps**, **Create App**, **Import from existing repo**, give the repository URL and a GitHub token with read access. The platform copies the code into a managed repository and deploys it on Vercel with `next build`. The first build of an imported app often fails; read the build logs and adjust.
 
-Set the six variables above in the app's **Environment variables** panel. Each change triggers a redeploy. `ADAPTER_URL` must be the adapter's public URL (the Render deploy or an ngrok tunnel), never `localhost`: the app runs on Vercel and calls the adapter from there.
+Set the seven variables above in the app's **Environment variables** panel. Each change triggers a redeploy. `ADAPTER_URL` must be the adapter's public URL (the Render deploy or an ngrok tunnel), never `localhost`: the app runs on Vercel and calls the adapter from there.
 
 ## Platform findings
 

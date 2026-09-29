@@ -3,7 +3,7 @@
 import { ArrowRight, CheckCircle, LockSimple, Warning } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
 import type { ConfirmHoldResponse, ReleaseHoldResponse, TowerCall, WallLane } from "@/lib/contracts";
-import { formatUsd } from "@/lib/format";
+import { carrierId, formatUsd } from "@/lib/format";
 
 type Hold = NonNullable<TowerCall["hold"]>;
 type HoldStatus = Hold["status"];
@@ -41,12 +41,6 @@ const statusChip: Record<HoldStatus, { text: string; tone: string }> = {
   booked_unconfirmed: { text: "Booked, unconfirmed", tone: "bg-warn-soft text-warn" },
   released: { text: "Released", tone: "bg-line text-fg-muted" },
 };
-
-function carrierId(call: TowerCall): string {
-  if (call.mcNumber) return `MC ${call.mcNumber}`;
-  if (call.dotNumber) return `DOT ${call.dotNumber}`;
-  return "Unidentified carrier";
-}
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (

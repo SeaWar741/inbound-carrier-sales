@@ -1,7 +1,7 @@
 "use client";
 
 import { Robot, UserFocus } from "@phosphor-icons/react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { AutonomyMode } from "@/lib/contracts";
 
 const options: { mode: AutonomyMode; label: string; hint: string }[] = [
@@ -13,7 +13,12 @@ const options: { mode: AutonomyMode; label: string; hint: string }[] = [
 export function AutonomySwitch({ mode }: { mode: AutonomyMode | null }) {
   const [pending, setPending] = useState<AutonomyMode | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const shown = pending ?? mode;
+  const shown = pending !== null && pending !== mode ? pending : mode;
+
+  // The wall now carries the chosen mode, so the local choice is no longer needed.
+  useEffect(() => {
+    if (pending !== null && mode === pending) setPending(null);
+  }, [mode, pending]);
 
   async function choose(next: AutonomyMode) {
     if (next === shown) return;
@@ -24,9 +29,10 @@ export function AutonomySwitch({ mode }: { mode: AutonomyMode | null }) {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ mode: next }),
     }).catch(() => null);
-    if (!res?.ok) setError("Not saved");
-    // Give the 1 s wall cache a moment to carry the new mode before dropping the local choice.
-    setTimeout(() => setPending(null), res?.ok ? 2_500 : 0);
+    if (!res?.ok) {
+      setError("Not saved");
+      setPending(null);
+    }
   }
 
   return (

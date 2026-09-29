@@ -41,8 +41,9 @@ function describe(err: unknown): string {
 }
 
 // Owns the operator's LiveKit connection to one call: listen silently, then take over with the mic.
-// A new call or unmount disconnects whatever is open.
-export function useVoice(callId: string, sessionId: string | null): Voice {
+// A new call or unmount disconnects whatever is open. The tower resolves the call's session itself;
+// hasSession only says whether one exists yet.
+export function useVoice(callId: string, hasSession: boolean): Voice {
   const [mode, setMode] = useState<VoiceMode>("idle");
   const [pending, setPending] = useState<Voice["pending"]>(null);
   const [error, setError] = useState<string | null>(null);
@@ -61,7 +62,7 @@ export function useVoice(callId: string, sessionId: string | null): Voice {
       connection.current = null;
       void open?.disconnect().catch(() => undefined);
     };
-  }, [callId, sessionId]);
+  }, [callId, hasSession]);
 
   // The room closing on its own (call ended, network gone) returns the bar to idle.
   const onDropped = useCallback((dropped: () => Connection | null) => {
@@ -72,12 +73,12 @@ export function useVoice(callId: string, sessionId: string | null): Voice {
   }, []);
 
   const listen = useCallback(async () => {
-    if (sessionId === null || connection.current !== null) return;
+    if (!hasSession || connection.current !== null) return;
     const current = generation.current;
     setPending("listen");
     setError(null);
     try {
-      const token = await fetchToken(callId, { mode: "listen", sessionId });
+      const token = await fetchToken(callId, { mode: "listen" });
       const { HappyRobotVoiceClient } = await import("@happyrobot-ai/sdk/voice");
       let self: Connection | null = null;
       const listener = await new HappyRobotVoiceClient({ url: token.url, token: token.token }).listen({
@@ -97,15 +98,15 @@ export function useVoice(callId: string, sessionId: string | null): Voice {
     } finally {
       if (generation.current === current) setPending(null);
     }
-  }, [callId, sessionId, onDropped]);
+  }, [callId, hasSession, onDropped]);
 
   const takeOver = useCallback(async () => {
-    if (sessionId === null) return;
+    if (!hasSession) return;
     const current = generation.current;
     setPending("takeover");
     setError(null);
     try {
-      const token = await fetchToken(callId, { mode: "takeover", sessionId });
+      const token = await fetchToken(callId, { mode: "takeover" });
       const { HappyRobotVoiceClient } = await import("@happyrobot-ai/sdk/voice");
       let self: Connection | null = null;
       const speaker = await new HappyRobotVoiceClient({ url: token.url, token: token.token }).connect({
@@ -126,7 +127,7 @@ export function useVoice(callId: string, sessionId: string | null): Voice {
     } finally {
       if (generation.current === current) setPending(null);
     }
-  }, [callId, sessionId, onDropped]);
+  }, [callId, hasSession, onDropped]);
 
   const stop = useCallback(async () => {
     const open = connection.current;

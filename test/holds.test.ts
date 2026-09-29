@@ -343,6 +343,19 @@ describe("hold routes", () => {
       expect(body.message).not.toContain("2538");
     });
 
+    it("answers a second create_hold for the same call with the booked message", async () => {
+      await start();
+      state.settings.autonomy = "autonomous";
+      accept("call-a", "LD00881", 2300);
+      const first = (await createHold({ callId: "call-a", loadId: "LD00881", agreedRate: 2300 })).json();
+      const second = (await createHold({ callId: "call-a", loadId: "LD00881", agreedRate: 2300 })).json();
+      expect(second).toEqual(first);
+      expect(second).toMatchObject({ status: "ok", holdStatus: "booked" });
+      expect(second.message).toMatch(/booked/);
+      expect(second.message).not.toMatch(/senior rep/);
+      expect(bookRequests()).toHaveLength(1);
+    });
+
     it("leaves the hold for a rep when the TMS does not answer", async () => {
       await start(["ok", "rate-limited", "rate-limited", "rate-limited"]);
       state.settings.autonomy = "autonomous";

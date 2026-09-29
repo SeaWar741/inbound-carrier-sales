@@ -1,5 +1,5 @@
 import "server-only";
-import { HappyRobotClient } from "@happyrobot-ai/sdk";
+import { HappyRobotClient, NotFoundError } from "@happyrobot-ai/sdk";
 import { z } from "zod";
 import type { Channel } from "./contracts";
 import { env } from "./env";
@@ -13,7 +13,7 @@ const signalTimeoutMs = 20_000;
 
 let client: HappyRobotClient | undefined;
 function happyRobot(): HappyRobotClient {
-  // The wall refreshes every second, so a slow answer is dropped rather than retried.
+  // The wall refreshes every 2 s, so a slow answer is dropped rather than retried.
   client ??= new HappyRobotClient({ apiKey: env().HAPPYROBOT_API_KEY, timeout: 5_000, maxRetries: 0 });
   return client;
 }
@@ -40,7 +40,15 @@ const sessionByRun = new Map<string, { id: string; channel: Channel | null }>();
 async function sessionOf(runId: string): Promise<{ id: string; channel: Channel | null } | null> {
   const known = sessionByRun.get(runId);
   if (known) return known;
-  const sessions = sessionsPage.parse(await happyRobot().runs.getSessions(runId));
+  let page: unknown;
+  try {
+    page = await happyRobot().runs.getSessions(runId);
+  } catch (error) {
+    // An unknown run has no session; any other failure means HappyRobot could not answer.
+    if (error instanceof NotFoundError) return null;
+    throw error;
+  }
+  const sessions = sessionsPage.parse(page);
   const session = sessions.data.at(-1);
   if (!session) return null;
   const channel: Channel | null = session.type === "voice" || session.type === "text" ? session.type : null;
@@ -87,7 +95,7 @@ export async function publishSignal(sessionId: string, instruction: string): Pro
     const response = await fetch(`${apiBase}/signals`, {
       method: "POST",
       headers: { authorization: `Bearer ${env().HAPPYROBOT_API_KEY}`, "content-type": "application/json" },
-      body: JSON.stringify({ key: `session.${sessionId}`, env: "development", payload: { instruction } }),
+      body: JSON.stringify({ key: `session.${sessionId}`, env: env().HAPPYROBOT_ENVIRONMENT, payload: { instruction } }),
       signal: AbortSignal.timeout(signalTimeoutMs),
       cache: "no-store",
     });
