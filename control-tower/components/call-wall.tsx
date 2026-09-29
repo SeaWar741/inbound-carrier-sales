@@ -98,12 +98,14 @@ function CallRow({
   call,
   now,
   selected,
+  takenOver,
   onSelect,
   buttonRef,
 }: {
   call: TowerCall;
   now: number;
   selected: boolean;
+  takenOver: boolean;
   onSelect: () => void;
   buttonRef: (node: HTMLButtonElement | null) => void;
 }) {
@@ -123,7 +125,11 @@ function CallRow({
         aria-pressed={selected}
         aria-label={`${carrierId(call)}, ${stageLabel(call)}, ${riskLabel[call.risk]}${call.live ? ", live" : ""}`}
         className={`flex w-full flex-col gap-1 border-l-2 px-3 py-2 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset ${
-          selected ? "border-accent bg-panel-raised" : "border-transparent hover:bg-panel-raised/60"
+          takenOver
+            ? "border-accent bg-accent/35"
+            : selected
+              ? "border-accent bg-panel-raised"
+              : "border-transparent hover:bg-panel-raised/60"
         } ${dimmed ? "opacity-60" : ""}`}
       >
         <span className="flex items-center gap-2 text-sm">
@@ -187,12 +193,15 @@ export function CallWall({
   loading,
   now,
   selectedCallId,
+  takenOverCallId = null,
   onSelect,
 }: {
   calls: TowerCall[] | null;
   loading: boolean;
   now: number;
   selectedCallId: string | null;
+  // The call the operator took over; its row gets a solid accent fill.
+  takenOverCallId?: string | null;
   onSelect: (callId: string) => void;
 }) {
   const buttons = useRef(new Map<string, HTMLButtonElement>());
@@ -233,6 +242,7 @@ export function CallWall({
           call={call}
           now={now}
           selected={call.callId === selectedCallId}
+          takenOver={call.callId === takenOverCallId}
           onSelect={() => onSelect(call.callId)}
           buttonRef={(node) => {
             if (node) buttons.current.set(call.callId, node);

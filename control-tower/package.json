@@ -16,6 +16,7 @@
     "@happyrobot-ai/sdk": "^0.1.51",
     "@phosphor-icons/react": "^2.1.10",
     "geist": "^1.7.2",
+    "livekit-client": "^2.22.3",
     "motion": "^13.4.6",
     "next": "^16.3.7",
     "react": "^19.3.0",

@@ -4,6 +4,7 @@ import { Broadcast, CursorClick, MapTrifold, Warning } from "@phosphor-icons/rea
 import { motion, useReducedMotion } from "motion/react";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
+import { CallDetail } from "@/components/call-detail";
 import { CallWall } from "@/components/call-wall";
 import { DayCounters } from "@/components/day-counters";
 import { TmsHealth } from "@/components/tms-health";
@@ -62,6 +63,9 @@ export function TowerShell() {
   const now = useNow();
   const searchParams = useSearchParams();
   const selectedCallId = searchParams.get("call");
+  const selectedCall = wall?.calls.find((call) => call.callId === selectedCallId) ?? null;
+  // The call the operator is speaking on, so the wall can mark it.
+  const [takenOverCallId, setTakenOverCallId] = useState<string | null>(null);
 
   // The selection lives in ?call= so a reload keeps the operator on the same call.
   const select = useCallback(
@@ -121,18 +125,28 @@ export function TowerShell() {
               loading={loading}
               now={now}
               selectedCallId={selectedCallId}
+              takenOverCallId={takenOverCallId}
               onSelect={select}
             />
           </div>
         </section>
 
-        <section aria-label="Call detail" className="flex flex-col rounded-[var(--radius-panel)] border border-line bg-panel">
-          <PanelHeading>Call</PanelHeading>
-          <QuietPanel
-            icon={<CursorClick size={20} weight="regular" />}
-            title="Select a call to follow it"
-            hint="Pick a row on the wall or use the arrow keys"
-          />
+        <section
+          aria-label="Call detail"
+          className="flex h-[calc(100dvh-4.75rem)] min-h-[560px] flex-col overflow-hidden rounded-[var(--radius-panel)] border border-line bg-panel"
+        >
+          {selectedCall ? (
+            <CallDetail key={selectedCall.callId} call={selectedCall} now={now} onTakeoverChange={setTakenOverCallId} />
+          ) : (
+            <>
+              <PanelHeading>Call</PanelHeading>
+              <QuietPanel
+                icon={<CursorClick size={20} weight="regular" />}
+                title="Select a call to follow it"
+                hint="Pick a row on the wall or use the arrow keys"
+              />
+            </>
+          )}
         </section>
 
         <section aria-label="Load context" className="flex flex-col rounded-[var(--radius-panel)] border border-line bg-panel">
