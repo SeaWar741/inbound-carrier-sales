@@ -1,7 +1,16 @@
 import type { FastifyPluginAsync } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
-import { operatorWallResponse, operatorWallUnavailableResponse, type OperatorWallResponse, type WallCall } from "../contract.ts";
+import {
+  createInterventionBody,
+  createInterventionParams,
+  createInterventionResponse,
+  interventionKinds,
+  operatorWallResponse,
+  operatorWallUnavailableResponse,
+  type OperatorWallResponse,
+  type WallCall,
+} from "../contract.ts";
 import { otpMaxAttempts, operatorTimeZone, wallEventsPerCall } from "../constants.ts";
 import { assessCall, otpLocked } from "../domain/call-stage.ts";
 import type { TmsHealthRecorder } from "../infra/tms/tms-health.ts";
@@ -39,7 +48,11 @@ export function wallQuery(): SqlStatement {
         COALESCE((SELECT json_agg(e ORDER BY e.created_at) FROM (
           SELECT tool, summary, status, created_at::timestamptz AS created_at
           FROM call_events WHERE call_id = t.call_id ORDER BY created_at DESC LIMIT ${wallEventsPerCall}
-        ) e), '[]'::json) AS events
+        ) e), '[]'::json) AS events,
+        COALESCE((SELECT json_agg(i ORDER BY i.created_at) FROM (
+          SELECT kind, load_id, amount_usd, message, created_at::timestamptz AS created_at
+          FROM interventions WHERE call_id = t.call_id
+        ) i), '[]'::json) AS interventions
       FROM today t
     )
     SELECT to_char((SELECT local_start FROM bounds), 'YYYY-MM-DD') AS day,
@@ -86,6 +99,14 @@ const eventRow = z.object({
   created_at: timestamp,
 });
 
+const interventionRow = z.object({
+  kind: z.enum(interventionKinds),
+  load_id: z.string().nullable(),
+  amount_usd: count.nullable(),
+  message: z.string().nullable(),
+  created_at: timestamp,
+});
+
 const callRow = z.object({
   call_id: z.string(),
   mc_number: z.string().nullable(),
@@ -99,6 +120,7 @@ const callRow = z.object({
   offers: z.array(offerRow),
   hold: holdRow.nullable(),
   events: z.array(eventRow),
+  interventions: z.array(interventionRow),
 });
 type CallRow = z.output<typeof callRow>;
 
@@ -156,6 +178,13 @@ export function toWallCall(row: CallRow): WallCall {
       createdAt: row.hold.created_at.toISOString(),
     },
     events: row.events.map((e) => ({ tool: e.tool, summary: e.summary, status: e.status, createdAt: e.created_at.toISOString() })),
+    interventions: row.interventions.map((i) => ({
+      kind: i.kind,
+      loadId: i.load_id,
+      amountUsd: i.amount_usd,
+      message: i.message,
+      createdAt: i.created_at.toISOString(),
+    })),
     createdAt: row.created_at.toISOString(),
   };
 }
@@ -188,6 +217,38 @@ export function operatorWallRoutes(deps: OperatorRouteDeps): FastifyPluginAsync 
         } catch (error) {
           request.log.warn({ err: error }, "operator wall unavailable");
           return reply.code(503).send({ status: "service_unavailable", message: "The call data is unavailable right now. Retry shortly." });
+        }
+      },
+    );
+
+    // The tower writes an authorization before it sends the whisper, so the agent's next
+    // evaluate_offer already includes it. Unknown calls are refused, not recorded.
+    app.post(
+      "/operator/calls/:callId/interventions",
+      {
+        schema: {
+          params: createInterventionParams,
+          body: createInterventionBody,
+          response: { 200: createInterventionResponse, 404: z.object({ status: z.literal("not_found"), message: z.string() }), 503: operatorWallUnavailableResponse },
+        },
+      },
+      async (request, reply) => {
+        const { callId } = request.params;
+        const body = request.body;
+        const loadId = body.kind === "authorization" ? body.loadId : null;
+        const amountUsd = body.kind === "authorization" ? body.amountUsd : null;
+        try {
+          const [row] = await deps.twin.query(
+            sql`INSERT INTO interventions (call_id, kind, load_id, amount_usd, message)
+                SELECT call_id, ${body.kind}, ${loadId}, ${amountUsd}, ${body.message ?? null} FROM calls WHERE call_id = ${callId}
+                RETURNING id`,
+            z.object({ id: z.uuid() }),
+          );
+          if (!row) return reply.code(404).send({ status: "not_found", message: "No call with that id." });
+          return { status: "recorded" as const, id: row.id };
+        } catch (error) {
+          request.log.warn({ err: error }, "intervention not recorded");
+          return reply.code(503).send({ status: "service_unavailable", message: "The intervention was not recorded. Retry shortly." });
         }
       },
     );

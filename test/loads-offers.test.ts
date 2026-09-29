@@ -26,6 +26,8 @@ const jsonResponse = (body: unknown, status = 200) =>
 const verifiedCalls = new Map<string, boolean>();
 // Active holds: load id -> the call holding it.
 const activeHolds = new Map<string, string>();
+// Summed operator authorizations, keyed "callId|loadId".
+const authorized = new Map<string, number>();
 type OfferRow = { callId: string; loadId: string; round: number; carrierAsk: number; decision: string; rateToSay: number | null };
 let offers: (OfferRow & { postedRate?: number; maxBuy?: number })[] = [];
 const sqlLog: string[] = [];
@@ -63,7 +65,14 @@ const twinFetch = vi.fn<typeof fetch>(async (_input, init) => {
     if (verified === undefined) return rows([]);
     const prior = offers.filter((o) => o.callId === callId && o.loadId === loadId).length;
     const holder = activeHolds.get(loadId ?? "");
-    return rows([{ verified, prior_rounds: String(prior), held_elsewhere: holder !== undefined && holder !== callId }]);
+    return rows([
+      {
+        verified,
+        prior_rounds: String(prior),
+        held_elsewhere: holder !== undefined && holder !== callId,
+        authorized_usd: String(authorized.get(`${callId}|${loadId}`) ?? 0),
+      },
+    ]);
   }
   const verifiedQuery = /SELECT verified FROM calls WHERE call_id = E'([^']*)'/.exec(text);
   if (verifiedQuery) {
@@ -108,6 +117,7 @@ beforeEach(() => {
   verifiedCalls.set("call-ok", true);
   verifiedCalls.set("call-unverified", false);
   activeHolds.clear();
+  authorized.clear();
   offers = [];
   sqlLog.length = 0;
   twinFetch.mockClear();
@@ -332,6 +342,23 @@ describe("POST /v1/offers/evaluate", () => {
     ]);
   });
 
+  it("adds an operator authorization to the counter for that load only", async () => {
+    authorized.set("call-ok|LD00881", 50);
+    const res = await evaluate({ callId: "call-ok", loadId: "LD00881", carrierAsk: 3000 });
+    expectNoMaxBuy(res.body);
+    expect(res.json()).toMatchObject({ decision: "counter", rateToSay: 2275, round: 1 });
+    expect(sqlLog.find((text) => text.includes("FROM interventions"))).toMatch(/i\.kind = 'authorization'/);
+    expect((await evaluate({ callId: "call-ok", loadId: "LD00848", carrierAsk: 9000 })).json().rateToSay).not.toBe(2275);
+  });
+
+  it("never lets an authorization lift the counter past the max buy", async () => {
+    authorized.set("call-ok|LD00881", 900);
+    for (let i = 0; i < 3; i++) await evaluate({ callId: "call-ok", loadId: "LD00881", carrierAsk: 3000 });
+    // 2,425 scheduled + 900 authorized is capped at the 2,538 max buy.
+    expect(offers.map((o) => o.rateToSay)).toEqual([2538, 2538, 2538]);
+    expect((await evaluate({ callId: "call-ok", loadId: "LD00881", carrierAsk: 2539 })).json().decision).toBe("reject");
+  });
+
   it("stores the load's posted rate and max buy with the offer, never in the response", async () => {
     const res = await evaluate({ callId: "call-ok", loadId: "LD00881", carrierAsk: 3000 });
     expectNoMaxBuy(res.body);
@@ -406,7 +433,7 @@ describe("POST /v1/offers/evaluate", () => {
 
   it("answers retry when a concurrent request already took the round", async () => {
     twinFetch.mockImplementationOnce(async () =>
-      jsonResponse({ command: "SELECT", rowCount: 1, rows: [{ verified: true, prior_rounds: "0", held_elsewhere: false }], truncated: false }),
+      jsonResponse({ command: "SELECT", rowCount: 1, rows: [{ verified: true, prior_rounds: "0", held_elsewhere: false, authorized_usd: "0" }], truncated: false }),
     );
     offers.push({ callId: "call-ok", loadId: "LD00881", round: 1, carrierAsk: 2600, decision: "counter", rateToSay: 2225 });
     const res = (await evaluate({ callId: "call-ok", loadId: "LD00881", carrierAsk: 2600 })).json();

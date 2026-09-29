@@ -54,6 +54,18 @@ export const tableDdl = {
     status text,
     created_at timestamp NOT NULL DEFAULT now()
   )`,
+  // Every operator action on a live call. An authorization raises the counter on one load,
+  // never past that load's max buy (see evaluateOffer).
+  interventions: `CREATE TABLE IF NOT EXISTS interventions (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    call_id text NOT NULL,
+    kind text NOT NULL CHECK (kind IN ('whisper', 'authorization', 'listen', 'takeover')),
+    load_id text,
+    amount_usd int8 CHECK (amount_usd > 0),
+    message text,
+    created_at timestamp NOT NULL DEFAULT now(),
+    CHECK ((kind = 'authorization') = (load_id IS NOT NULL AND amount_usd IS NOT NULL))
+  )`,
 } as const;
 
 // Changes to tables that already exist; each statement is idempotent and runs on every bootstrap.
@@ -66,6 +78,7 @@ export const migrations = [
   "ALTER TABLE holds ADD COLUMN IF NOT EXISTS posted_rate int8",
   "ALTER TABLE holds ADD COLUMN IF NOT EXISTS max_buy int8",
   "CREATE INDEX IF NOT EXISTS call_events_by_call ON call_events (call_id, created_at)",
+  "CREATE INDEX IF NOT EXISTS interventions_by_call ON interventions (call_id, created_at)",
 ] as const;
 
 export const holdStatuses = ["held", "confirming", "booked", "booked_unconfirmed", "released"] as const;

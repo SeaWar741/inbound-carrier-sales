@@ -5,7 +5,8 @@ export const finalRound = concessionSchedule.length;
 // How a rate is spoken back to the carrier.
 export const dollars = (usd: number) => `$${usd.toLocaleString("en-US")}`;
 
-export type OfferInput = { postedRate: number; maxBuy: number; carrierAsk: number; round: number };
+// authorizedUsd: what a senior rep added on this call for this load.
+export type OfferInput = { postedRate: number; maxBuy: number; carrierAsk: number; round: number; authorizedUsd?: number };
 
 export type OfferEvaluation =
   | { decision: "accept" | "counter"; rateToSay: number; isFinalRound: boolean }
@@ -22,8 +23,10 @@ export function scheduledCounter(postedRate: number, maxBuy: number, round: numb
 }
 
 // Past the final round the last counter stands: an ask at or under it is still accepted.
-export function evaluateOffer({ postedRate, maxBuy, carrierAsk, round }: OfferInput): OfferEvaluation {
-  const counter = scheduledCounter(postedRate, maxBuy, round);
+// An authorization lifts the scheduled counter but never past the max buy, and never lowers it.
+export function evaluateOffer({ postedRate, maxBuy, carrierAsk, round, authorizedUsd = 0 }: OfferInput): OfferEvaluation {
+  const scheduled = scheduledCounter(postedRate, maxBuy, round);
+  const counter = Math.max(scheduled, Math.min(scheduled + authorizedUsd, maxBuy));
   const isFinalRound = round >= finalRound;
   if (carrierAsk <= counter) return { decision: "accept", rateToSay: carrierAsk, isFinalRound };
   if (round > finalRound) return { decision: "reject", rateToSay: null, isFinalRound: true };

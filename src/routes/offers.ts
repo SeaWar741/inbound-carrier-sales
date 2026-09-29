@@ -37,7 +37,12 @@ const noDecision = (status: Exclude<EvaluateOfferResponse["status"], "ok">, mess
   isFinalRound: false,
 });
 
-const callStateRow = z.object({ verified: z.boolean(), prior_rounds: z.coerce.number().int(), held_elsewhere: z.boolean() });
+const callStateRow = z.object({
+  verified: z.boolean(),
+  prior_rounds: z.coerce.number().int(),
+  held_elsewhere: z.boolean(),
+  authorized_usd: z.coerce.number().int(),
+});
 
 export function offerRoutes(deps: OfferRouteDeps): FastifyPluginAsync {
   return async (plugin) => {
@@ -56,7 +61,9 @@ export function offerRoutes(deps: OfferRouteDeps): FastifyPluginAsync {
             sql`SELECT c.verified,
                   (SELECT count(*) FROM offers o WHERE o.call_id = c.call_id AND o.load_id = ${loadId}) AS prior_rounds,
                   EXISTS (SELECT 1 FROM holds h WHERE h.load_id = ${loadId} AND h.status <> 'released'
-                    AND h.call_id <> c.call_id) AS held_elsewhere
+                    AND h.call_id <> c.call_id) AS held_elsewhere,
+                  (SELECT COALESCE(sum(i.amount_usd), 0) FROM interventions i WHERE i.call_id = c.call_id
+                    AND i.load_id = ${loadId} AND i.kind = 'authorization') AS authorized_usd
                 FROM calls c WHERE c.call_id = ${callId}`,
             callStateRow,
           );
@@ -68,7 +75,13 @@ export function offerRoutes(deps: OfferRouteDeps): FastifyPluginAsync {
           const load = await deps.tms.getLoad(loadId);
           if (load.status !== "OPEN") return noDecision("load_unavailable", messages.loadUnavailable);
 
-          const evaluation = evaluateOffer({ postedRate: load.rate, maxBuy: load.maxBuy, carrierAsk, round });
+          const evaluation = evaluateOffer({
+            postedRate: load.rate,
+            maxBuy: load.maxBuy,
+            carrierAsk,
+            round,
+            authorizedUsd: call.authorized_usd,
+          });
           await deps.twin.query(
             sql`INSERT INTO offers (call_id, load_id, round, carrier_ask, decision, rate_to_say, posted_rate, max_buy)
                 VALUES (${callId}, ${loadId}, ${round}, ${carrierAsk}, ${evaluation.decision}, ${evaluation.rateToSay},

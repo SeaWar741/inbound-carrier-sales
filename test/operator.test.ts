@@ -52,6 +52,9 @@ const wallRow = {
         { tool: "verify_carrier", summary: "MC 123456 verified", status: "ok", created_at: "2026-09-29T15:00:01+00:00" },
         { tool: "create_hold", summary: null, status: "ok", created_at: "2026-09-29T15:09:00+00:00" },
       ],
+      interventions: [
+        { kind: "authorization", load_id: "LD00881", amount_usd: "50", message: "Authorize +$50", created_at: "2026-09-29T15:07:00+00:00" },
+      ],
     },
     {
       call_id: "call-a",
@@ -66,6 +69,7 @@ const wallRow = {
       offers: [],
       hold: null,
       events: [{ tool: "verify_carrier", summary: null, status: "not_eligible", created_at: "2026-09-29T14:00:01+00:00" }],
+      interventions: [],
     },
   ],
 };
@@ -76,6 +80,9 @@ const twin = {
   query: async <T>(statement: SqlStatement, rowSchema: z.ZodType<T>): Promise<T[]> => {
     statements.push(statement.text);
     if (failTwin) throw new TwinError("connection reset");
+    if (statement.text.startsWith("INSERT INTO interventions")) {
+      return statement.text.includes("WHERE call_id = E'call-b'") ? [rowSchema.parse({ id: "0b0c2a5e-8a39-4b8e-9d7e-0f3f2d1c4b5a" })] : [];
+    }
     return [rowSchema.parse(wallRow)];
   },
 };
@@ -129,6 +136,9 @@ describe("GET /v1/operator/wall", () => {
       hold: { status: "booked", agreedRate: 2300, maxBuy: 2500, bookingRef: "BR-1", createdAt: "2026-09-29T15:09:00.000Z" },
     });
     expect(booked?.events.map((e) => e.tool)).toEqual(["verify_carrier", "create_hold"]);
+    expect(booked?.interventions).toEqual([
+      { kind: "authorization", loadId: "LD00881", amountUsd: 50, message: "Authorize +$50", createdAt: "2026-09-29T15:07:00.000Z" },
+    ]);
   });
 
   it("answers 503 when Twin fails", async () => {
@@ -140,5 +150,33 @@ describe("GET /v1/operator/wall", () => {
     } finally {
       failTwin = false;
     }
+  });
+});
+
+const intervene = (callId: string, body: object, key: string = testConfig.OPERATOR_API_KEY) =>
+  app.inject({ method: "POST", url: `/v1/operator/calls/${callId}/interventions`, headers: { "x-api-key": key }, payload: body });
+
+describe("POST /v1/operator/calls/:callId/interventions", () => {
+  it("rejects the agent key", async () => {
+    expect((await intervene("call-b", { kind: "whisper", message: "Offer quick pay" }, testConfig.AGENT_API_KEY)).statusCode).toBe(401);
+  });
+
+  it("records an authorization scoped to one load of a known call", async () => {
+    statements.length = 0;
+    const res = await intervene("call-b", { kind: "authorization", loadId: "ld00881", amountUsd: 50 });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ status: "recorded", id: "0b0c2a5e-8a39-4b8e-9d7e-0f3f2d1c4b5a" });
+    expect(statements[0]).toContain("E'authorization', E'LD00881', 50");
+  });
+
+  it("answers 404 for a call that does not exist", async () => {
+    expect((await intervene("call-x", { kind: "whisper", message: "hi" })).statusCode).toBe(404);
+  });
+
+  it("refuses an authorization without a load or amount, and money on a whisper", async () => {
+    expect((await intervene("call-b", { kind: "authorization", amountUsd: 50 })).statusCode).toBe(400);
+    expect((await intervene("call-b", { kind: "authorization", loadId: "LD00881", amountUsd: 0 })).statusCode).toBe(400);
+    expect((await intervene("call-b", { kind: "authorization", loadId: "LD00881", amountUsd: 5000 })).statusCode).toBe(400);
+    expect((await intervene("call-b", { kind: "whisper", amountUsd: 50 })).statusCode).toBe(400);
   });
 });

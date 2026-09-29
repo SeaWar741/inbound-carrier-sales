@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { otpDigits } from "./constants.ts";
+import { maxAuthorizationUsd, otpDigits } from "./constants.ts";
 import { callRisks, callStages } from "./domain/call-stage.ts";
 import { cityInput, equipmentInput, loadIdInput, stateInput, zipInput } from "./infra/tms/codec.ts";
 import { holdStatuses } from "./infra/twin-schemas.ts";
@@ -292,6 +292,16 @@ const wallEvent = z.object({
   createdAt: z.iso.datetime(),
 });
 
+export const interventionKinds = ["whisper", "authorization", "listen", "takeover"] as const;
+
+const wallIntervention = z.object({
+  kind: z.enum(interventionKinds),
+  loadId: z.string().nullable(),
+  amountUsd: z.number().int().nullable(),
+  message: z.string().nullable(),
+  createdAt: z.iso.datetime(),
+});
+
 export const wallCall = z.object({
   callId: z.string(),
   mcNumber: z.string().nullable(),
@@ -307,6 +317,8 @@ export const wallCall = z.object({
   hold: wallHold.nullable(),
   // Oldest first, the last ones of the call only.
   events: z.array(wallEvent),
+  // Oldest first, every operator action on the call.
+  interventions: z.array(wallIntervention),
   createdAt: z.iso.datetime(),
 });
 export type WallCall = z.infer<typeof wallCall>;
@@ -338,3 +350,17 @@ export const operatorWallResponse = z.object({
 export type OperatorWallResponse = z.infer<typeof operatorWallResponse>;
 
 export const operatorWallUnavailableResponse = z.object({ status: z.literal("service_unavailable"), message: z.string() });
+
+// An authorization is dollars on top of one load's scheduled counter; evaluateOffer caps it at that load's max buy.
+export const createInterventionParams = z.object({ callId: z.string().trim().min(1).max(128) });
+export const createInterventionBody = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal("authorization"),
+    loadId: loadIdInput,
+    amountUsd: z.number().int().positive().max(maxAuthorizationUsd),
+    message: z.string().trim().max(500).optional(),
+  }),
+  z.strictObject({ kind: z.enum(["whisper", "listen", "takeover"]), message: z.string().trim().max(500).optional() }),
+]);
+export type CreateInterventionBody = z.infer<typeof createInterventionBody>;
+export const createInterventionResponse = z.object({ status: z.literal("recorded"), id: z.uuid() });

@@ -40,5 +40,7 @@ export const contactChangeWindowDays = 30;
 export const operatorTimeZone = "America/Chicago";
 // The wall shows the tail of a call, not its full history.
 export const wallEventsPerCall = 20;
+// A typo guard on one operator authorization; the real ceiling is always the load's max buy.
+export const maxAuthorizationUsd = 1_000;
 // TMS health: 500 attempts is well over an hour of demo traffic, and sorting it per wall poll is trivial.
 export const tmsHealthLatencySamples = 500;
