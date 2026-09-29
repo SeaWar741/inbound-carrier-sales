@@ -24,7 +24,7 @@ const offer = (loadId: string, round: number, carrierAsk: number, rateToSay: num
 });
 
 type Priced = Pick<TowerCall, "offers" | "hold" | "live" | "createdAt">;
-const call = (offers: WallOffer[], hold: { loadId: string; status: "held" | "booked" | "released"; agreedRate: number; createdAt: string } | null = null, live = false): Priced => ({
+const call = (offers: WallOffer[], hold: { loadId: string; status: "held" | "confirming" | "booked" | "booked_unconfirmed" | "released"; agreedRate: number; createdAt: string } | null = null, live = false): Priced => ({
   offers,
   live,
   createdAt: offers[0]?.createdAt ?? "2026-09-29T10:00:00.000Z",
@@ -102,6 +102,15 @@ describe("loadOutcome", () => {
       loadOutcome([call([offer("LD1", 1, 2400, 2100, at)], { loadId: "LD1", status: "held", agreedRate: 2100, createdAt: at })], "LD1"),
       { kind: "holding", amount: 2100 },
     );
+  });
+  it("reads a hold a rep has not acted on as holding, and a confirmed or unconfirmed booking as booked", () => {
+    // LD00879 in the dev data: the agent's last event said "Holding" but the hold row is booked.
+    const hold = (status: "held" | "confirming" | "booked" | "booked_unconfirmed") =>
+      loadOutcome([call([offer("LD1", 3, 7600, 7600, at)], { loadId: "LD1", status, agreedRate: 7600, createdAt: at })], "LD1");
+    assert.deepEqual(hold("held"), { kind: "holding", amount: 7600 });
+    assert.deepEqual(hold("confirming"), { kind: "holding", amount: 7600 });
+    assert.deepEqual(hold("booked"), { kind: "booked", amount: 7600 });
+    assert.deepEqual(hold("booked_unconfirmed"), { kind: "booked", amount: 7600 });
   });
   it("without a hold: live is negotiating, countered is lost, never countered is no offer", () => {
     assert.deepEqual(loadOutcome([call([offer("LD1", 1, 2400, 2100, at)], null, true)], "LD1"), { kind: "negotiating" });

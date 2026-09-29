@@ -144,6 +144,26 @@ export function lastSummary(call: Pick<TowerCall, "events">): string | null {
   return call.events.findLast((event) => event.summary)?.summary ?? null;
 }
 
+// One line for a call in the timeline. A call that placed a hold is worded by the hold's current
+// status: the agent's last event says "Holding" even after a rep books or releases the load.
+export function callSummary(call: Pick<TowerCall, "events" | "hold">): string | null {
+  const hold = call.hold;
+  if (!hold) return lastSummary(call);
+  const at = `${hold.loadId} at ${formatUsd(hold.agreedRate)}`;
+  switch (hold.status) {
+    case "held":
+      return `Holding ${at}, waiting for a rep`;
+    case "confirming":
+      return `Confirming ${at}`;
+    case "booked":
+      return `Booked ${at}`;
+    case "booked_unconfirmed":
+      return `Booked ${at}, unconfirmed`;
+    case "released":
+      return `Released ${hold.loadId}`;
+  }
+}
+
 export type LoadSection<T> = { loadId: string | null; calls: T[] };
 
 // A carrier's calls sectioned by load: a call belongs to the load of its latest offer, calls with no
@@ -163,28 +183,37 @@ export function groupCallsByLoad<T extends { offers: { loadId: string }[] }>(cal
   return [...sections.values()];
 }
 
-export type TimelineRow<T> =
-  | { kind: "call"; call: T; day: string | null }
-  | { kind: "no_load"; count: number; open: boolean };
+export type LoadCard<T> = {
+  // Null for the one card that collects calls without any offer.
+  loadId: string | null;
+  // Newest first; the first is the call a click on the card selects.
+  calls: T[];
+  // The furthest negotiation round any of the calls reached on this load, 0 without offers.
+  rounds: number;
+  // When the newest call on the card started.
+  lastAt: string;
+};
 
-// The rows one timeline section renders. `day` is the desk date (YYYY-MM-DD) on the first call of a
-// new day, so today's calls carry none. The no-load section folds into one "N calls without a load"
-// row that opens when the operator expands it or when the selected call is inside it.
-export function timelineRows<T extends { callId: string; createdAt: string }>(
-  section: LoadSection<T>,
-  { today, selectedCallId, expanded }: { today: string; selectedCallId: string | null; expanded: boolean },
-): TimelineRow<T>[] {
-  const rows: TimelineRow<T>[] = [];
-  if (section.loadId === null) {
-    const open = expanded || section.calls.some((call) => call.callId === selectedCallId);
-    rows.push({ kind: "no_load", count: section.calls.length, open });
-    if (!open) return rows;
-  }
-  let previousDay = today;
-  for (const call of section.calls) {
-    const day = deskDayKey(call.createdAt);
-    rows.push({ kind: "call", call, day: day === previousDay ? null : day });
-    previousDay = day;
-  }
-  return rows;
+type CardCall = { callId: string; createdAt: string; offers: { loadId: string; round: number }[] };
+
+// The timeline's cards: one per load (a call belongs to the load of its latest offer), newest
+// activity first, and the calls without a load folded into one card at the end.
+export function loadCards<T extends CardCall>(calls: T[]): LoadCard<T>[] {
+  const cards = groupCallsByLoad(calls).map((section) => {
+    const ordered = [...section.calls].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    const rounds = Math.max(
+      0,
+      ...ordered.flatMap((call) => call.offers.filter((offer) => offer.loadId === section.loadId).map((offer) => offer.round)),
+    );
+    return { loadId: section.loadId, calls: ordered, rounds, lastAt: ordered[0]!.createdAt };
+  });
+  return cards.sort((a, b) => {
+    if ((a.loadId === null) !== (b.loadId === null)) return a.loadId === null ? 1 : -1;
+    return b.lastAt.localeCompare(a.lastAt);
+  });
+}
+
+// A time on the desk clock, with the date in front when it is not on `today` ("Sep 28, 2:30 PM").
+export function formatDeskWhen(iso: string, today: string): string {
+  return deskDayKey(iso) === today ? formatClock(iso) : formatDateTime(iso);
 }
