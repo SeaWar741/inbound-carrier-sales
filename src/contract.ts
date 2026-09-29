@@ -40,29 +40,50 @@ export type VerifyCarrierResponse = z.infer<typeof verifyCarrierResponse>;
 
 const callId = z.string().trim().min(1).max(128);
 
-// Mirrors the TMS codec's normalization so a bad filter is a 200 invalid_request, not a thrown error.
-const place = z
-  .object({
-    city: z.string().trim().min(1).max(30).regex(/^[^|\r\n]+$/).optional(),
-    state: z.string().trim().toUpperCase().regex(/^[A-Z]{2}$/).optional(),
-    zip: z.string().trim().regex(/^\d{5}$/).optional(),
-  })
-  .refine((p) => p.city !== undefined || p.state !== undefined || p.zip !== undefined, {
-    message: "Provide a city, state or zip",
-  });
+// The agent's webhooks send every tool parameter as a string, and "" when the caller gave none.
+const blankToUndefined = (value: unknown) => (typeof value === "string" && value.trim() === "" ? undefined : value);
+const optionalField = <T extends z.ZodType>(schema: T) => z.preprocess(blankToUndefined, schema.optional());
 
-export const searchLoadsBody = z.object({
-  callId,
-  origin: place,
-  destination: place.optional(),
-  equipmentType: z
-    .string()
-    .trim()
-    .toUpperCase()
-    .transform((s) => s.replace(/[\s-]+/g, "_"))
-    .pipe(z.enum(equipmentTypes)),
-  pickupDate: z.iso.date().optional(),
-});
+// Whole US dollars, sent as a number by tests and as a digit string by the agent.
+const wholeDollars = z.preprocess(
+  (value) => (typeof value === "string" && /^\s*\d+\s*$/.test(value) ? Number(value) : value),
+  z.number().int().positive().max(1_000_000),
+);
+
+// Mirrors the TMS codec's normalization so a bad filter is a 200 invalid_request, not a thrown error.
+const city = z.string().trim().min(1).max(30).regex(/^[^|\r\n]+$/);
+const state = z.string().trim().toUpperCase().regex(/^[A-Z]{2}$/);
+const zip = z.string().trim().regex(/^\d{5}$/);
+
+// Flat fields because each is one tool parameter; the route reads origin/destination objects.
+export const searchLoadsBody = z
+  .object({
+    callId,
+    originCity: optionalField(city),
+    originState: optionalField(state),
+    originZip: optionalField(zip),
+    destinationCity: optionalField(city),
+    destinationState: optionalField(state),
+    destinationZip: optionalField(zip),
+    equipmentType: z
+      .string()
+      .trim()
+      .toUpperCase()
+      .transform((s) => s.replace(/[\s-]+/g, "_"))
+      .pipe(z.enum(equipmentTypes)),
+    pickupDate: optionalField(z.iso.date()),
+  })
+  .refine((b) => b.originCity !== undefined || b.originState !== undefined || b.originZip !== undefined, {
+    message: "Provide an origin city, state or zip",
+  })
+  .transform(({ originCity, originState, originZip, destinationCity, destinationState, destinationZip, ...rest }) => {
+    const hasDestination = destinationCity !== undefined || destinationState !== undefined || destinationZip !== undefined;
+    return {
+      ...rest,
+      origin: { city: originCity, state: originState, zip: originZip },
+      destination: hasDestination ? { city: destinationCity, state: destinationState, zip: destinationZip } : undefined,
+    };
+  });
 export type SearchLoadsBody = z.output<typeof searchLoadsBody>;
 
 // The max buy is never part of this shape, so the serializer can never emit it.
@@ -93,7 +114,7 @@ export type SearchLoadsResponse = z.infer<typeof searchLoadsResponse>;
 export const evaluateOfferBody = z.object({
   callId,
   loadId: loadIdInput,
-  carrierAsk: z.number().int().positive().max(1_000_000),
+  carrierAsk: wholeDollars,
 });
 export type EvaluateOfferBody = z.output<typeof evaluateOfferBody>;
 
@@ -150,7 +171,7 @@ export type CheckOtpResponse = z.infer<typeof checkOtpResponse>;
 export const createHoldBody = z.object({
   callId,
   loadId: loadIdInput,
-  agreedRate: z.number().int().positive().max(1_000_000),
+  agreedRate: wholeDollars,
 });
 export type CreateHoldBody = z.output<typeof createHoldBody>;
 

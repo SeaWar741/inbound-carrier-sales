@@ -131,7 +131,7 @@ const detail = (loadId: string, status: string): LoadDetail => ({
 
 describe("POST /v1/loads/search", () => {
   it("pitches open loads with delivery details and never the max buy", async () => {
-    const res = await search({ callId: "call-ok", origin: { city: " Savannah ", state: "ga" }, equipmentType: "dry van", pickupDate: "2026-10-03" });
+    const res = await search({ callId: "call-ok", originCity: " Savannah ", originState: "ga", equipmentType: "dry van", pickupDate: "2026-10-03" });
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body).toMatchObject({ status: "ok", message: "I found 2 open loads that fit." });
@@ -156,10 +156,24 @@ describe("POST /v1/loads/search", () => {
     expect(query).toContain("ORIG_CITY:Savannah|ORIG_STATE:GA|EQTYPE:DRY_VAN|PICKUP_DATE:20261003");
   });
 
+  it("accepts the agent's all-string body with blank optional fields", async () => {
+    const res = await search({
+      callId: "call-ok",
+      originCity: "Savannah",
+      originState: "GA",
+      destinationCity: "",
+      destinationState: "",
+      equipmentType: "dry van",
+      pickupDate: "",
+    });
+    expect(res.json()).toMatchObject({ status: "ok" });
+    expect(fake.requests.at(-3)).not.toContain("DEST_");
+  });
+
   it("refuses an unverified or unknown call without touching the TMS", async () => {
     const before = fake.requests.length;
     for (const callId of ["call-unverified", "call-unknown"]) {
-      const res = await search({ callId, origin: { state: "GA" }, equipmentType: "REEFER" });
+      const res = await search({ callId, originState: "GA", equipmentType: "REEFER" });
       expect(res.json()).toMatchObject({ status: "not_verified", loads: [] });
     }
     expect(fake.requests.length).toBe(before);
@@ -172,7 +186,7 @@ describe("POST /v1/loads/search", () => {
       getLoad: vi.fn(async (loadId: string) => detail(loadId, loadId === "LD3" ? "BOOKED" : "OPEN")),
     };
     const target = serverWith(tms);
-    const res = await search({ callId: "call-ok", origin: { zip: "31401" }, equipmentType: "DRY_VAN" }, target);
+    const res = await search({ callId: "call-ok", originZip: "31401", equipmentType: "DRY_VAN" }, target);
     await target.close();
     expect(tms.getLoad.mock.calls.map(([id]) => id)).toEqual(["LD1", "LD3", "LD4"]);
     // LD3 changed status between query and detail, so it is dropped rather than pitched.
@@ -188,14 +202,14 @@ describe("POST /v1/loads/search", () => {
       }),
     };
     const target = serverWith(tms);
-    const res = await search({ callId: "call-ok", origin: { state: "GA" }, equipmentType: "DRY_VAN" }, target);
+    const res = await search({ callId: "call-ok", originState: "GA", equipmentType: "DRY_VAN" }, target);
     await target.close();
     expect(res.json()).toEqual({ status: "no_loads", message: "I don't have any open loads on that lane right now.", loads: [] });
   });
 
   it("answers tms_unavailable when the board does not respond", async () => {
     const res = await withFake(["empty-close"], (target) =>
-      search({ callId: "call-ok", origin: { state: "GA" }, equipmentType: "DRY_VAN" }, target),
+      search({ callId: "call-ok", originState: "GA", equipmentType: "DRY_VAN" }, target),
     );
     expect(res.statusCode).toBe(200);
     expect(res.json()).toMatchObject({ status: "tms_unavailable", loads: [] });
@@ -204,10 +218,10 @@ describe("POST /v1/loads/search", () => {
 
   it("answers invalid_request with HTTP 200 for a malformed body", async () => {
     for (const payload of [
-      { callId: "call-ok", origin: {}, equipmentType: "DRY_VAN" },
-      { callId: "call-ok", origin: { state: "Georgia" }, equipmentType: "DRY_VAN" },
-      { callId: "call-ok", origin: { state: "GA" }, equipmentType: "SPACESHIP" },
-      { callId: "call-ok", origin: { state: "GA" }, equipmentType: "DRY_VAN", pickupDate: "2026-02-30" },
+      { callId: "call-ok", originState: "", equipmentType: "DRY_VAN" },
+      { callId: "call-ok", originState: "Georgia", equipmentType: "DRY_VAN" },
+      { callId: "call-ok", originState: "GA", equipmentType: "SPACESHIP" },
+      { callId: "call-ok", originState: "GA", equipmentType: "DRY_VAN", pickupDate: "2026-02-30" },
     ]) {
       const res = await search(payload);
       expect(res.statusCode).toBe(200);
@@ -216,7 +230,7 @@ describe("POST /v1/loads/search", () => {
   });
 
   it("stays behind the agent key", async () => {
-    const res = await post("/v1/loads/search", { callId: "call-ok", origin: { state: "GA" }, equipmentType: "DRY_VAN" }, app, config.OPERATOR_API_KEY);
+    const res = await post("/v1/loads/search", { callId: "call-ok", originState: "GA", equipmentType: "DRY_VAN" }, app, config.OPERATOR_API_KEY);
     expect(res.statusCode).toBe(401);
   });
 });
@@ -243,6 +257,11 @@ describe("POST /v1/offers/evaluate", () => {
       [3, "counter", 2425],
       [4, "reject", null],
     ]);
+  });
+
+  it("reads the carrier's ask when the agent sends it as a digit string", async () => {
+    const res = (await evaluate({ callId: "call-ok", loadId: "LD00881", carrierAsk: "1950" })).json();
+    expect(res).toMatchObject({ status: "ok", decision: "accept", rateToSay: 1950 });
   });
 
   it("accepts at the carrier's ask and never says more than asked", async () => {

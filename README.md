@@ -24,6 +24,24 @@ Every `/v1` route requires an `x-api-key` header. Two keys, two principals:
 
 `GET /healthz` is public and never touches the TMS.
 
+## HappyRobot workflows
+
+Workflows are code in `workflow/` and are pushed with the public API; each push forks the latest version, replaces its nodes and publishes to `development`.
+
+```sh
+npm run push:workflow -- otp-email              # OTP delivery by email (built-in Email node)
+npm run push:workflow -- otp-sms                # OTP delivery by SMS (needs TWILIO_CREDENTIAL_ID, TWILIO_PHONE_NUMBER)
+npm run push:workflow -- inbound-carrier-sales  # the voice agent (needs ADAPTER_URL, AGENT_API_KEY)
+```
+
+- **Agent** (`workflow/agent.ts`, `workflow/prompt.md`): Web Call trigger, one inbound voice agent, six tools (`verify_carrier`, `send_otp`, `check_otp`, `search_loads`, `evaluate_offer`, `create_hold`). Each tool is a webhook to this adapter keyed by the run id. The agent sees only a whitelist of response fields per tool; the load's max buy never reaches it.
+- **OTP delivery** (`workflow/otp-delivery.ts`): the adapter starts these workflows directly, so a code never passes through the agent or its model.
+- **Call log**: completed runs are dumped to the Twin table `call_log`.
+
+Pushing the agent generates each tool's result once, which calls the adapter with blank input, so the adapter must be running at `ADAPTER_URL`.
+
+Twin tables are created with `npm run bootstrap:twin` (idempotent; also applies migrations and prints SQL latency).
+
 ## Deploy
 
 `render.yaml` is a Render Blueprint (Docker, free plan). Secrets are entered in the Render dashboard.
