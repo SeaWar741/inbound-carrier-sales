@@ -1,0 +1,70 @@
+@import "tailwindcss";
+
+/* Ops room theme, locked dark. One accent (electric blue) means selection and "the AI is acting";
+   green, amber and red are only ever state. A light theme is a second block of these variables. */
+:root {
+  --bg: #09090b;
+  --panel: #111114;
+  --panel-raised: #17171b;
+  --line: #232329;
+  --line-strong: #2e2e36;
+  --fg: #ececef;
+  --fg-muted: #9a9aa6;
+  --fg-faint: #62626c;
+  --accent: #4f8cff;
+  --accent-soft: rgb(79 140 255 / 0.14);
+  --ok: #34c77b;
+  --ok-soft: rgb(52 199 123 / 0.14);
+  --warn: #f2b33d;
+  --warn-soft: rgb(242 179 61 / 0.14);
+  --risk: #f0524f;
+  --risk-soft: rgb(240 82 79 / 0.14);
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-panel: var(--panel);
+  --color-panel-raised: var(--panel-raised);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-fg: var(--fg);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-faint: var(--fg-faint);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-risk: var(--risk);
+  --color-risk-soft: var(--risk-soft);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --radius-panel: 6px;
+}
+
+html,
+body {
+  background: var(--bg);
+  color: var(--fg);
+}
+
+body {
+  font-family: var(--font-sans), system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.tabular {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
