@@ -169,12 +169,12 @@ function Quiet({ title, hint }: { title: string; hint?: string }) {
 const stickThresholdPx = 32;
 
 export function Transcript({
-  sessionId,
+  streamId,
   stream,
   interventions,
   sent,
 }: {
-  sessionId: string | null;
+  streamId: string | null;
   stream: CallStream;
   interventions: Intervention[];
   sent: SentIntervention[];
@@ -203,7 +203,7 @@ export function Transcript({
     setFollowing(true);
   }
 
-  if (sessionId === null && entries.length === 0) {
+  if (streamId === null && entries.length === 0) {
     return <Quiet title="No transcript for this call" hint="The call has no live session to follow" />;
   }
   if (entries.length === 0) {

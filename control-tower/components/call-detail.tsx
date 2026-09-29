@@ -133,7 +133,8 @@ export function CallDetail({
   now: number;
   onTakeoverChange: (callId: string | null) => void;
 }) {
-  const stream = useCallStream(call.sessionId);
+  // The transcript is looked up by call, so it stays readable after the call ends.
+  const stream = useCallStream(call.callId);
   const voice = useVoice(call.callId, call.sessionId);
   const { sent, whisper, authorize } = useSentInterventions(call.callId, call.sessionId, stream.signals.length);
   const state = carrierState(call);
@@ -171,7 +172,7 @@ export function CallDetail({
       </div>
 
       <div className="min-h-0 flex-1">
-        <Transcript sessionId={call.sessionId} stream={stream} interventions={call.interventions} sent={sent} />
+        <Transcript streamId={call.callId} stream={stream} interventions={call.interventions} sent={sent} />
       </div>
 
       <InterventionBar call={call} voice={voice} onWhisper={whisper} onAuthorize={authorize} />

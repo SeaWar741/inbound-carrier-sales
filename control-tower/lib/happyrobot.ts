@@ -53,6 +53,20 @@ export async function listRunningRuns(): Promise<RunningRun[]> {
   );
 }
 
+// A run's session never changes once it exists, so found ids are kept for the life of the server.
+const sessionByRun = new Map<string, string>();
+
+// The newest session of a run, live or ended; HappyRobot keeps its messages after the call.
+export async function sessionForRun(runId: string): Promise<string | null> {
+  const known = sessionByRun.get(runId);
+  if (known) return known;
+  const sessions = sessionsPage.parse(await happyRobot().runs.getSessions(runId));
+  const session = sessions.data.at(-1);
+  if (!session) return null;
+  sessionByRun.set(runId, session.id);
+  return session.id;
+}
+
 const voiceToken = z.object({ url: z.string(), token: z.string(), room_name: z.string() });
 
 export async function createVoiceToken(sessionId: string, takeover: boolean) {
@@ -81,7 +95,7 @@ export async function publishSignal(sessionId: string, instruction: string): Pro
 
 // Opens the raw SSE stream of one session; the caller owns the body and aborts it through `signal`.
 export async function openSessionStream(sessionId: string, signal: AbortSignal): Promise<Response> {
-  return fetch(`${apiBase}/sessions/${encodeURIComponent(sessionId)}/stream?backfillLimit=100`, {
+  return fetch(`${apiBase}/sessions/${encodeURIComponent(sessionId)}/stream?backfillLimit=500`, {
     headers: { authorization: `Bearer ${env().HAPPYROBOT_API_KEY}`, accept: "text/event-stream" },
     signal,
     cache: "no-store",

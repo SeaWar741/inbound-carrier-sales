@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import type { StreamEvent } from "@/lib/contracts";
-import { openSessionStream } from "@/lib/happyrobot";
+import { openSessionStream, sessionForRun } from "@/lib/happyrobot";
 
 // Transcript of one HappyRobot session as SSE: `line`, `tool`, `signal` and `ended` events.
-// The route id is the session id, not the call id.
+// The route id is the call id (the HappyRobot run id); its session is looked up, live or ended.
 
 const params = z.object({ id: z.uuid() });
 
@@ -59,7 +59,16 @@ const encode = (event: StreamEvent) => `event: ${event.event}\ndata: ${JSON.stri
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   const parsedParams = params.safeParse(await context.params);
   if (!parsedParams.success) {
-    return NextResponse.json({ status: "invalid_request", message: "The session id must be a uuid." }, { status: 400 });
+    return NextResponse.json({ status: "invalid_request", message: "The call id must be a uuid." }, { status: 400 });
+  }
+  let sessionId: string | null;
+  try {
+    sessionId = await sessionForRun(parsedParams.data.id);
+  } catch {
+    return NextResponse.json({ status: "live_unavailable", message: "The transcript is unavailable right now." }, { status: 502 });
+  }
+  if (sessionId === null) {
+    return NextResponse.json({ status: "not_found", message: "This call has no session yet." }, { status: 404 });
   }
 
   const upstreamAbort = new AbortController();
@@ -68,7 +77,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
 
   let upstream: Response;
   try {
-    upstream = await openSessionStream(parsedParams.data.id, upstreamAbort.signal);
+    upstream = await openSessionStream(sessionId, upstreamAbort.signal);
   } catch {
     request.signal.removeEventListener("abort", abortUpstream);
     return NextResponse.json({ status: "live_unavailable", message: "The live transcript is unavailable right now." }, { status: 502 });

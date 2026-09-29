@@ -22,18 +22,18 @@ function parse<T>(event: MessageEvent<string>): T | null {
   }
 }
 
-// Follows /api/calls/<sessionId>/stream. Every connect replays the session from the start, so a
+// Follows /api/calls/<callId>/stream, live or ended. Every connect replays the session from the start, so a
 // reconnect after a drop sends events already held; those are dropped by id (lines) or by name and time.
-export function useCallStream(sessionId: string | null): CallStream {
+export function useCallStream(callId: string | null): CallStream {
   const [state, setState] = useState<CallStream>(empty);
 
   useEffect(() => {
-    if (sessionId === null) {
+    if (callId === null) {
       setState(empty);
       return;
     }
     setState({ ...empty, status: "connecting" });
-    const source = new EventSource(`/api/calls/${encodeURIComponent(sessionId)}/stream`);
+    const source = new EventSource(`/api/calls/${encodeURIComponent(callId)}/stream`);
 
     source.onopen = () => setState((prev) => (prev.status === "ended" ? prev : { ...prev, status: "open" }));
 
@@ -75,7 +75,7 @@ export function useCallStream(sessionId: string | null): CallStream {
     };
 
     return () => source.close();
-  }, [sessionId]);
+  }, [callId]);
 
   return state;
 }
