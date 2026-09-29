@@ -39,7 +39,7 @@ const sortLabels: Record<(typeof inboxSorts)[number], string> = {
 const searchDebounceMs = 300;
 
 // The cortex filter chip (an h-8 select trigger with a leading icon), on a native select.
-function FilterSelect({
+export function FilterSelect({
   label,
   icon: Icon,
   value,
