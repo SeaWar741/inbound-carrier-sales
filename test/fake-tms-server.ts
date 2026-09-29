@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import net from "node:net";
 import { fileURLToPath } from "node:url";
+import { z } from "zod";
 import { loadGetLineLength, loadQueryLineLength } from "../src/infra/tms/codec.ts";
 
 // Real lines captured from the live board on 2026-09-28, byte-exact: 246 bytes for LOAD_QUERY, 524 for LOAD_GET.
@@ -268,7 +269,8 @@ export async function startFakeTms(options: {
 
 const defaultSnapshotPath = fileURLToPath(new URL("../../docs/raw/tms-board-snapshot-2026-09-28.json", import.meta.url));
 
-// Standalone local TMS: `npm run fake:tms`, serving the OPEN loads of the board snapshot.
+// Standalone local TMS: `npm run fake:tms`, serving the board snapshot. Searches list only the
+// OPEN loads; the rest still answer LOAD_GET and LOAD_BOOK answers ALREADY_BOOKED for them.
 if (import.meta.main) {
   const token = process.env.TMS_TOKEN;
   if (!token) throw new Error("TMS_TOKEN is required");
@@ -276,8 +278,8 @@ if (import.meta.main) {
   if (!snapshotPath) throw new Error(`TMS_BOARD_SNAPSHOT is required (no snapshot at ${defaultSnapshotPath})`);
   const port = Number(process.env.FAKE_TMS_PORT ?? "9400");
 
-  const records = JSON.parse(readFileSync(snapshotPath, "utf8")) as BoardRecord[];
-  const board = new FakeBoard(records.filter((record) => trimmed(record.STATUS) === "OPEN"));
+  const records: BoardRecord[] = z.array(z.record(z.string(), z.string())).parse(JSON.parse(readFileSync(snapshotPath, "utf8")));
+  const board = new FakeBoard(records);
   const fake = await startFakeTms({ token, board, port });
-  console.log(`Fake TMS listening on 127.0.0.1:${fake.port} with ${board.size} open loads from ${snapshotPath}`);
+  console.log(`Fake TMS listening on 127.0.0.1:${fake.port} with ${board.size} loads from ${snapshotPath}`);
 }

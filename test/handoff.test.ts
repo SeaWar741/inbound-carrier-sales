@@ -6,8 +6,13 @@ import { testConfig } from "./test-config.ts";
 
 type Query = (statement: SqlStatement) => Promise<unknown[]>;
 
-const serverWith = (query: Query) =>
-  buildServer(testConfig, { agentRoutes: [handoffRoutes], operatorRoutes: [] }, { twin: { query: query as TwinClient["query"] } });
+// The call-events hook is on too, so a double write would show up as a second query.
+const serverWith = (query: Query) => {
+  const twin = { query: query as TwinClient["query"] };
+  return buildServer(testConfig, { agentRoutes: [handoffRoutes({ twin })], operatorRoutes: [] }, { twin });
+};
+
+const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
 
 const post = (app: ReturnType<typeof serverWith>, payload: object, key = testConfig.AGENT_API_KEY) =>
   app.inject({ method: "POST", url: "/v1/calls/request-human", headers: { "x-api-key": key }, payload });
@@ -19,7 +24,7 @@ afterEach(async () => {
 });
 
 describe("POST /v1/calls/request-human", () => {
-  it("answers with the handoff line and records exactly one call event, through the hook", async () => {
+  it("records the request before promising a rep, in exactly one call event", async () => {
     const query = vi.fn<Query>(async () => []);
     app = serverWith(query);
 
@@ -30,9 +35,10 @@ describe("POST /v1/calls/request-human", () => {
       message: "Let me get a senior rep on the line; they will have everything we covered.",
     });
 
-    await vi.waitFor(() => expect(query).toHaveBeenCalledOnce());
+    await settle();
+    expect(query).toHaveBeenCalledOnce();
     expect(query.mock.calls[0]?.[0].text).toBe(
-      "INSERT INTO call_events (call_id, tool, summary, status) VALUES (E'call-1', E'request_human', E'Carrier asked for a human: wants to talk to a senior rep', E'transferring')",
+      "INSERT INTO call_events (call_id, tool, summary, status) VALUES (E'call-1', 'request_human', E'Carrier asked for a human: wants to talk to a senior rep', 'transferring')",
     );
   });
 
@@ -41,8 +47,25 @@ describe("POST /v1/calls/request-human", () => {
     app = serverWith(query);
     const res = await post(app, { callId: "call-1", reason: "" });
     expect(res.json()).toMatchObject({ status: "transferring" });
-    await vi.waitFor(() => expect(query).toHaveBeenCalledOnce());
-    expect(query.mock.calls[0]?.[0].text).toContain("E'request_human', E'Carrier asked for a human', E'transferring'");
+    await settle();
+    expect(query).toHaveBeenCalledOnce();
+    expect(query.mock.calls[0]?.[0].text).toContain("'request_human', E'Carrier asked for a human', 'transferring'");
+  });
+
+  it("does not promise a rep when the request cannot be recorded", async () => {
+    const query = vi.fn<Query>(async () => {
+      throw new Error("twin down");
+    });
+    app = serverWith(query);
+    const res = await post(app, { callId: "call-1", reason: "rates" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({
+      status: "invalid_request",
+      message: "I couldn't reach a senior rep just now. Let me keep helping you in the meantime.",
+    });
+    expect(res.json().message).not.toMatch(/on the line/);
+    await settle();
+    expect(query).toHaveBeenCalledOnce();
   });
 
   it("answers 200 invalid_request without a call id", async () => {
@@ -56,7 +79,7 @@ describe("POST /v1/calls/request-human", () => {
     const query = vi.fn<Query>(async () => []);
     app = serverWith(query);
     expect((await post(app, { callId: "call-1" }, testConfig.OPERATOR_API_KEY)).statusCode).toBe(401);
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await settle();
     expect(query).not.toHaveBeenCalled();
   });
 });

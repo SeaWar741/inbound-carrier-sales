@@ -54,14 +54,6 @@ export const tableDdl = {
     status text,
     created_at timestamp NOT NULL DEFAULT now()
   )`,
-  interventions: `CREATE TABLE IF NOT EXISTS interventions (
-    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    call_id text NOT NULL,
-    kind text NOT NULL CHECK (kind IN ('whisper', 'authorization', 'listen', 'takeover', 'confirm', 'release')),
-    message text,
-    amount_usd int8 CHECK (amount_usd > 0),
-    created_at timestamp NOT NULL DEFAULT now()
-  )`,
 } as const;
 
 // Changes to tables that already exist; each statement is idempotent and runs on every bootstrap.

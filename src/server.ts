@@ -71,7 +71,7 @@ if (import.meta.main) {
       loadRoutes({ tms, twin }),
       offerRoutes({ tms, twin }),
       holdRoutes({ tms, twin }),
-      handoffRoutes,
+      handoffRoutes({ twin }),
     ],
     operatorRoutes: [confirmHoldRoutes({ tms, twin }), releaseHoldRoutes({ twin })],
   }, { twin });

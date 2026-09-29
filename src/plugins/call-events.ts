@@ -16,13 +16,13 @@ const toolNames: Record<string, string> = {
   "/loads/search": "search_loads",
   "/offers/evaluate": "evaluate_offer",
   "/holds": "create_hold",
-  "/calls/request-human": "request_human",
 };
 
-// A route without a name above is named by its path: "/v1/notes/add" -> "notes_add".
-export function toolName(routeUrl: string): string {
+// Only the routes named above are recorded. request_human is absent on purpose: its route
+// awaits its own row, because the agent may promise a rep only once the operator can see it.
+export function toolName(routeUrl: string): string | null {
   const path = routeUrl.replace(/^\/v1(?=\/)/, "");
-  return toolNames[path] ?? path.replace(/^\/+/, "").replace(/[^a-z0-9]+/gi, "_").toLowerCase();
+  return toolNames[path] ?? null;
 }
 
 // Before validation the body is whatever the agent sent, so every field is read defensively.
@@ -65,10 +65,6 @@ export function summarize(tool: string, body: Fields, response: Fields): string 
       const rate = usd(body.agreedRate);
       return rate ? `Holding load ${load} at ${rate}` : `Holding load ${load}`;
     }
-    case "request_human": {
-      const reason = text(body.reason);
-      return reason ? `Carrier asked for a human: ${reason}` : "Carrier asked for a human";
-    }
     default:
       return null;
   }
@@ -105,8 +101,10 @@ export function recordCallEvents(scope: FastifyInstance, deps: CallEventDeps): v
     // Unauthorized or unrouted requests have no call to attach the event to.
     if (routeUrl === undefined || !callId.success) return;
 
-    const response = responses.get(request) ?? {};
     const tool = toolName(routeUrl);
+    if (tool === null) return;
+
+    const response = responses.get(request) ?? {};
     const summary = summarize(tool, body, response)?.slice(0, maxSummaryLength) ?? null;
     const status = typeof response.status === "string" ? response.status : null;
 

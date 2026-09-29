@@ -46,15 +46,13 @@ describe("call events hook", () => {
     );
   });
 
-  it("names a route without a known name by its path", async () => {
-    const statements: string[] = [];
-    app = serverWith(async (statement) => {
-      statements.push(statement.text);
-      return [];
-    });
-    await post(app, "/v1/notes/add", { callId: "call-1" });
-    await vi.waitFor(() => expect(statements).toHaveLength(1));
-    expect(statements[0]).toContain("VALUES (E'call-1', E'notes_add', NULL, E'ok')");
+  it("writes nothing for a route without a known tool name", async () => {
+    const query = vi.fn<Query>(async () => []);
+    app = serverWith(query);
+    const res = await post(app, "/v1/notes/add", { callId: "call-1" });
+    expect(res.statusCode).toBe(200);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(query).not.toHaveBeenCalled();
   });
 
   it("answers the agent without waiting for the write", async () => {
@@ -100,6 +98,7 @@ describe("toolName and summarize", () => {
     expect(
       ["/v1/carriers/verify", "/v1/otp/send", "/v1/otp/check", "/v1/loads/search", "/v1/offers/evaluate", "/v1/holds"].map(toolName),
     ).toEqual(["verify_carrier", "send_otp", "check_otp", "search_loads", "evaluate_offer", "create_hold"]);
+    expect(toolName("/v1/calls/request-human")).toBeNull();
   });
 
   it("describes each call from the request, without the code or any rate the agent did not hear", () => {
@@ -114,8 +113,7 @@ describe("toolName and summarize", () => {
     );
     expect(summarize("evaluate_offer", { carrierAsk: "abc" }, { decision: "accept", round: 1 })).toBe("Accept round 1");
     expect(summarize("create_hold", { loadId: "LD00841", agreedRate: 2100 }, {})).toBe("Holding load LD00841 at $2,100");
-    expect(summarize("request_human", { callId: "c" }, {})).toBe("Carrier asked for a human");
-    expect(summarize("request_human", { reason: " wants to talk rates " }, {})).toBe("Carrier asked for a human: wants to talk rates");
+    expect(summarize("request_human", { reason: "wants rates" }, {})).toBeNull();
     expect(summarize("unknown_tool", { callId: "c" }, {})).toBeNull();
   });
 });
