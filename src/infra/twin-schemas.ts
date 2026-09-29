@@ -96,6 +96,8 @@ export const migrations = [
   "ALTER TABLE offers ADD COLUMN IF NOT EXISTS pickup_at text",
   "CREATE INDEX IF NOT EXISTS call_events_by_call ON call_events (call_id, created_at)",
   "CREATE INDEX IF NOT EXISTS interventions_by_call ON interventions (call_id, created_at)",
+  // The FMCSA name at verification, so the inbox can name a carrier without calling FMCSA again.
+  "ALTER TABLE calls ADD COLUMN IF NOT EXISTS carrier_name text",
 ] as const;
 
 export const autonomyModes = ["human", "autonomous"] as const;
