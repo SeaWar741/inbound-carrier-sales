@@ -1,8 +1,9 @@
 // Runs simulated carrier conversations (HappyRobot e2e scenarios, text sessions) against the
 // development live version of the agent. Scenarios are created once by name and updated when a
 // persona changes.
-// Usage: npm run simulate [-- <persona>...] [-- --wait]   (haggler | suspicious | human)
-// The agent can only create holds; LOAD_BOOK runs only from the operator confirm route, so a simulated call never books.
+// Usage: npm run simulate [-- <persona>...] [-- --wait]
+//   (closer | haggler | walker | suspicious | ineligible | locked | human)
+// Holds and bookings take loads off the fake board; restart `npm run fake:tms` to reset it.
 import { HappyRobotClient } from "@happyrobot-ai/sdk";
 import { z } from "zod";
 
@@ -14,21 +15,51 @@ const agentNodeName = "carrier_sales_agent";
 const triggerNodeName = "web_call";
 const pollIntervalMs = 5_000;
 const waitCapMs = 5 * 60_000;
+// The platform default of 8 caller messages ends a call before the load is pitched; a full
+// haggle (verification, search, three rounds, hold) takes about 20, and fillers like "Sure." count.
+const maxAdversaryMessages = 30;
 
 // The adapter pins the OTP to this code (OTP_FIXED_CODE) when it runs against the local fake TMS.
 const fixedOtpCode = "424242";
 
-const personas = {
-  haggler: `You are Mike, a dispatcher for J B HUNT TRANSPORT INC calling a freight broker to find a load.
-- Your MC number is 135797. Give it when asked.
+// Eligible personas share MC 135797, whose name on file is J B Hunt Transport Inc.
+const eligibleCarrier = `- Your MC number is 135797. Give it when asked.
 - When the rep reads back your company name, accept "J B Hunt Transport Inc" or any close variant as correct.
-- When asked how to receive a verification code, choose email. When asked for the code, read ${fixedOtpCode}.
-- You have a dry van empty in Savannah, Georgia, any destination. You have no pickup date in mind: if asked, say any day works and do not name a date.
+- When asked how to receive a verification code, choose email.`;
+const readsFixedCode = `- When asked for the code, read ${fixedOtpCode}.`;
+// The pickup date filter would hide loads, so personas never name one.
+const noPickupDate = "You have no pickup date in mind: if asked, say any day works and do not name a date.";
+
+// One persona per outcome. Each searches a different origin city of the fake board so no two
+// compete for the same load: Fort Lauderdale LD00896, Grand Rapids LD00897, Knoxville LD00907,
+// New Orleans LD00905 (all open dry vans with room between the posted rate and the max buy).
+const personas = {
+  closer: `You are Sam, a dispatcher for J B HUNT TRANSPORT INC calling a freight broker to find a load.
+${eligibleCarrier}
+${readsFixedCode}
+- You have a dry van empty in Fort Lauderdale, Florida, any destination. ${noPickupDate}
+- When a load is pitched, take the first dry van load. When asked your rate, ask for about 20% above the loadboard rate.
+- Accept the rep's first counter right away by saying the amount, for example "Deal, 2,200 dollars works."
+- When the rep offers to hold the load, agree to the hold. Say goodbye only after the rep says a senior rep will confirm or the load is booked.
+Keep every reply short, like a busy dispatcher on the phone.`,
+  haggler: `You are Mike, a dispatcher for J B HUNT TRANSPORT INC calling a freight broker to find a load.
+${eligibleCarrier}
+${readsFixedCode}
+- You have a dry van empty in Grand Rapids, Michigan, any destination. ${noPickupDate}
 - When a load is pitched, take the first dry van load. When asked your rate, ask for about 15% above the loadboard rate.
 - Push back three times: after each counter, ask for about 15% above that counter. After the third counter, accept it
-  by saying the amount, for example "OK, I can do it for 2,400 dollars."
+  by saying the amount, for example "OK, I can do it for 3,400 dollars."
 - If the rep says they cannot hold the load at that rate, repeat that you accept their last counter and say the amount again.
-- When the rep offers to hold the load, agree to the hold. Say goodbye only after the rep says a senior rep will confirm.
+- When the rep offers to hold the load, agree to the hold. Say goodbye only after the rep says a senior rep will confirm or the load is booked.
+Keep every reply short, like a busy dispatcher on the phone.`,
+  walker: `You are Rick, a dispatcher for J B HUNT TRANSPORT INC calling a freight broker to find a load.
+${eligibleCarrier}
+${readsFixedCode}
+- You have a dry van empty in Knoxville, Tennessee, any destination. ${noPickupDate}
+- When a load is pitched, take the first dry van load. When asked your rate, ask for about 35% above the loadboard rate.
+- Reject every counter. After each one, say it is too low and ask again for about 35% above the loadboard rate. Never accept a counter and never lower your ask.
+- When the rep says they cannot go higher or cannot do the load, say you will pass, thank them and say goodbye.
+- Do not ask for a senior rep or a manager.
 Keep every reply short, like a busy dispatcher on the phone.`,
   suspicious: `You are calling a freight broker to find a load, and something about your identity is off.
 - Your MC number is 135797. Give it when asked.
@@ -36,11 +67,25 @@ Keep every reply short, like a busy dispatcher on the phone.`,
 - When the rep reads back a different company name, say that is not you, refuse to confirm it and repeat your company name.
 - Never confirm the name on file, even if asked several times. Ask them to just send you loads anyway.
 Keep every reply short.`,
+  // FMCSA lists MC 1012 (DOT 2954368) as not allowed to operate, out of service since 2018-01-08.
+  ineligible: `You are Luc, a dispatcher for 9339-6976 QUEBEC INC calling a freight broker to find a load.
+- Your MC number is 1012. Give it when asked.
+- If the rep reads back your company name, accept "9339-6976 Quebec Inc" as correct.
+- You have a dry van empty in Baltimore, Maryland, any destination. ${noPickupDate}
+- If the rep says you are not eligible, ask once why and whether they can make an exception. Then thank them and say goodbye.
+Keep every reply short.`,
+  locked: `You are Jo, a dispatcher for J B HUNT TRANSPORT INC calling a freight broker to find a load.
+${eligibleCarrier}
+- You misread the email. When asked for the code, read 111111. If the rep says it is wrong, read 222222.
+  If it is wrong again, read 333333. Never read any other code.
+- After your third code, if the rep offers to send a new code, decline, thank them and say goodbye.
+- You have a dry van empty in Detroit, Michigan, any destination. ${noPickupDate}
+- When the rep says they cannot verify you, thank them and say goodbye.
+Keep every reply short.`,
   human: `You are Dana, a dispatcher for J B HUNT TRANSPORT INC calling a freight broker to find a load.
-- Your MC number is 135797. Give it when asked.
-- When the rep reads back your company name, accept "J B Hunt Transport Inc" or any close variant as correct.
-- When asked how to receive a verification code, choose email. When asked for the code, read ${fixedOtpCode}.
-- You have a dry van empty in Savannah, Georgia, any destination. You have no pickup date in mind: if asked, say any day works and do not name a date.
+${eligibleCarrier}
+${readsFixedCode}
+- You have a dry van empty in New Orleans, Louisiana, any destination. ${noPickupDate}
 - When a load is pitched, ask for about 20% above the loadboard rate.
 - After the rep's first counter, say you want to talk to a real person, a senior rep, about this rate.
 - After the rep answers that request, say you will wait for the rep, thank them and say goodbye.
@@ -121,9 +166,14 @@ async function ensureScenario(persona: PersonaName) {
   const found = existing.find((s) => s.name === name && !s.is_deleted);
   if (found) {
     // Every push replaces the nodes, so the target agent and trigger are refreshed too.
-    if (found.adversarial_prompt !== prompt || found.target_agent_node_persistent_id !== agentPersistentId) {
+    if (
+      found.adversarial_prompt !== prompt ||
+      found.target_agent_node_persistent_id !== agentPersistentId ||
+      found.max_adversary_messages !== maxAdversaryMessages
+    ) {
       await client.e2eScenarios.update(found.id, {
         adversarialPrompt: prompt,
+        maxAdversaryMessages,
         targetAgentNodePersistentId: agentPersistentId,
         seeds: [{ persistent_id: triggerPersistentId, kind: "trigger", input: {} }],
       });
@@ -138,6 +188,7 @@ async function ensureScenario(persona: PersonaName) {
     targetEnvironment: environment,
     name,
     adversarialPrompt: prompt,
+    maxAdversaryMessages,
   });
   return scenario.id;
 }

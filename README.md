@@ -46,11 +46,24 @@ Twin tables are created with `npm run bootstrap:twin` (idempotent; also applies 
 ## Simulated calls
 
 ```sh
-npm run simulate                    # all personas at once, prints one line per run
-npm run simulate -- haggler --wait  # one persona, polls every 5 s until it finishes (5 minute cap)
+npm run simulate                        # all personas at once, prints one line per run
+npm run simulate -- closer walker       # a subset
+npm run simulate -- haggler --wait      # polls every 5 s until the runs finish (5 minute cap)
 ```
 
-Runs HappyRobot e2e scenarios (text sessions, `whole_run`) against the live `development` version of the agent. Each persona (`haggler`, `suspicious`, `human`) is a scenario created once by name and updated when its prompt changes. They use MC 135797 and assume the adapter runs against `npm run fake:tms` with `OTP_FIXED_CODE=424242`. A simulated call can place a hold but never book: booking runs only from the operator confirm route.
+Runs HappyRobot e2e scenarios (text sessions, `whole_run`, up to 30 caller messages) against the live `development` version of the agent. Each persona is a scenario created once by name and updated when its prompt changes. They assume the adapter runs against `npm run fake:tms` with `OTP_FIXED_CODE=424242`. Eligible personas use MC 135797 (J B Hunt Transport Inc), and each searches a different origin so no two compete for a load.
+
+| Persona | Caller | Expected outcome |
+| --- | --- | --- |
+| `closer` | Dry van in Fort Lauderdale, FL (LD00896), accepts the first counter | Hold placed (booked in autonomous mode) |
+| `haggler` | Dry van in Grand Rapids, MI (LD00897), three rounds, takes the final counter | Hold placed (booked in autonomous mode) |
+| `walker` | Dry van in Knoxville, TN (LD00907), rejects every counter | Three counters, no deal |
+| `suspicious` | MC 135797 but insists on another company name | Refused, never verified |
+| `ineligible` | MC 1012, which FMCSA lists as not allowed to operate | Refused at verification |
+| `locked` | MC 135797, reads three wrong codes | OTP locked, never verified |
+| `human` | Dry van in New Orleans, LA (LD00905), asks for a senior rep after the first counter | Transferred to a senior rep |
+
+Holds and bookings take loads off the board. The fake TMS keeps its board in memory, so restarting `npm run fake:tms` resets it.
 
 ## Deploy
 
