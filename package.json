@@ -10,7 +10,8 @@
     "bootstrap:twin": "node --env-file-if-exists=.env scripts/bootstrap-twin.ts",
     "smoke:tms": "node --env-file-if-exists=.env scripts/tms-smoke.ts",
     "fake:tms": "node --env-file-if-exists=.env test/fake-tms-server.ts",
-    "push:workflow": "node --env-file-if-exists=.env workflow/push.ts"
+    "push:workflow": "node --env-file-if-exists=.env workflow/push.ts",
+    "simulate": "node --env-file-if-exists=.env scripts/simulate.ts"
   },
   "type": "module",
   "dependencies": {

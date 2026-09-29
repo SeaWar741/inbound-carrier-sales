@@ -43,6 +43,15 @@ Pushing the agent generates each tool's result once, which calls the adapter wit
 
 Twin tables are created with `npm run bootstrap:twin` (idempotent; also applies migrations and prints SQL latency).
 
+## Simulated calls
+
+```sh
+npm run simulate                    # all personas at once, prints one line per run
+npm run simulate -- haggler --wait  # one persona, polls every 5 s until it finishes (5 minute cap)
+```
+
+Runs HappyRobot e2e scenarios (text sessions, `whole_run`) against the live `development` version of the agent. Each persona (`haggler`, `suspicious`, `human`) is a scenario created once by name and updated when its prompt changes. They use MC 135797 and assume the adapter runs against `npm run fake:tms` with `OTP_FIXED_CODE=424242`. A simulated call can place a hold but never book: booking runs only from the operator confirm route.
+
 ## Deploy
 
 `render.yaml` is a Render Blueprint (Docker, free plan). Secrets are entered in the Render dashboard.
