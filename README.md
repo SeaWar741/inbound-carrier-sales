@@ -51,19 +51,21 @@ npm run simulate -- closer walker       # a subset
 npm run simulate -- haggler --wait      # polls every 5 s until the runs finish (5 minute cap)
 ```
 
-Runs HappyRobot e2e scenarios (text sessions, `whole_run`, up to 30 caller messages) against the live `development` version of the agent. Each persona is a scenario created once by name and updated when its prompt changes. They assume the adapter runs against `npm run fake:tms` with `OTP_FIXED_CODE=424242`. Eligible personas use MC 135797 (J B Hunt Transport Inc), and each searches a different origin so no two compete for a load.
+Runs HappyRobot e2e scenarios (text sessions, `whole_run`, up to 30 caller messages) against the live `development` version of the agent. Each persona is a scenario created once by name and updated when its prompt changes. They assume the adapter runs against `npm run fake:tms` with `OTP_FIXED_CODE=424242`. Eligible personas use MC 135797 (J B Hunt Transport Inc).
+
+Personas that search (`closer`, `haggler`, `walker`, `human`) get a load picked at run time, printed before the runs start. The picker reads the same board snapshot as the fake TMS (`TMS_BOARD_SNAPSHOT` or `../docs/raw/tms-board-snapshot-2026-09-28.json`), keeps the OPEN loads, and drops every load with a Twin hold that is not released. Each persona gets a load that is alone in its origin city and equipment, in a city no other persona uses, with room for its script: the first ask draws a counter, the haggler and walker get three rising counters, and the walker's ask stays above the last one. The prompt names that load's origin city, state and equipment, so scenarios are updated on every run.
 
 | Persona | Caller | Expected outcome |
 | --- | --- | --- |
-| `closer` | Dry van in Fort Lauderdale, FL (LD00896), accepts the first counter | Hold placed (booked in autonomous mode) |
-| `haggler` | Dry van in Grand Rapids, MI (LD00897), three rounds, takes the final counter | Hold placed (booked in autonomous mode) |
-| `walker` | Dry van in Knoxville, TN (LD00907), rejects every counter | Three counters, no deal |
+| `closer` | Picked load, accepts the first counter | Hold placed (booked in autonomous mode) |
+| `haggler` | Picked load, three rounds, takes the final counter | Hold placed (booked in autonomous mode) |
+| `walker` | Picked load, rejects every counter | Three counters, no deal |
 | `suspicious` | MC 135797 but insists on another company name | Refused, never verified |
 | `ineligible` | MC 1012, which FMCSA lists as not allowed to operate | Refused at verification |
 | `locked` | MC 135797, reads three wrong codes | OTP locked, never verified |
-| `human` | Dry van in New Orleans, LA (LD00905), asks for a senior rep after the first counter | Transferred to a senior rep |
+| `human` | Picked load, asks for a senior rep after the first counter | Transferred to a senior rep |
 
-Holds and bookings take loads off the board. The fake TMS keeps its board in memory, so restarting `npm run fake:tms` resets it.
+Holds and bookings take loads off the board. The fake TMS keeps its board in memory, so restarting `npm run fake:tms` resets it, but Twin is not reset: booked demo loads stay taken in Twin (there is no cleanup) and the picker skips them. When too few free loads remain, the script stops with a message before starting any run.
 
 ## Deploy
 
