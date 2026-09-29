@@ -482,6 +482,10 @@ export function LaneMap({
     map.touchZoomRotate.disableRotation();
     map.keyboard.disableRotation();
     mapRef.current = map;
+    // The compact attribution opens expanded and would cover a thumbnail; start it as the (i) button.
+    map.once("load", () => {
+      map.getContainer().querySelector(".maplibregl-ctrl-attrib")?.classList.remove("maplibregl-compact-show");
+    });
 
     let styleLoaded = false;
     let fallback = false;
