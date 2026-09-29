@@ -91,6 +91,11 @@ export const adapterWallCall = z.object({
 });
 export type AdapterWallCall = z.infer<typeof adapterWallCall>;
 
+// "human": a rep confirms every hold in the tower. "autonomous": the agent's hold books at once.
+export const autonomyModes = ["human", "autonomous"] as const;
+export type AutonomyMode = (typeof autonomyModes)[number];
+export const setAutonomyBody = z.strictObject({ mode: z.enum(autonomyModes) });
+
 const tmsHealth = z.object({
   since: z.iso.datetime(),
   attempts: z.number().int(),
@@ -112,6 +117,8 @@ export const adapterWallResponse = z.object({
     marginSaved: z.number(),
   }),
   tmsHealth,
+  // Defaults to the safe mode when an older adapter does not send it.
+  autonomy: z.enum(autonomyModes).default("human"),
   calls: z.array(adapterWallCall),
 });
 export type AdapterWallResponse = z.infer<typeof adapterWallResponse>;

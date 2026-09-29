@@ -2,9 +2,11 @@ import "server-only";
 import { z } from "zod";
 import {
   adapterWallResponse,
+  autonomyModes,
   confirmHoldResponse,
   releaseHoldResponse,
   type AdapterWallResponse,
+  type AutonomyMode,
   type ConfirmHoldResponse,
   type ErrorResponse,
   type ReleaseHoldResponse,
@@ -107,4 +109,19 @@ export async function releaseHold(holdId: string, reason: string | undefined): P
     timeoutMs: readTimeoutMs,
   });
   return holdAnswer(response, releaseHoldResponse, "The hold service did not answer. Retry the release.");
+}
+
+const autonomyAnswer = z.object({ status: z.literal("ok"), mode: z.enum(autonomyModes) });
+
+export async function setAutonomy(mode: AutonomyMode): Promise<AdapterResult<{ mode: AutonomyMode }>> {
+  const response = await call("/v1/operator/settings/autonomy", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ mode }),
+    timeoutMs: readTimeoutMs,
+  });
+  if (!response?.ok) return unavailable("The mode was not saved. Retry shortly.");
+  const parsed = autonomyAnswer.safeParse(await json(response));
+  if (!parsed.success) return unavailable("The mode was not saved. Retry shortly.");
+  return { ok: true, httpStatus: 200, body: { mode: parsed.data.mode } };
 }

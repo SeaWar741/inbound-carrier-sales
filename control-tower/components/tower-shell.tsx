@@ -4,6 +4,7 @@ import { Broadcast, CursorClick, Warning } from "@phosphor-icons/react";
 import { motion, useReducedMotion } from "motion/react";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
+import { AutonomySwitch } from "@/components/autonomy-switch";
 import { CallDetail } from "@/components/call-detail";
 import { CallWall } from "@/components/call-wall";
 import { DayCounters } from "@/components/day-counters";
@@ -94,6 +95,7 @@ export function TowerShell() {
         <div className="flex flex-1 justify-center">
           <DayCounters counters={wall?.counters ?? null} />
         </div>
+        <AutonomySwitch mode={wall?.autonomy ?? null} />
         <TmsHealth health={wall?.tmsHealth ?? null} />
       </header>
 
