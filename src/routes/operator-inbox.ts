@@ -13,16 +13,16 @@ import {
   type OperatorCarriersQuery,
   type OperatorLoad,
 } from "../contract.ts";
-import { carrierCallsLimit, inboxPageSize, operatorTimeZone } from "../constants.ts";
+import { carrierCallsLimit, dashboardLoadsLimit, inboxPageSize, operatorTimeZone } from "../constants.ts";
 import { tripProgress, tripSql, tripStatuses } from "../domain/trip.ts";
 import { sql, type SqlStatement, type TwinClient } from "../infra/twin-client.ts";
-import { callColumns, laneOf, toWallCall, wallRow } from "./operator.ts";
+import { laneOf, toWallCall, wallCallColumns, wallRow } from "./operator.ts";
 
 export type OperatorInboxDeps = { twin: Pick<TwinClient, "query"> };
 
 // Booked holds with the lane of their load's latest offer that has one; holds whose load never had
 // a lane stored are skipped, which also keeps tripSql away from null pickups. The window keeps
-// trips that arrived in the last day and pickups up to a week out; 500 is the dashboard's cap.
+// trips that arrived in the last day and pickups up to a week out, capped at dashboardLoadsLimit.
 export function loadsQuery(): SqlStatement {
   const text = sql`WITH lane AS (
       SELECT DISTINCT ON (h.hold_id) h.hold_id, h.load_id, h.call_id, h.agreed_rate,
@@ -42,7 +42,7 @@ export function loadsQuery(): SqlStatement {
     FROM lane `.text + tripSql.text + sql`
     WHERE trip.eta_ts >= now() - interval '24 hours' AND trip.pickup_ts <= now() + interval '7 days'
     ORDER BY trip.pickup_ts
-    LIMIT 500`.text;
+    LIMIT ${dashboardLoadsLimit}`.text;
   return { text };
 }
 
@@ -87,10 +87,9 @@ function toOperatorLoad(row: LoadRow, now: Date): OperatorLoad | null {
   };
 }
 
-// The calls row as a WallCall reads it, from a calls row aliased `t`.
-const wallCallColumns = sql`t.call_id, t.mc_number, t.dot_number, t.eligible, t.verified, t.otp_attempts,
-        t.otp_expires_at::timestamptz AS otp_expires_at, t.created_at::timestamptz AS created_at,
-        `.text + callColumns.text;
+// A carrier's key from a calls row: tagged so an MC, a DOT and a call id with equal digits never merge.
+const carrierKey = (alias: "c" | "t") =>
+  `COALESCE('mc:' || ${alias}.mc_number, 'dot:' || ${alias}.dot_number, 'call:' || ${alias}.call_id)`;
 
 const sinceBounds: Record<OperatorCarriersQuery["since"], SqlStatement> = {
   // The desk's calendar day, converted back to the stored session-zone clock like wallQuery.
@@ -111,9 +110,10 @@ const sortOrders: Record<OperatorCarriersQuery["sort"], string> = {
 const containsPattern = (q: string) => `%${q.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_")}%`;
 
 // One round trip: the page of carriers, the tab total and the four tab counts. A carrier is every
-// call sharing COALESCE(mc_number, dot_number, call_id) inside the `since` window; its stage comes
-// from its latest call and that call's holds. `filtered` applies the bar filters; the counts group
-// it by tab and the total and page add the tab, so all three read one predicate.
+// call sharing carrierKey inside the `since` window. needs_approval, negotiating and live come from
+// its latest call; booked, in_transit and arrived from its latest booked hold across all those calls.
+// `filtered` applies the bar filters; the counts group it by tab and the total and page add the tab,
+// so all three read one predicate.
 export function carriersQuery(params: OperatorCarriersQuery): SqlStatement {
   const latestLive = params.live.length > 0 ? sql`k.latest_call_id IN (${params.live})`.text : "FALSE";
 
@@ -138,7 +138,7 @@ export function carriersQuery(params: OperatorCarriersQuery): SqlStatement {
 
   const text =
     `WITH scoped AS (
-      SELECT c.*, COALESCE(c.mc_number, c.dot_number, c.call_id) AS carrier_key
+      SELECT c.*, ` + carrierKey("c") + ` AS carrier_key
       FROM calls c WHERE c.created_at >= ` + sinceBounds[params.since].text + `
     ), grouped AS (
       SELECT s.carrier_key, count(*) AS calls_count, max(s.created_at) AS last_call_at,
@@ -160,15 +160,15 @@ export function carriersQuery(params: OperatorCarriersQuery): SqlStatement {
       SELECT s.carrier_key, max(h.updated_at) AS last_hold_at
       FROM scoped s JOIN holds h ON h.call_id = s.call_id GROUP BY s.carrier_key
     ), booked AS (
-      SELECT DISTINCT ON (k.carrier_key) k.carrier_key, h.agreed_rate, lo.pickup_at, lo.miles
-      FROM carriers k JOIN holds h ON h.call_id = k.latest_call_id
+      SELECT DISTINCT ON (s.carrier_key) s.carrier_key, h.agreed_rate, lo.pickup_at, lo.miles
+      FROM scoped s JOIN holds h ON h.call_id = s.call_id
       LEFT JOIN LATERAL (
         SELECT o.pickup_at, o.miles FROM offers o
         WHERE o.load_id = h.load_id AND o.pickup_at IS NOT NULL AND o.miles IS NOT NULL
         ORDER BY o.created_at DESC LIMIT 1
       ) lo ON TRUE
       WHERE h.status IN ('booked', 'booked_unconfirmed')
-      ORDER BY k.carrier_key, h.created_at DESC
+      ORDER BY s.carrier_key, h.created_at DESC
     ), booked_trip AS (
       SELECT lane.carrier_key, lane.agreed_rate, trip.pickup_ts, trip.eta_ts, trip.trip_status
       FROM booked lane ` + tripSql.text + `
@@ -218,7 +218,7 @@ export function carriersQuery(params: OperatorCarriersQuery): SqlStatement {
         SELECT p.ord, p.carrier_key, p.mc_number, p.dot_number, p.carrier_name, p.calls_count, p.loads_count,
           p.last_activity_at::timestamptz AS last_activity_at, p.carrier_stage, p.needs_human,
           p.has_booking, p.pickup_ts, p.eta_ts, p.trip_status,
-          (SELECT row_to_json(w) FROM (SELECT ` + wallCallColumns + `
+          (SELECT row_to_json(w) FROM (SELECT ` + wallCallColumns.text + `
             FROM calls t WHERE t.call_id = p.latest_call_id) w) AS latest_call
         FROM ordered p WHERE p.ord > ` + sql`${offset}`.text + ` AND p.ord <= ` + sql`${offset + inboxPageSize}`.text + `
       ) r), '[]'::json) AS rows`;
@@ -277,8 +277,8 @@ function toOperatorCarrier(row: CarrierRow): OperatorCarrier {
 // The carrier's latest calls, newest first, with the same columns the wall reads.
 export function carrierCallsQuery(key: string): SqlStatement {
   const text =
-    `SELECT ` + wallCallColumns + `
-    FROM calls t WHERE ` + sql`COALESCE(t.mc_number, t.dot_number, t.call_id) = ${key}
+    `SELECT ` + wallCallColumns.text + `
+    FROM calls t WHERE ` + carrierKey("t") + sql` = ${key}
     ORDER BY t.created_at DESC, t.call_id DESC
     LIMIT ${carrierCallsLimit}`.text;
   return { text };

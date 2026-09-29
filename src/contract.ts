@@ -444,7 +444,7 @@ export const operatorCarriersQuery = z.object({
 export type OperatorCarriersQuery = z.output<typeof operatorCarriersQuery>;
 
 const operatorCarrier = z.object({
-  // COALESCE(mc_number, dot_number, call_id) of the carrier's calls.
+  // 'mc:<mc>', else 'dot:<dot>', else 'call:<call id>' of the carrier's calls.
   key: z.string(),
   mcNumber: z.string().nullable(),
   dotNumber: z.string().nullable(),

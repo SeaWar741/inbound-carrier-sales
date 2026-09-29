@@ -46,6 +46,13 @@ export const callColumns = sql`EXISTS (SELECT 1 FROM call_events e WHERE e.call_
           FROM interventions WHERE call_id = t.call_id
         ) i), '[]'::json) AS interventions`;
 
+// The select list of a WallCall row from a calls row aliased `t`: its own columns, then callColumns.
+export const wallCallColumns: SqlStatement = {
+  text: sql`t.call_id, t.mc_number, t.dot_number, t.eligible, t.verified, t.otp_attempts,
+        t.otp_expires_at::timestamptz AS otp_expires_at, t.created_at::timestamptz AS created_at,
+        `.text + callColumns.text,
+};
+
 // Stored timestamps are session-zone wall clock; bounds are converted back to that clock so the
 // created_at comparison stays index-friendly. The wall and its counters come back in a single row.
 export function wallQuery(): SqlStatement {
@@ -59,9 +66,7 @@ export function wallQuery(): SqlStatement {
       SELECT h.* FROM holds h JOIN today t ON t.call_id = h.call_id
       WHERE h.status IN ('booked', 'booked_unconfirmed')
     ), wall AS (
-      SELECT t.call_id, t.mc_number, t.dot_number, t.eligible, t.verified, t.otp_attempts,
-        t.otp_expires_at::timestamptz AS otp_expires_at, t.created_at::timestamptz AS created_at,
-        `.text + callColumns.text + sql`
+      SELECT `.text + wallCallColumns.text + sql`
       FROM today t
     )
     SELECT to_char((SELECT local_start FROM bounds), 'YYYY-MM-DD') AS day,

@@ -50,5 +50,7 @@ export const tmsHealthLatencySamples = 500;
 export const avgTransitMph = 50;
 // Operator inbox: one screen of carriers at 1280 px; the page size is not a parameter.
 export const inboxPageSize = 25;
+// The dashboard's booked loads: a week of pickups is far below this; it only bounds a runaway result.
+export const dashboardLoadsLimit = 500;
 // A carrier's timeline shows its recent calls, not its full history.
 export const carrierCallsLimit = 50;

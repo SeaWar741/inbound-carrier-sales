@@ -85,7 +85,7 @@ const carriersRow = {
   rows: [
     {
       ord: 1,
-      carrier_key: "123456",
+      carrier_key: "mc:123456",
       mc_number: "123456",
       dot_number: "7654321",
       carrier_name: "ACME TRUCKING LLC",
@@ -102,7 +102,7 @@ const carriersRow = {
     },
     {
       ord: 2,
-      carrier_key: "call-x",
+      carrier_key: "call:call-x",
       mc_number: null,
       dot_number: null,
       carrier_name: null,
@@ -131,7 +131,7 @@ const twin = {
     if (failTwin) throw new TwinError("connection reset");
     const text = statement.text;
     if (text.startsWith("WITH scoped")) return [rowSchema.parse(carriersRow)];
-    if (text.includes("FROM calls t WHERE COALESCE(t.mc_number, t.dot_number, t.call_id)")) {
+    if (text.includes("FROM calls t WHERE COALESCE('mc:' || t.mc_number")) {
       return text.includes("'unknown'") ? [] : [callRow, { ...callRow, call_id: "call-a", hold: null }].map((r) => rowSchema.parse(r));
     }
     return [loadRow, { ...loadRow, hold_id: "hold-2", load_id: "LD00900", carrier_name: null, trip_status: "upcoming" }].map((r) => rowSchema.parse(r));
@@ -250,7 +250,7 @@ describe("GET /v1/operator/carriers", () => {
     const body = operatorCarriersResponse.parse(res.json());
     expect(body).toMatchObject({ total: 2, page: 2, counts: { needsYou: 1, live: 0, active: 1, closed: 3 } });
     expect(body.rows[0]).toMatchObject({
-      key: "123456",
+      key: "mc:123456",
       carrierName: "ACME TRUCKING LLC",
       callsCount: 3,
       loadsCount: 2,
@@ -260,7 +260,23 @@ describe("GET /v1/operator/carriers", () => {
       nextTrip: { pickupAt: "2026-09-29T19:00:00.000Z", etaAt: "2026-09-30T15:00:00.000Z", status: "in_transit" },
       latestCall: { callId: "call-b", stage: "booked", hold: { status: "booked", agreedRate: 2300 } },
     });
-    expect(body.rows[1]).toMatchObject({ key: "call-x", carrierStage: "needs_approval", needsHuman: true, nextTrip: null });
+    expect(body.rows[1]).toMatchObject({ key: "call:call-x", carrierStage: "needs_approval", needsHuman: true, nextTrip: null });
+  });
+
+  it("keys carriers by tagged MC, DOT or call id", () => {
+    const text = carriersQuery(operatorCarriersQuery.parse({})).text;
+    expect(text).toContain("SELECT c.*, COALESCE('mc:' || c.mc_number, 'dot:' || c.dot_number, 'call:' || c.call_id) AS carrier_key");
+  });
+
+  it("takes the trip from the latest booked hold across every call in the window, not only the latest call", () => {
+    const text = carriersQuery(operatorCarriersQuery.parse({})).text;
+    const booked = text.slice(text.indexOf("booked AS ("), text.indexOf("booked_trip AS ("));
+    expect(booked).toContain("FROM scoped s JOIN holds h ON h.call_id = s.call_id");
+    expect(booked).toContain("WHERE h.status IN ('booked', 'booked_unconfirmed')");
+    expect(booked).toContain("ORDER BY s.carrier_key, h.created_at DESC");
+    expect(booked).not.toContain("latest_call_id");
+    // needs_approval still reads the latest call's open hold.
+    expect(text).toContain("h.call_id = k.latest_call_id AND h.status IN ('held', 'confirming')) THEN 'needs_approval'");
   });
 
   it("omits every absent or empty filter instead of rendering IN ()", () => {
@@ -323,13 +339,13 @@ describe("GET /v1/operator/carriers/:key/calls", () => {
 
   it("returns the carrier's calls as wall calls, newest first, capped at 50", async () => {
     statements.length = 0;
-    const res = await getCalls("123456");
+    const res = await getCalls("mc:123456");
     expect(res.statusCode).toBe(200);
     const { calls } = operatorCarrierCallsResponse.parse(res.json());
     expect(calls.map((c) => c.callId)).toEqual(["call-b", "call-a"]);
     expect(calls[0]).toMatchObject({ otp: { attempts: 1 }, hold: { holdId: "7b0c2a5e-8a39-4b8e-9d7e-0f3f2d1c4b5a" } });
     const [text] = statements;
-    expect(text).toContain("COALESCE(t.mc_number, t.dot_number, t.call_id) = E'123456'");
+    expect(text).toContain("COALESCE('mc:' || t.mc_number, 'dot:' || t.dot_number, 'call:' || t.call_id) = E'mc:123456'");
     expect(text).toContain("ORDER BY t.created_at DESC, t.call_id DESC");
     expect(text).toContain("LIMIT 50");
     expect(text).toContain("AS human_requested");
