@@ -3,9 +3,10 @@
 import { LuChevronLeft, LuChevronRight } from "react-icons/lu";
 import { motion, useReducedMotion } from "motion/react";
 import { finalRound, type WallOffer } from "@/lib/contracts";
-import { formatUsd } from "@/lib/format";
+import { formatClock, formatPercent, formatPerMile, formatSignedUsd, formatUsd, outcomeLabel } from "@/lib/format";
+import { marginKept, perMile, spreadVsPosted, type LoadOutcome } from "@/lib/pricing";
 
-// Position on the posted-to-max-buy scale as a percentage, clamped to the track.
+// Position on a min-to-max scale as a percentage, clamped to the track.
 function percentOf(value: number, min: number, max: number): number {
   if (max <= min) return 100;
   return Math.min(100, Math.max(0, ((value - min) / (max - min)) * 100));
@@ -23,24 +24,141 @@ function Pinned({ at, className, children }: { at: number; className: string; ch
   );
 }
 
+// One key/value cell of the pricing grid: a label, the amount, and its $/mi under it when known.
+function Figure({
+  label,
+  value,
+  tone = "text-fg",
+  sub,
+  className = "",
+}: {
+  label: string;
+  value: string;
+  tone?: string;
+  sub?: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={`min-w-0 ${className}`}>
+      <div className="truncate text-fg-muted">{label}</div>
+      <div className={`tabular truncate font-semibold ${tone}`}>{value}</div>
+      {sub && <div className="tabular truncate text-[11px] text-fg-faint">{sub}</div>}
+    </div>
+  );
+}
+
+// Each call's last offer on the load, oldest first: the carrier ask and our counter on a scale
+// from the posted rate to the highest ask (or the ceiling when every ask stayed under it).
+function NegotiationPath({ path, postedRate, maxBuy, outcome }: { path: WallOffer[]; postedRate: number; maxBuy: number; outcome: LoadOutcome }) {
+  const top = Math.max(maxBuy, ...path.map((offer) => offer.carrierAsk));
+  const pct = (value: number) => percentOf(value, postedRate, top);
+  const ceiling = pct(maxBuy);
+  const last = path.at(-1);
+  const result = outcomeLabel(outcome);
+  return (
+    <div className="flex flex-col gap-1.5 border-t border-line pt-2.5">
+      <div className="flex items-baseline justify-between text-[11px]">
+        <h4 className="font-medium uppercase tracking-wide text-fg-faint">Negotiation</h4>
+        <span className="flex gap-2">
+          <span className="text-warn">Ask</span>
+          <span className="text-accent">Counter</span>
+          <span className="text-fg-faint">| Ceiling</span>
+        </span>
+      </div>
+      <ol className="flex flex-col gap-1">
+        {path.map((offer) => {
+          const ask = pct(offer.carrierAsk);
+          const counter = offer.rateToSay === null ? null : pct(offer.rateToSay);
+          const from = counter === null ? ask : Math.min(ask, counter);
+          const to = counter === null ? ask : Math.max(ask, counter);
+          return (
+            <li key={offer.createdAt} className="grid grid-cols-[4.5rem_minmax(0,1fr)_3.25rem] items-center gap-2 text-[11px]">
+              <span className="tabular truncate text-fg-muted">
+                R{offer.round} <span className="text-fg-faint">{formatClock(offer.createdAt)}</span>
+              </span>
+              <span className="relative h-3" aria-hidden>
+                <span className="absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 rounded-full bg-line" />
+                <span className="absolute top-1/2 h-1 -translate-y-1/2 bg-warn-soft" style={{ left: `${from}%`, width: `${to - from}%` }} />
+                <span className="absolute inset-y-0 w-px bg-fg-faint" style={{ left: `${ceiling}%` }} />
+                {counter !== null && <span className="absolute inset-y-0.5 w-0.5 -translate-x-1/2 rounded-full bg-accent" style={{ left: `${counter}%` }} />}
+                <span className="absolute inset-y-0.5 w-0.5 -translate-x-1/2 rounded-full bg-warn" style={{ left: `${ask}%` }} />
+              </span>
+              <span className="tabular text-right leading-tight">
+                <span className="block text-warn">{formatUsd(offer.carrierAsk)}</span>
+                <span className={`block ${offer.rateToSay === null ? "text-fg-faint" : "text-accent"}`}>
+                  {offer.rateToSay === null ? offer.decision : formatUsd(offer.rateToSay)}
+                </span>
+              </span>
+            </li>
+          );
+        })}
+      </ol>
+      <div className="flex items-baseline justify-between text-xs">
+        <span className="text-fg-muted">Result</span>
+        <span className={`tabular font-medium ${result.tone}`}>
+          {result.text}
+          {last && (outcome.kind === "booked" || outcome.kind === "holding") && <span className="font-normal text-fg-faint"> in R{last.round}</span>}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 // Operator only: the load's max buy is on screen here and nowhere the agent can reach.
+// The pricing card of the load on the table: the meter from posted to ceiling, the key numbers
+// once each, and the negotiation that led here.
 export function MarginMeter({
   offer,
   authorizedUsd,
   agreedRate,
+  path,
+  outcome,
 }: {
   offer: WallOffer;
   // Authorizations on the load not yet priced into the latest counter.
   authorizedUsd: number;
   // Set while the load is held or booked on this call.
   agreedRate: number | null;
+  // Every recorded offer on this load with this carrier, oldest first.
+  path: WallOffer[];
+  outcome: LoadOutcome;
 }) {
   const reduce = useReducedMotion();
   const spring = reduce ? { duration: 0 } : { type: "spring" as const, stiffness: 140, damping: 22 };
   const { postedRate, maxBuy } = offer;
+  const miles = offer.lane?.miles ?? null;
+
+  const rounds = (
+    <span className="flex items-center gap-1" aria-label={`Round ${offer.round} of ${finalRound}`}>
+      {Array.from({ length: finalRound }, (_, index) => index + 1).map((round) => (
+        <span
+          key={round}
+          className={`tabular rounded-full px-1.5 py-0.5 text-[10px] leading-none ${
+            round === offer.round ? "bg-accent-soft text-accent" : round < offer.round ? "text-fg-muted" : "text-fg-faint"
+          }`}
+        >
+          R{round}
+        </span>
+      ))}
+    </span>
+  );
+
+  const header = (
+    <div className="flex items-center justify-between gap-2">
+      <h3 className="text-xs font-medium uppercase tracking-wide text-fg-faint">
+        Pricing <span className="tabular font-normal normal-case tracking-normal text-fg-muted">{offer.loadId}</span>
+      </h3>
+      {rounds}
+    </div>
+  );
 
   if (postedRate === null || maxBuy === null) {
-    return <p className="px-3 py-3 text-xs text-fg-faint">Rates were not recorded for this offer.</p>;
+    return (
+      <div className="flex flex-col gap-2 px-3 py-3">
+        {header}
+        <p className="text-xs text-fg-faint">Rates were not recorded for this offer.</p>
+      </div>
+    );
   }
 
   const ourRate = agreedRate ?? offer.rateToSay;
@@ -51,23 +169,25 @@ export function MarginMeter({
   const askPct = pct(offer.carrierAsk);
   const askAbove = offer.carrierAsk > maxBuy;
   const askBelow = offer.carrierAsk < postedRate;
-  const marginKept = ourRate === null ? null : maxBuy - ourRate;
+
+  // The rate the margin is read against: the agreed one, else the carrier's latest ask.
+  const reference = agreedRate ?? offer.carrierAsk;
+  const margin = marginKept(maxBuy, reference);
+  const spread = spreadVsPosted(reference, postedRate);
+  const mile = (rate: number | null) => {
+    const value = perMile(rate, miles);
+    return value === null ? undefined : formatPerMile(value);
+  };
 
   return (
     <div className="flex flex-col gap-3 px-3 py-3">
-      <div className="flex items-baseline justify-between">
-        <h3 className="text-xs font-medium uppercase tracking-wide text-fg-faint">Margin</h3>
-        <span className="tabular text-xs text-fg-muted">{offer.loadId}</span>
-      </div>
+      {header}
 
       <div className="relative pt-5 pb-5">
         {/* Carrier ask above the track; clamped with an arrow when it is off the scale. */}
         <Pinned at={askPct} className="top-0 flex items-center gap-0.5 text-warn">
           {askBelow && <LuChevronLeft size={10} aria-hidden />}
-          <span>
-            Ask <span className="tabular">{formatUsd(offer.carrierAsk)}</span>
-            {askAbove && " over max"}
-          </span>
+          <span>Ask{askAbove && " over ceiling"}</span>
           {askAbove && <LuChevronRight size={10} aria-hidden />}
         </Pinned>
 
@@ -97,48 +217,44 @@ export function MarginMeter({
 
         {ourRate !== null && (
           <Pinned at={ourPct} className={`bottom-0 ${agreedRate !== null ? "text-ok" : "text-accent"}`}>
-            {agreedRate !== null ? "Agreed" : "Counter"} <span className="tabular">{formatUsd(ourRate)}</span>
-            {authorizedUsd > 0 && agreedRate === null && (
-              <span className="text-fg-muted">
-                {" "}
-                + <span className="tabular">{formatUsd(authorizedUsd)}</span> authorized
-              </span>
-            )}
+            {agreedRate !== null ? "Agreed" : "Counter"}
+            {authorizedUsd > 0 && agreedRate === null && <span className="text-fg-muted"> + authorized</span>}
           </Pinned>
         )}
       </div>
 
-      <div className="flex justify-between text-[11px] text-fg-faint">
-        <span>
-          Posted <span className="tabular text-fg-muted">{formatUsd(postedRate)}</span>
-        </span>
-        <span>
-          Max buy <span className="tabular text-fg-muted">{formatUsd(maxBuy)}</span>
-        </span>
+      <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 text-xs">
+        <Figure label="Approx. cost (posted)" value={formatUsd(postedRate)} sub={mile(postedRate)} />
+        <Figure label="Ceiling (max buy)" value={formatUsd(maxBuy)} sub={mile(maxBuy)} />
+        {agreedRate !== null ? (
+          <Figure label="Agreed" value={formatUsd(agreedRate)} tone="text-ok" sub={mile(agreedRate)} />
+        ) : (
+          <>
+            <Figure label="Carrier ask" value={formatUsd(offer.carrierAsk)} tone="text-warn" sub={mile(offer.carrierAsk)} />
+            <Figure
+              label="Our counter"
+              value={offer.rateToSay === null ? "-" : formatUsd(offer.rateToSay)}
+              tone="text-accent"
+              sub={authorizedUsd > 0 ? `+ ${formatUsd(authorizedUsd)} authorized` : mile(offer.rateToSay)}
+            />
+          </>
+        )}
+        <Figure
+          label={agreedRate !== null ? "Spread vs posted" : "Ask vs posted"}
+          value={spread === null ? "-" : formatSignedUsd(spread)}
+          tone={spread !== null && spread > 0 ? "text-fg" : "text-ok"}
+        />
+        <Figure
+          label={agreedRate !== null ? "Margin kept" : "Margin at ask"}
+          value={margin === null ? "-" : formatSignedUsd(margin.usd).replace(/^\+/, "")}
+          tone={margin !== null && margin.usd < 0 ? "text-risk" : "text-ok"}
+          sub={margin === null ? undefined : `${formatPercent(margin.pct)} of ceiling`}
+        />
       </div>
 
-      <div className="flex items-center justify-between border-t border-line pt-2">
-        <span className="text-xs text-fg-muted">
-          Margin kept{" "}
-          <span className="tabular text-sm font-semibold text-ok">{marginKept === null ? "-" : formatUsd(marginKept)}</span>
-        </span>
-        <span className="flex items-center gap-1" aria-label={`Round ${offer.round} of ${finalRound}`}>
-          {Array.from({ length: finalRound }, (_, index) => index + 1).map((round) => (
-            <span
-              key={round}
-              className={`tabular rounded-full px-1.5 py-0.5 text-[10px] leading-none ${
-                round === offer.round
-                  ? "bg-accent-soft text-accent"
-                  : round < offer.round
-                    ? "text-fg-muted"
-                    : "text-fg-faint"
-              }`}
-            >
-              R{round}
-            </span>
-          ))}
-        </span>
-      </div>
+      {path.length > 0 && <NegotiationPath path={path} postedRate={postedRate} maxBuy={maxBuy} outcome={outcome} />}
+
+      <p className="text-[11px] text-fg-faint">Trip costs (fuel, tolls) arrive with Trip Intelligence.</p>
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import type { CarrierStage, TowerCall } from "./contracts";
+import type { LoadOutcome } from "./pricing";
 
 // Display helpers for money, durations and times. The desk runs on Chicago time.
 const deskTimeZone = "America/Chicago";
@@ -13,10 +14,32 @@ const clockSeconds = new Intl.DateTimeFormat("en-US", {
 });
 // wall.day is already the Chicago calendar date, so it is formatted as a plain date in UTC.
 const dateTime = new Intl.DateTimeFormat("en-US", { timeZone: deskTimeZone, month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+// The desk calendar date of an instant as YYYY-MM-DD (en-CA formats dates that way).
+const deskDate = new Intl.DateTimeFormat("en-CA", { timeZone: deskTimeZone, year: "numeric", month: "2-digit", day: "2-digit" });
 const dayLabel = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "short", month: "short", day: "numeric" });
 
 export function formatUsd(amount: number): string {
   return usdWhole.format(amount);
+}
+
+// "+$134" or "-$50"; zero carries no sign.
+export function formatSignedUsd(amount: number): string {
+  const rounded = Math.round(amount);
+  if (rounded === 0) return usdWhole.format(0);
+  return `${rounded > 0 ? "+" : "-"}${usdWhole.format(Math.abs(rounded))}`;
+}
+
+// "$2.72/mi".
+export function formatPerMile(usdPerMile: number): string {
+  return `$${usdPerMile.toFixed(2)}/mi`;
+}
+
+export function formatPercent(pct: number): string {
+  return `${pct.toFixed(1)}%`;
+}
+
+export function deskDayKey(iso: string | number): string {
+  return deskDate.format(new Date(iso));
 }
 
 // mm:ss, rolling into h:mm:ss for calls longer than an hour.
@@ -100,6 +123,22 @@ export function callStageLabel(call: Pick<TowerCall, "stage" | "round">): string
   }
 }
 
+// A load's outcome as the timeline and the pricing card word it, with its text color.
+export function outcomeLabel(outcome: LoadOutcome): { text: string; tone: string } {
+  switch (outcome.kind) {
+    case "booked":
+      return { text: `Booked ${formatUsd(outcome.amount)}`, tone: "text-ok" };
+    case "holding":
+      return { text: `Holding ${formatUsd(outcome.amount)}`, tone: "text-accent" };
+    case "negotiating":
+      return { text: "Negotiating", tone: "text-accent" };
+    case "lost":
+      return { text: "Lost", tone: "text-fg-muted" };
+    case "no_offer":
+      return { text: "No offer", tone: "text-fg-faint" };
+  }
+}
+
 // The newest summary the agent wrote on a call.
 export function lastSummary(call: Pick<TowerCall, "events">): string | null {
   return call.events.findLast((event) => event.summary)?.summary ?? null;
@@ -122,4 +161,30 @@ export function groupCallsByLoad<T extends { offers: { loadId: string }[] }>(cal
     section.calls.push(call);
   }
   return [...sections.values()];
+}
+
+export type TimelineRow<T> =
+  | { kind: "call"; call: T; day: string | null }
+  | { kind: "no_load"; count: number; open: boolean };
+
+// The rows one timeline section renders. `day` is the desk date (YYYY-MM-DD) on the first call of a
+// new day, so today's calls carry none. The no-load section folds into one "N calls without a load"
+// row that opens when the operator expands it or when the selected call is inside it.
+export function timelineRows<T extends { callId: string; createdAt: string }>(
+  section: LoadSection<T>,
+  { today, selectedCallId, expanded }: { today: string; selectedCallId: string | null; expanded: boolean },
+): TimelineRow<T>[] {
+  const rows: TimelineRow<T>[] = [];
+  if (section.loadId === null) {
+    const open = expanded || section.calls.some((call) => call.callId === selectedCallId);
+    rows.push({ kind: "no_load", count: section.calls.length, open });
+    if (!open) return rows;
+  }
+  let previousDay = today;
+  for (const call of section.calls) {
+    const day = deskDayKey(call.createdAt);
+    rows.push({ kind: "call", call, day: day === previousDay ? null : day });
+    previousDay = day;
+  }
+  return rows;
 }

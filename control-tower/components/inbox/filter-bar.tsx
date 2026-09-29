@@ -164,8 +164,8 @@ export function FilterBar({
         />
       </div>
 
-      {/* One row; when it outgrows the pane it scrolls sideways with the scrollbar hidden. */}
-      <div className="flex items-center gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      {/* Starts at the left and wraps to a second row when the chips outgrow the pane; never scrolls or clips a label. */}
+      <div className="flex flex-wrap items-center gap-1.5">
         <FilterSelect
           label="Stage"
           icon={LuCircleDot}

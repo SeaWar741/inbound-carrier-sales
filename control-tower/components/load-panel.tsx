@@ -7,6 +7,7 @@ import { equipmentLabel, HoldCard, LaneText } from "@/components/hold-card";
 import { MarginMeter } from "@/components/margin-meter";
 import { LaneMap, type LaneMapLoad } from "@/components/lane-map";
 import type { TowerCall, WallOffer } from "@/lib/contracts";
+import { loadOutcome, negotiationPath } from "@/lib/pricing";
 
 // The load on the table: the held one while a hold stands, otherwise the one offered most recently.
 function currentOffer(call: TowerCall): WallOffer | null {
@@ -18,7 +19,14 @@ function currentOffer(call: TowerCall): WallOffer | null {
   return call.offers.at(-1) ?? null;
 }
 
-export function LoadPanel({ selectedCall }: { selectedCall: TowerCall | null }) {
+export function LoadPanel({
+  selectedCall,
+  history,
+}: {
+  selectedCall: TowerCall | null;
+  // The carrier's calls, newest first, for the negotiation path and outcome of the load.
+  history: TowerCall[];
+}) {
   const offer = selectedCall ? currentOffer(selectedCall) : null;
   const hold = selectedCall?.hold ?? null;
   const lane = offer?.lane ?? null;
@@ -49,6 +57,8 @@ export function LoadPanel({ selectedCall }: { selectedCall: TowerCall | null }) 
         .filter((i) => i.kind === "authorization" && i.loadId === offer.loadId && i.createdAt > offer.createdAt)
         .reduce((sum, i) => sum + (i.amountUsd ?? 0), 0)
     : 0;
+  const path = useMemo(() => (loadId ? negotiationPath(history, loadId) : []), [history, loadId]);
+  const outcome = useMemo(() => (loadId ? loadOutcome(history, loadId) : null), [history, loadId]);
   const agreedRate = hold && hold.status !== "released" && hold.loadId === offer?.loadId ? hold.agreedRate : null;
 
   return (
@@ -78,12 +88,19 @@ export function LoadPanel({ selectedCall }: { selectedCall: TowerCall | null }) 
       </div>
 
       {selectedCall === null ? (
-        <EmptyState className="py-10" icon={<LuMousePointerClick size={20} />} title="Select a call to see its load" hint="Map, margin and hold follow the selection" />
+        <EmptyState className="py-10" icon={<LuMousePointerClick size={20} />} title="Select a call to see its load" hint="Map, pricing and hold follow the selection" />
       ) : offer === null ? (
-        <EmptyState className="py-10" icon={<LuTruck size={20} />} title="No load on the table yet" hint="The lane and margin appear with the first offer" />
+        <EmptyState className="py-10" icon={<LuTruck size={20} />} title="No load on the table yet" hint="The lane and pricing appear with the first offer" />
       ) : (
         <div className="border-b border-line">
-          <MarginMeter key={offer.loadId} offer={offer} authorizedUsd={authorizedUsd} agreedRate={agreedRate} />
+          <MarginMeter
+            key={offer.loadId}
+            offer={offer}
+            authorizedUsd={authorizedUsd}
+            agreedRate={agreedRate}
+            path={path}
+            outcome={outcome ?? { kind: "no_offer" }}
+          />
         </div>
       )}
 
