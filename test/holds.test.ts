@@ -41,7 +41,7 @@ describe("resolveBooking", () => {
 });
 
 type Call = { verified: boolean; mcNumber: string | null };
-type Offer = { callId: string; loadId: string; decision: string; rateToSay: number | null };
+type Offer = { callId: string; loadId: string; round: number; decision: string; rateToSay: number | null };
 type Hold = {
   hold_id: string;
   call_id: string;
@@ -92,7 +92,11 @@ function fakeTwin() {
       const rate = Number(text(/o\.rate_to_say = (\d+)/, sql));
       const call = calls.get(callId);
       if (call) {
-        const agreed = offers.some((o) => o.callId === callId && o.loadId === loadId && o.decision === "accept" && o.rateToSay === rate);
+        const onLoad = offers.filter((o) => o.callId === callId && o.loadId === loadId);
+        const latest = onLoad.reduce<(typeof onLoad)[number] | undefined>((a, o) => (a && a.round > o.round ? a : o), undefined);
+        const agreed =
+          onLoad.some((o) => o.decision === "accept" && o.rateToSay === rate) ||
+          (latest?.decision === "counter" && latest.rateToSay === rate);
         rows.push({ verified: call.verified, mc_number: call.mcNumber, agreed });
       }
     } else if (sql.startsWith("SELECT * FROM holds WHERE load_id")) {
@@ -186,8 +190,9 @@ describe("hold routes", () => {
     await fake.close();
   });
 
-  const accept = (callId: string, loadId: string, rateToSay: number) =>
-    state.offers.push({ callId, loadId, decision: "accept", rateToSay });
+  const offer = (callId: string, loadId: string, decision: string, rateToSay: number) =>
+    state.offers.push({ callId, loadId, round: state.offers.filter((o) => o.callId === callId && o.loadId === loadId).length + 1, decision, rateToSay });
+  const accept = (callId: string, loadId: string, rateToSay: number) => offer(callId, loadId, "accept", rateToSay);
 
   const createHold = (payload: object, key = agentKey) =>
     app.inject({ method: "POST", url: "/v1/holds", headers: { "x-api-key": key }, payload });
@@ -247,8 +252,8 @@ describe("hold routes", () => {
     });
 
     it("requires an accepted offer at exactly that rate", async () => {
+      offer("call-a", "LD00881", "counter", 2400);
       accept("call-a", "LD00881", 2300);
-      state.offers.push({ callId: "call-a", loadId: "LD00881", decision: "counter", rateToSay: 2400 });
       for (const agreedRate of [2301, 2400, 2299]) {
         const res = await createHold({ callId: "call-a", loadId: "LD00881", agreedRate });
         expect(res.json()).toMatchObject({ status: "no_agreement", holdId: null });
@@ -256,6 +261,13 @@ describe("hold routes", () => {
       const otherLoad = await createHold({ callId: "call-a", loadId: "LD00848", agreedRate: 2300 });
       expect(otherLoad.json()).toMatchObject({ status: "no_agreement" });
       expect(state.holds).toEqual([]);
+    });
+
+    it("holds our latest counter when the carrier takes it, but not an earlier one", async () => {
+      offer("call-a", "LD00881", "counter", 2225);
+      offer("call-a", "LD00881", "counter", 2350);
+      expect((await createHold({ callId: "call-a", loadId: "LD00881", agreedRate: 2225 })).json()).toMatchObject({ status: "no_agreement" });
+      expect((await createHold({ callId: "call-a", loadId: "LD00881", agreedRate: 2350 })).json()).toMatchObject({ status: "ok", holdStatus: "held" });
     });
 
     it("refuses a rate above the max buy even with a recorded accept", async () => {

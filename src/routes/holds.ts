@@ -74,11 +74,14 @@ export function holdRoutes(deps: HoldRouteDeps): FastifyPluginAsync {
       const existingOutcome = (hold: HoldRow) =>
         hold.callId === callId ? holdPlaced(hold) : noHold("load_on_hold", createMessages.loadOnHold);
       try {
-        // Only a rate the negotiation itself accepted can be held; the agent cannot invent one.
+        // Only a rate the negotiation itself produced can be held: one evaluate_offer accepted, or
+        // our latest counter on this load, which the carrier took. The agent cannot invent one.
         const [call] = await deps.twin.query(
           sql`SELECT c.verified, c.mc_number,
                 EXISTS (SELECT 1 FROM offers o WHERE o.call_id = c.call_id AND o.load_id = ${loadId}
-                  AND o.decision = 'accept' AND o.rate_to_say = ${agreedRate}) AS agreed
+                  AND o.decision = 'accept' AND o.rate_to_say = ${agreedRate})
+                OR COALESCE((SELECT o.decision = 'counter' AND o.rate_to_say = ${agreedRate} FROM offers o
+                  WHERE o.call_id = c.call_id AND o.load_id = ${loadId} ORDER BY o.round DESC LIMIT 1), false) AS agreed
               FROM calls c WHERE c.call_id = ${callId}`,
           agreementRow,
         );
