@@ -36,3 +36,30 @@ export function pointOnArc(from: LngLat, to: LngLat, t: number): LngLat {
 export function arcPoints(from: LngLat, to: LngLat, segments = 48): LngLat[] {
   return Array.from({ length: segments + 1 }, (_, index) => pointOnArc(from, to, index / segments));
 }
+
+// The arc cut at a share of the trip: the part already driven and the part still ahead. Both keep
+// the cut point, so they meet without a gap; either has a single point when progress is 0 or 1.
+export function splitArc(from: LngLat, to: LngLat, progress: number, segments = 48): [LngLat[], LngLat[]] {
+  const cut = Math.min(1, Math.max(0, progress));
+  const at = pointOnArc(from, to, cut);
+  const traveled: LngLat[] = [];
+  const remaining: LngLat[] = [at];
+  for (let index = 0; index <= segments; index++) {
+    const t = index / segments;
+    if (t < cut) traveled.push(pointOnArc(from, to, t));
+    else if (t > cut) remaining.push(pointOnArc(from, to, t));
+  }
+  traveled.push(at);
+  return [traveled, remaining];
+}
+
+// Frames of a line-dasharray (in line widths) whose dashes shift forward one step per frame, so a
+// dashed line appears to flow from its first coordinate toward its last.
+export function dashFrames(dash: number, gap: number, steps: number): number[][] {
+  const period = dash + gap;
+  return Array.from({ length: steps }, (_, index) => {
+    const offset = (period * index) / steps;
+    // Up to one gap of offset, the line opens on a gap; past it, on the tail of the previous dash.
+    return offset <= gap ? [0, offset, dash, gap - offset] : [offset - gap, gap, dash - (offset - gap), 0];
+  });
+}

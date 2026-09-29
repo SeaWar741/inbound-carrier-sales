@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { ActiveLoads, carrierLabel } from "@/components/dashboard/active-loads";
 import { KpiTiles } from "@/components/dashboard/kpi-tiles";
+import { equipmentLabel } from "@/components/hold-card";
 import { LaneMap, type LaneMapLoad } from "@/components/lane-map";
 import type { TowerLoads, TripStatus } from "@/lib/contracts";
 import { usePoll } from "@/lib/use-poll";
@@ -22,14 +23,25 @@ export default function DashboardPage() {
   const loads = useMemo(() => (data ? [...data.loads].sort((a, b) => statusRank[a.status] - statusRank[b.status]) : null), [data]);
   const mapLoads = useMemo<LaneMapLoad[]>(
     () =>
-      (loads ?? []).map((load) => ({
-        id: load.holdId,
-        originZip: load.lane.origin.zip,
-        destinationZip: load.lane.destination.zip,
-        progress: load.progress,
-        status: load.status,
-        label: `${load.loadId} ${load.lane.origin.city}, ${load.lane.origin.state} to ${load.lane.destination.city}, ${load.lane.destination.state}, ${carrierLabel(load)}`,
-      })),
+      (loads ?? []).map((load) => {
+        const origin = `${load.lane.origin.city}, ${load.lane.origin.state}`;
+        const destination = `${load.lane.destination.city}, ${load.lane.destination.state}`;
+        return {
+          id: load.holdId,
+          originZip: load.lane.origin.zip,
+          destinationZip: load.lane.destination.zip,
+          progress: load.progress,
+          status: load.status,
+          label: `${load.loadId} ${origin} to ${destination}, ${carrierLabel(load)}`,
+          loadId: load.loadId,
+          origin,
+          destination,
+          carrier: carrierLabel(load),
+          etaAt: load.etaAt,
+          rate: load.agreedRate,
+          equipment: equipmentLabel(load.lane.equipment),
+        };
+      }),
     [loads],
   );
 
@@ -38,7 +50,7 @@ export default function DashboardPage() {
       <KpiTiles loads={loads} counters={wall?.counters ?? null} />
       <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_380px] gap-3">
         <section aria-label="Load map" className="h-full min-h-0 overflow-hidden rounded-[var(--radius-panel)] border border-line bg-panel">
-          <LaneMap loads={mapLoads} selectedId={selectedId} onSelect={setSelectedId} />
+          <LaneMap loads={mapLoads} selectedId={selectedId} onSelect={setSelectedId} overview />
         </section>
         <ActiveLoads loads={loads} error={error} selectedId={selectedId} onSelect={setSelectedId} />
       </div>
