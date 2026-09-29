@@ -115,6 +115,7 @@ describe("toolName and summarize", () => {
     expect(summarize("evaluate_offer", { carrierAsk: "abc" }, { decision: "accept", round: 1 })).toBe("Accept round 1");
     expect(summarize("create_hold", { loadId: "LD00841", agreedRate: 2100 }, { status: "ok" })).toBe("Holding load LD00841 at $2,100");
     expect(summarize("create_hold", { loadId: "LD00841", agreedRate: 2100 }, { status: "no_agreement" })).toBe("Hold refused on load LD00841 at $2,100");
+    expect(summarize("create_hold", { loadId: "LD00841", agreedRate: 2100 }, { status: "ok", holdStatus: "booked" })).toBe("Booked load LD00841 at $2,100");
     expect(summarize("request_human", { reason: "wants rates" }, {})).toBeNull();
     expect(summarize("unknown_tool", { callId: "c" }, {})).toBeNull();
   });

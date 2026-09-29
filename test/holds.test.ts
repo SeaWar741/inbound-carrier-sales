@@ -78,6 +78,7 @@ const seeded = (fields: Partial<Hold> & Pick<Hold, "hold_id">): Hold => ({
 
 // In-memory stand-in for the statements the hold routes run, enforcing the same unique constraints.
 function fakeTwin() {
+  const settings: { autonomy: "human" | "autonomous" | null } = { autonomy: null };
   const calls = new Map<string, Call>();
   const offers: Offer[] = [];
   const holds: Hold[] = [];
@@ -97,7 +98,7 @@ function fakeTwin() {
         const agreed =
           onLoad.some((o) => o.decision === "accept" && o.rateToSay === rate) ||
           (latest?.decision === "counter" && latest.rateToSay === rate);
-        rows.push({ verified: call.verified, mc_number: call.mcNumber, agreed });
+        rows.push({ verified: call.verified, mc_number: call.mcNumber, agreed, autonomy: settings.autonomy });
       }
     } else if (sql.startsWith("SELECT * FROM holds WHERE load_id")) {
       const loadId = text(/load_id = E'([^']*)'/, sql);
@@ -152,7 +153,7 @@ function fakeTwin() {
     }
     return rows.map((row) => rowSchema.parse({ ...row }));
   };
-  return { twin: { query }, calls, offers, holds };
+  return { twin: { query }, calls, offers, holds, settings };
 }
 
 const agentKey = testConfig.AGENT_API_KEY;
@@ -325,6 +326,40 @@ describe("hold routes", () => {
       const res = await createHold({ callId: "call-a", loadId: "LD00881", agreedRate: 2300 }, operatorKey);
       expect(res.statusCode).toBe(401);
       expect(state.holds).toEqual([]);
+    });
+  });
+
+  describe("POST /v1/holds in autonomous mode", () => {
+    it("books the hold at once through LOAD_BOOK and says so", async () => {
+      await start();
+      state.settings.autonomy = "autonomous";
+      accept("call-a", "LD00881", 2300);
+      const body = (await createHold({ callId: "call-a", loadId: "LD00881", agreedRate: 2300 })).json();
+      expect(body).toMatchObject({ status: "ok", holdStatus: "booked" });
+      expect(body.message).toMatch(/booked/);
+      expect(body.message).toContain("$2,300");
+      expect(bookRequests()).toHaveLength(1);
+      expect(state.holds[0]).toMatchObject({ status: "booked", booking_ref: "BR00000000091277" });
+      expect(body.message).not.toContain("2538");
+    });
+
+    it("leaves the hold for a rep when the TMS does not answer", async () => {
+      await start(["ok", "rate-limited", "rate-limited", "rate-limited"]);
+      state.settings.autonomy = "autonomous";
+      accept("call-a", "LD00881", 2300);
+      const body = (await createHold({ callId: "call-a", loadId: "LD00881", agreedRate: 2300 })).json();
+      expect(body).toMatchObject({ status: "ok", holdStatus: "held" });
+      expect(body.message).toMatch(/senior rep/);
+      expect(body.message).not.toMatch(/\bbooked\b/i);
+      expect(state.holds[0]).toMatchObject({ status: "held" });
+    });
+
+    it("never books in human mode", async () => {
+      await start();
+      state.settings.autonomy = "human";
+      accept("call-a", "LD00881", 2300);
+      expect((await createHold({ callId: "call-a", loadId: "LD00881", agreedRate: 2300 })).json()).toMatchObject({ holdStatus: "held" });
+      expect(bookRequests()).toHaveLength(0);
     });
   });
 

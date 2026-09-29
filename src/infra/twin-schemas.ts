@@ -66,6 +66,13 @@ export const tableDdl = {
     created_at timestamp NOT NULL DEFAULT now(),
     CHECK ((kind = 'authorization') = (load_id IS NOT NULL AND amount_usd IS NOT NULL))
   )`,
+  // Operator switches. 'autonomy' is 'human' (the default: a rep confirms every hold) or
+  // 'autonomous' (create_hold books right away, under the same max buy guard).
+  settings: `CREATE TABLE IF NOT EXISTS settings (
+    key text PRIMARY KEY,
+    value text NOT NULL,
+    updated_at timestamp NOT NULL DEFAULT now()
+  )`,
 } as const;
 
 // Changes to tables that already exist; each statement is idempotent and runs on every bootstrap.
@@ -90,6 +97,9 @@ export const migrations = [
   "CREATE INDEX IF NOT EXISTS call_events_by_call ON call_events (call_id, created_at)",
   "CREATE INDEX IF NOT EXISTS interventions_by_call ON interventions (call_id, created_at)",
 ] as const;
+
+export const autonomyModes = ["human", "autonomous"] as const;
+export type AutonomyMode = (typeof autonomyModes)[number];
 
 export const holdStatuses = ["held", "confirming", "booked", "booked_unconfirmed", "released"] as const;
 

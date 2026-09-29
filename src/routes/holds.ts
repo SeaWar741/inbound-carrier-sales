@@ -20,10 +20,10 @@ import type { BookingRequest } from "../infra/tms/codec.ts";
 import { TmsBusinessError, TmsUnavailableError } from "../infra/tms/errors.ts";
 import type { TmsClient } from "../infra/tms/tms-client.ts";
 import { sql, TwinError, type TwinClient } from "../infra/twin-client.ts";
-import { holdRowSchema, type HoldRow } from "../infra/twin-schemas.ts";
+import { autonomyModes, holdRowSchema, type HoldRow } from "../infra/twin-schemas.ts";
 import { invalidRequestHandler } from "../plugins/invalid-request.ts";
 
-export type HoldRouteDeps = { tms: Pick<TmsClient, "getLoad">; twin: Pick<TwinClient, "query"> };
+export type HoldRouteDeps = { tms: Pick<TmsClient, "getLoad" | "bookLoad">; twin: Pick<TwinClient, "query"> };
 export type ConfirmHoldRouteDeps = { tms: Pick<TmsClient, "bookLoad">; twin: Pick<TwinClient, "query"> };
 export type ReleaseHoldRouteDeps = { twin: Pick<TwinClient, "query"> };
 
@@ -55,7 +55,28 @@ const holdPlaced = (hold: HoldRow): CreateHoldResponse => ({
   holdStatus: hold.status,
 });
 
-const agreementRow = z.object({ verified: z.boolean(), mc_number: z.string().nullable(), agreed: z.boolean() });
+const agreementRow = z.object({
+  verified: z.boolean(),
+  mc_number: z.string().nullable(),
+  agreed: z.boolean(),
+  autonomy: z.enum(autonomyModes).nullable(),
+});
+
+const bookedNow = (hold: HoldRow): CreateHoldResponse => ({
+  status: "ok",
+  message: `You're booked on that load at ${dollars(hold.agreedRate)}. The rate confirmation is on its way.`,
+  holdId: hold.holdId,
+  holdStatus: hold.status,
+});
+
+// Autonomous mode books the new hold at once through the operator's own confirm path. Anything
+// short of a clean booking leaves the hold for a rep, so the carrier is never told more than is true.
+async function autoBook(deps: HoldRouteDeps, hold: HoldRow, log: Log): Promise<CreateHoldResponse> {
+  const result = await confirmBooking(deps, hold.holdId, `autonomous-${hold.holdId}`, log);
+  if (result !== "conflict" && result.status === "booked") return bookedNow({ ...hold, status: "booked" });
+  if (result !== "conflict" && result.status === "released") return noHold("load_unavailable", createMessages.loadUnavailable);
+  return holdPlaced({ ...hold, status: result !== "conflict" && result.holdStatus ? result.holdStatus : hold.status });
+}
 
 export function holdRoutes(deps: HoldRouteDeps): FastifyPluginAsync {
   const activeHold = async (loadId: string): Promise<HoldRow | undefined> => {
@@ -81,7 +102,8 @@ export function holdRoutes(deps: HoldRouteDeps): FastifyPluginAsync {
                 EXISTS (SELECT 1 FROM offers o WHERE o.call_id = c.call_id AND o.load_id = ${loadId}
                   AND o.decision = 'accept' AND o.rate_to_say = ${agreedRate})
                 OR COALESCE((SELECT o.decision = 'counter' AND o.rate_to_say = ${agreedRate} FROM offers o
-                  WHERE o.call_id = c.call_id AND o.load_id = ${loadId} ORDER BY o.round DESC LIMIT 1), false) AS agreed
+                  WHERE o.call_id = c.call_id AND o.load_id = ${loadId} ORDER BY o.round DESC LIMIT 1), false) AS agreed,
+                (SELECT value FROM settings WHERE key = 'autonomy') AS autonomy
               FROM calls c WHERE c.call_id = ${callId}`,
           agreementRow,
         );
@@ -103,7 +125,7 @@ export function holdRoutes(deps: HoldRouteDeps): FastifyPluginAsync {
             holdRowSchema,
           );
           if (!hold) throw new Error("hold insert returned no row");
-          return holdPlaced(hold);
+          return call.autonomy === "autonomous" ? await autoBook(deps, hold, request.log) : holdPlaced(hold);
         } catch (error) {
           if (!isUniqueViolation(error)) throw error;
           // Another request won the race for this load between our read and our insert.
@@ -171,7 +193,7 @@ const alreadyProcessed = (hold: HoldRow): ConfirmHoldResponse => {
 async function attemptBooking(
   tms: ConfirmHoldRouteDeps["tms"],
   booking: BookingRequest,
-  log: { warn: (details: object, message: string) => void },
+  log: Log,
 ): Promise<BookingAttempt> {
   try {
     const confirmation = await tms.bookLoad(booking);
@@ -186,6 +208,64 @@ async function attemptBooking(
       return { outcome: "unavailable", ambiguous: error.ambiguous };
     }
     throw error;
+  }
+}
+
+type Log = { warn: (details: object, message: string) => void };
+
+// Books a held load once: the operator's confirm and, in autonomous mode, create_hold both come here.
+export async function confirmBooking(
+  deps: ConfirmHoldRouteDeps,
+  holdId: string,
+  key: string,
+  log: Log,
+): Promise<ConfirmHoldResponse | "conflict"> {
+  try {
+    const rows = await deps.twin.query(sql`SELECT * FROM holds WHERE hold_id = ${holdId} OR idempotency_key = ${key}`, holdRowSchema);
+    if (rows.some((row) => row.idempotencyKey === key && row.holdId !== holdId)) return "conflict";
+    const hold = rows.find((row) => row.holdId === holdId);
+    if (!hold) return noResult("not_found", confirmMessages.notFound, holdId);
+    if (hold.status !== "held") return hold.idempotencyKey === key ? resultFor(hold) : alreadyProcessed(hold);
+    if (hold.mcNumber === null) return noResult("invalid_request", confirmMessages.noMcNumber, holdId);
+
+    // Only the request whose UPDATE flips 'held' to 'confirming' may call LOAD_BOOK.
+    let claimed: HoldRow | undefined;
+    try {
+      [claimed] = await deps.twin.query(
+        sql`UPDATE holds SET status = 'confirming', idempotency_key = ${key}, updated_at = now()
+            WHERE hold_id = ${holdId} AND status = 'held' RETURNING *`,
+        holdRowSchema,
+      );
+    } catch (error) {
+      if (isUniqueViolation(error)) return "conflict";
+      throw error;
+    }
+    if (!claimed) {
+      const [current] = await deps.twin.query(sql`SELECT * FROM holds WHERE hold_id = ${holdId}`, holdRowSchema);
+      if (!current) return noResult("not_found", confirmMessages.notFound, holdId);
+      return current.idempotencyKey === key ? resultFor(current) : alreadyProcessed(current);
+    }
+
+    const attempt = await attemptBooking(
+      deps.tms,
+      { loadId: claimed.loadId, mcNumber: hold.mcNumber, agreedRate: claimed.agreedRate },
+      log,
+    );
+    const resolution = resolveBooking(attempt);
+    // Going back to 'held' clears the key so the operator can retry with any key.
+    const [resolved] = await deps.twin.query(
+      sql`UPDATE holds SET status = ${resolution.status}, booking_ref = ${resolution.bookingRef},
+            release_reason = ${resolution.reason}, idempotency_key = ${resolution.status === "held" ? null : key},
+            updated_at = now()
+          WHERE hold_id = ${holdId} AND status = 'confirming' RETURNING *`,
+      holdRowSchema,
+    );
+    if (!resolved) throw new Error("hold left 'confirming' before the booking outcome was stored");
+    return resultFor(resolved);
+  } catch (error) {
+    // A hold left in 'confirming' is never booked twice; an operator checks it by hand.
+    log.warn({ err: error, holdId }, "hold confirm unavailable");
+    return noResult("service_unavailable", confirmMessages.serviceUnavailable, holdId);
   }
 }
 
@@ -206,58 +286,9 @@ export function confirmHoldRoutes(deps: ConfirmHoldRouteDeps): FastifyPluginAsyn
       },
       async (request, reply) => {
         const { holdId } = request.params;
-        const key = request.headers["idempotency-key"];
-        const conflict = () => reply.code(409).send({ status: "conflict", message: confirmMessages.conflict });
-        try {
-          const rows = await deps.twin.query(
-            sql`SELECT * FROM holds WHERE hold_id = ${holdId} OR idempotency_key = ${key}`,
-            holdRowSchema,
-          );
-          if (rows.some((row) => row.idempotencyKey === key && row.holdId !== holdId)) return conflict();
-          const hold = rows.find((row) => row.holdId === holdId);
-          if (!hold) return noResult("not_found", confirmMessages.notFound, holdId);
-          if (hold.status !== "held") return hold.idempotencyKey === key ? resultFor(hold) : alreadyProcessed(hold);
-          if (hold.mcNumber === null) return noResult("invalid_request", confirmMessages.noMcNumber, holdId);
-
-          // Only the request whose UPDATE flips 'held' to 'confirming' may call LOAD_BOOK.
-          let claimed: HoldRow | undefined;
-          try {
-            [claimed] = await deps.twin.query(
-              sql`UPDATE holds SET status = 'confirming', idempotency_key = ${key}, updated_at = now()
-                  WHERE hold_id = ${holdId} AND status = 'held' RETURNING *`,
-              holdRowSchema,
-            );
-          } catch (error) {
-            if (isUniqueViolation(error)) return conflict();
-            throw error;
-          }
-          if (!claimed) {
-            const [current] = await deps.twin.query(sql`SELECT * FROM holds WHERE hold_id = ${holdId}`, holdRowSchema);
-            if (!current) return noResult("not_found", confirmMessages.notFound, holdId);
-            return current.idempotencyKey === key ? resultFor(current) : alreadyProcessed(current);
-          }
-
-          const attempt = await attemptBooking(
-            deps.tms,
-            { loadId: claimed.loadId, mcNumber: hold.mcNumber, agreedRate: claimed.agreedRate },
-            request.log,
-          );
-          const resolution = resolveBooking(attempt);
-          // Going back to 'held' clears the key so the operator can retry with any key.
-          const [resolved] = await deps.twin.query(
-            sql`UPDATE holds SET status = ${resolution.status}, booking_ref = ${resolution.bookingRef},
-                  release_reason = ${resolution.reason}, idempotency_key = ${resolution.status === "held" ? null : key},
-                  updated_at = now()
-                WHERE hold_id = ${holdId} AND status = 'confirming' RETURNING *`,
-            holdRowSchema,
-          );
-          if (!resolved) throw new Error("hold left 'confirming' before the booking outcome was stored");
-          return resultFor(resolved);
-        } catch (error) {
-          // A hold left in 'confirming' is never booked twice; an operator checks it by hand.
-          request.log.warn({ err: error, holdId }, "hold confirm unavailable");
-          return noResult("service_unavailable", confirmMessages.serviceUnavailable, holdId);
-        }
+        const result = await confirmBooking(deps, holdId, request.headers["idempotency-key"], request.log);
+        if (result === "conflict") return reply.code(409).send({ status: "conflict", message: confirmMessages.conflict });
+        return result;
       },
     );
   };

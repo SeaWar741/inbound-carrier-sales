@@ -67,7 +67,8 @@ export function summarize(tool: string, body: Fields, response: Fields): string 
     case "create_hold": {
       const load = text(body.loadId) ?? "a load";
       const rate = usd(body.agreedRate);
-      const head = response.status === "ok" ? `Holding load ${load}` : `Hold refused on load ${load}`;
+      const head =
+        response.status !== "ok" ? `Hold refused on load ${load}` : response.holdStatus === "booked" ? `Booked load ${load}` : `Holding load ${load}`;
       return rate ? `${head} at ${rate}` : head;
     }
     default:

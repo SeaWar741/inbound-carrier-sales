@@ -15,6 +15,7 @@ const wallRow = {
   fraud_blocked: "1",
   dollars_generated: "2300",
   margin_saved: "200",
+  autonomy: "human",
   calls: [
     {
       call_id: "call-b",
@@ -140,6 +141,7 @@ describe("GET /v1/operator/wall", () => {
 
     const wall = operatorWallResponse.parse(res.json());
     expect(wall.day).toBe("2026-09-29");
+    expect(wall.autonomy).toBe("human");
     expect(wall.counters).toEqual({ calls: 2, booked: 1, fraudBlocked: 1, dollarsGenerated: 2300, marginSaved: 200 });
     expect(wall.tmsHealth).toEqual({
       since: "2026-09-29T12:00:00.000Z",
@@ -217,5 +219,19 @@ describe("POST /v1/operator/calls/:callId/interventions", () => {
     expect((await intervene("call-b", { kind: "authorization", loadId: "LD00881", amountUsd: 0 })).statusCode).toBe(400);
     expect((await intervene("call-b", { kind: "authorization", loadId: "LD00881", amountUsd: 5000 })).statusCode).toBe(400);
     expect((await intervene("call-b", { kind: "whisper", amountUsd: 50 })).statusCode).toBe(400);
+  });
+});
+
+describe("PUT /v1/operator/settings/autonomy", () => {
+  const put = (body: object, key: string = testConfig.OPERATOR_API_KEY) =>
+    app.inject({ method: "PUT", url: "/v1/operator/settings/autonomy", headers: { "x-api-key": key }, payload: body });
+
+  it("switches the mode with the operator key only", async () => {
+    expect((await put({ mode: "autonomous" }, testConfig.AGENT_API_KEY)).statusCode).toBe(401);
+    statements.length = 0;
+    const res = await put({ mode: "autonomous" });
+    expect(res.json()).toEqual({ status: "ok", mode: "autonomous" });
+    expect(statements[0]).toContain("ON CONFLICT (key) DO UPDATE");
+    expect((await put({ mode: "yolo" })).statusCode).toBe(400);
   });
 });

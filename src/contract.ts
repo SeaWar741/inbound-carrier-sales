@@ -2,7 +2,7 @@ import { z } from "zod";
 import { maxAuthorizationUsd, otpDigits } from "./constants.ts";
 import { callRisks, callStages } from "./domain/call-stage.ts";
 import { cityInput, equipmentInput, loadIdInput, stateInput, zipInput } from "./infra/tms/codec.ts";
-import { holdStatuses } from "./infra/twin-schemas.ts";
+import { autonomyModes, holdStatuses } from "./infra/twin-schemas.ts";
 
 // Request and response schemas for the agent and operator APIs.
 
@@ -360,6 +360,8 @@ export const operatorWallResponse = z.object({
     marginSaved: z.number(),
   }),
   tmsHealth,
+  // "human": a rep confirms every hold. "autonomous": create_hold books right away.
+  autonomy: z.enum(autonomyModes),
   // Newest call first.
   calls: z.array(wallCall),
 });
@@ -380,3 +382,6 @@ export const createInterventionBody = z.discriminatedUnion("kind", [
 ]);
 export type CreateInterventionBody = z.infer<typeof createInterventionBody>;
 export const createInterventionResponse = z.object({ status: z.literal("recorded"), id: z.uuid() });
+
+export const setAutonomyBody = z.strictObject({ mode: z.enum(autonomyModes) });
+export const setAutonomyResponse = z.object({ status: z.literal("ok"), mode: z.enum(autonomyModes) });

@@ -8,6 +8,8 @@ import {
   interventionKinds,
   operatorWallResponse,
   operatorWallUnavailableResponse,
+  setAutonomyBody,
+  setAutonomyResponse,
   type OperatorWallResponse,
   type WallCall,
   type WallLane,
@@ -16,7 +18,7 @@ import { otpMaxAttempts, operatorTimeZone, wallEventsPerCall } from "../constant
 import { assessCall, otpLocked } from "../domain/call-stage.ts";
 import type { TmsHealthRecorder } from "../infra/tms/tms-health.ts";
 import { sql, type SqlStatement, type TwinClient } from "../infra/twin-client.ts";
-import { holdStatuses } from "../infra/twin-schemas.ts";
+import { autonomyModes, holdStatuses } from "../infra/twin-schemas.ts";
 
 export type OperatorRouteDeps = { twin: Pick<TwinClient, "query">; tmsHealth: Pick<TmsHealthRecorder, "snapshot"> };
 
@@ -63,6 +65,7 @@ export function wallQuery(): SqlStatement {
       (SELECT count(*) FROM today WHERE NOT eligible OR (NOT verified AND otp_attempts >= ${otpMaxAttempts})) AS fraud_blocked,
       (SELECT COALESCE(sum(agreed_rate), 0) FROM today_holds) AS dollars_generated,
       (SELECT COALESCE(sum(max_buy - agreed_rate), 0) FROM today_holds) AS margin_saved,
+      COALESCE((SELECT value FROM settings WHERE key = 'autonomy'), 'human') AS autonomy,
       COALESCE((SELECT json_agg(w ORDER BY w.created_at DESC) FROM wall w), '[]'::json) AS calls`;
 }
 
@@ -158,6 +161,7 @@ export const wallRow = z.object({
   fraud_blocked: count,
   dollars_generated: money,
   margin_saved: money,
+  autonomy: z.enum(autonomyModes),
   calls: z.array(callRow),
 });
 export type WallRow = z.output<typeof wallRow>;
@@ -243,6 +247,7 @@ export function operatorWallRoutes(deps: OperatorRouteDeps): FastifyPluginAsync 
               marginSaved: row.margin_saved,
             },
             tmsHealth: deps.tmsHealth.snapshot(),
+            autonomy: row.autonomy,
             calls: row.calls.map(toWallCall),
           };
           return wall;
@@ -281,6 +286,27 @@ export function operatorWallRoutes(deps: OperatorRouteDeps): FastifyPluginAsync 
         } catch (error) {
           request.log.warn({ err: error }, "intervention not recorded");
           return reply.code(503).send({ status: "service_unavailable", message: "The intervention was not recorded. Retry shortly." });
+        }
+      },
+    );
+
+    // One switch for every new call: in autonomous mode create_hold books without a rep.
+    app.put(
+      "/operator/settings/autonomy",
+      { schema: { body: setAutonomyBody, response: { 200: setAutonomyResponse, 503: operatorWallUnavailableResponse } } },
+      async (request, reply) => {
+        const { mode } = request.body;
+        try {
+          await deps.twin.query(
+            sql`INSERT INTO settings (key, value) VALUES ('autonomy', ${mode})
+                ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+            z.unknown(),
+          );
+          request.log.info({ mode }, "autonomy mode changed");
+          return { status: "ok" as const, mode };
+        } catch (error) {
+          request.log.warn({ err: error }, "autonomy mode not saved");
+          return reply.code(503).send({ status: "service_unavailable", message: "The mode was not saved. Retry shortly." });
         }
       },
     );
