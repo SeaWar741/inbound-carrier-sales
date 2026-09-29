@@ -54,6 +54,8 @@ type Hold = {
   release_reason: string | null;
   created_at: string;
   updated_at: string;
+  posted_rate?: string;
+  max_buy?: string;
 };
 
 const unique = (name: string) => new TwinError(`duplicate key value violates unique constraint "${name}"`);
@@ -97,9 +99,18 @@ function fakeTwin() {
       const loadId = text(/load_id = E'([^']*)'/, sql);
       rows.push(...holds.filter((h) => h.load_id === loadId && h.status !== "released"));
     } else if (sql.startsWith("INSERT INTO holds")) {
-      const [, callId = "", loadId = "", mc, rate = ""] = /VALUES \(E'([^']*)', E'([^']*)', (NULL|E'[^']*'), (\d+)\)/.exec(sql) ?? [];
+      const [, callId = "", loadId = "", mc, rate = "", postedRate, maxBuy] =
+        /VALUES \(E'([^']*)', E'([^']*)', (NULL|E'[^']*'), (\d+), (\d+), (\d+)\)/.exec(sql) ?? [];
       if (holds.some((h) => h.load_id === loadId && h.status !== "released")) throw unique("holds_one_active_per_load");
-      const hold = seeded({ hold_id: randomUUID(), call_id: callId, load_id: loadId, mc_number: nullable(mc), agreed_rate: rate });
+      const hold = seeded({
+        hold_id: randomUUID(),
+        call_id: callId,
+        load_id: loadId,
+        mc_number: nullable(mc),
+        agreed_rate: rate,
+        ...(postedRate !== undefined && { posted_rate: postedRate }),
+        ...(maxBuy !== undefined && { max_buy: maxBuy }),
+      });
       holds.push(hold);
       rows.push(hold);
     } else if (sql.startsWith("SELECT * FROM holds WHERE hold_id")) {
@@ -220,6 +231,9 @@ describe("hold routes", () => {
       expect(body.message).toMatch(/senior rep/);
       expect(body.message).not.toMatch(/\bbooked\b/i);
       expect(state.holds).toMatchObject([{ call_id: "call-a", load_id: "LD00881", mc_number: "123456", agreed_rate: "2300", status: "held" }]);
+      // The posted rate and max buy are stored with the hold for the operator; the agent never sees them.
+      expect(state.holds[0]).toMatchObject({ posted_rate: "2093", max_buy: "2538" });
+      expect(res.body).not.toMatch(/max_?buy|2538/i);
       expect(bookRequests()).toEqual([]);
     });
 

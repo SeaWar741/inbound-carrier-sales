@@ -45,12 +45,35 @@ export const tableDdl = {
     created_at timestamp NOT NULL DEFAULT now(),
     updated_at timestamp NOT NULL DEFAULT now()
   )`,
+  // One row per agent tool call, written after the response; the operator wall reads it.
+  call_events: `CREATE TABLE IF NOT EXISTS call_events (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    call_id text NOT NULL,
+    tool text NOT NULL,
+    summary text,
+    status text,
+    created_at timestamp NOT NULL DEFAULT now()
+  )`,
+  interventions: `CREATE TABLE IF NOT EXISTS interventions (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    call_id text NOT NULL,
+    kind text NOT NULL CHECK (kind IN ('whisper', 'authorization', 'listen', 'takeover', 'confirm', 'release')),
+    message text,
+    amount_usd int8 CHECK (amount_usd > 0),
+    created_at timestamp NOT NULL DEFAULT now()
+  )`,
 } as const;
 
 // Changes to tables that already exist; each statement is idempotent and runs on every bootstrap.
 export const migrations = [
   // Two calls racing to hold one load: the index, not a read-then-insert, picks the winner.
   "CREATE UNIQUE INDEX IF NOT EXISTS holds_one_active_per_load ON holds (load_id) WHERE status <> 'released'",
+  // The load's posted rate and max buy at decision time, for the operator only; never sent to the agent.
+  "ALTER TABLE offers ADD COLUMN IF NOT EXISTS posted_rate int8",
+  "ALTER TABLE offers ADD COLUMN IF NOT EXISTS max_buy int8",
+  "ALTER TABLE holds ADD COLUMN IF NOT EXISTS posted_rate int8",
+  "ALTER TABLE holds ADD COLUMN IF NOT EXISTS max_buy int8",
+  "CREATE INDEX IF NOT EXISTS call_events_by_call ON call_events (call_id, created_at)",
 ] as const;
 
 export const holdStatuses = ["held", "confirming", "booked", "booked_unconfirmed", "released"] as const;

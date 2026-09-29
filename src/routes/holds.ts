@@ -95,8 +95,8 @@ export function holdRoutes(deps: HoldRouteDeps): FastifyPluginAsync {
 
         try {
           const [hold] = await deps.twin.query(
-            sql`INSERT INTO holds (call_id, load_id, mc_number, agreed_rate)
-                VALUES (${callId}, ${loadId}, ${call.mc_number}, ${agreedRate}) RETURNING *`,
+            sql`INSERT INTO holds (call_id, load_id, mc_number, agreed_rate, posted_rate, max_buy)
+                VALUES (${callId}, ${loadId}, ${call.mc_number}, ${agreedRate}, ${load.rate}, ${load.maxBuy}) RETURNING *`,
             holdRowSchema,
           );
           if (!hold) throw new Error("hold insert returned no row");

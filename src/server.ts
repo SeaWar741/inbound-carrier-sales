@@ -8,6 +8,7 @@ import { OtpDeliveryClient } from "./infra/otp-delivery-client.ts";
 import { TmsClient } from "./infra/tms/tms-client.ts";
 import { TwinClient } from "./infra/twin-client.ts";
 import { requireApiKey } from "./plugins/auth.ts";
+import { recordCallEvents, type CallEventDeps } from "./plugins/call-events.ts";
 import { carrierRoutes } from "./routes/carriers.ts";
 import { healthRoutes } from "./routes/health.ts";
 import { confirmHoldRoutes, holdRoutes, releaseHoldRoutes } from "./routes/holds.ts";
@@ -20,7 +21,8 @@ export type RouteSets = {
   operatorRoutes: FastifyPluginAsync[];
 };
 
-export function buildServer(config: Config, routes: RouteSets) {
+// Call events are recorded only when a Twin is given, so route tests can leave them out.
+export function buildServer(config: Config, routes: RouteSets, callEvents?: CallEventDeps) {
   const app = Fastify({
     logger: { redact: ["req.headers[\"x-api-key\"]", "req.headers.authorization"] },
   });
@@ -33,6 +35,7 @@ export function buildServer(config: Config, routes: RouteSets) {
   app.register(
     async (scope) => {
       scope.addHook("onRequest", requireApiKey(config.AGENT_API_KEY));
+      if (callEvents) recordCallEvents(scope, callEvents);
       for (const plugin of routes.agentRoutes) await scope.register(plugin);
     },
     { prefix: "/v1" },
@@ -69,6 +72,6 @@ if (import.meta.main) {
       holdRoutes({ tms, twin }),
     ],
     operatorRoutes: [confirmHoldRoutes({ tms, twin }), releaseHoldRoutes({ twin })],
-  });
+  }, { twin });
   await app.listen({ host: "0.0.0.0", port: config.PORT });
 }

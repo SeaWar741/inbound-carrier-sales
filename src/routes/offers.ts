@@ -70,8 +70,9 @@ export function offerRoutes(deps: OfferRouteDeps): FastifyPluginAsync {
 
           const evaluation = evaluateOffer({ postedRate: load.rate, maxBuy: load.maxBuy, carrierAsk, round });
           await deps.twin.query(
-            sql`INSERT INTO offers (call_id, load_id, round, carrier_ask, decision, rate_to_say)
-                VALUES (${callId}, ${loadId}, ${round}, ${carrierAsk}, ${evaluation.decision}, ${evaluation.rateToSay})`,
+            sql`INSERT INTO offers (call_id, load_id, round, carrier_ask, decision, rate_to_say, posted_rate, max_buy)
+                VALUES (${callId}, ${loadId}, ${round}, ${carrierAsk}, ${evaluation.decision}, ${evaluation.rateToSay},
+                  ${load.rate}, ${load.maxBuy})`,
             z.unknown(),
           );
 
