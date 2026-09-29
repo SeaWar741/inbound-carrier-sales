@@ -9,6 +9,7 @@ cp .env.example .env   # fill in the values
 npm install
 npm run dev            # http://localhost:8080/healthz
 npm run typecheck && npm test
+npm run fake:tms       # local TMS on 127.0.0.1:9400 (FAKE_TMS_PORT) serving the OPEN loads of the board snapshot (TMS_BOARD_SNAPSHOT); point TMS_HOST/TMS_PORT at it
 ```
 
 Requires Node 25 (TypeScript runs natively, no build step).

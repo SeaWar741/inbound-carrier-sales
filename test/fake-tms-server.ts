@@ -1,4 +1,7 @@
+import { existsSync, readFileSync } from "node:fs";
 import net from "node:net";
+import { fileURLToPath } from "node:url";
+import { loadGetLineLength, loadQueryLineLength } from "../src/infra/tms/codec.ts";
 
 // Real lines captured from the live board on 2026-09-28, byte-exact: 246 bytes for LOAD_QUERY, 524 for LOAD_GET.
 export const sampleQueryLines = [
@@ -48,8 +51,117 @@ function parseRequest(line: string): Map<string, string> {
 
 const errorLine = (code: string, message: string) => `ERR|CODE:${code}|MSG:${message}\r\n`;
 
+// A board record keeps the padded wire values in wire field order, as captured in the snapshot.
+export type BoardRecord = Record<string, string>;
+
+const summaryKeys = [
+  "LOAD_ID",
+  "ORIG_CITY",
+  "ORIG_STATE",
+  "ORIG_ZIP",
+  "DEST_CITY",
+  "DEST_STATE",
+  "DEST_ZIP",
+  "PICKUP_DT",
+  "EQTYPE",
+  "RATE",
+  "MILES",
+  "STATUS",
+] as const;
+
+// Request filter key to board field; PICKUP_DATE (YYYYMMDD) is matched as a prefix of PICKUP_DT.
+const exactFilters = ["ORIG_CITY", "ORIG_STATE", "ORIG_ZIP", "DEST_CITY", "DEST_STATE", "DEST_ZIP", "EQTYPE"] as const;
+
+const summaryLine = (record: BoardRecord) => summaryKeys.map((key) => `${key}:${record[key] ?? ""}`).join("|");
+const detailLine = (record: BoardRecord) =>
+  Object.entries(record)
+    .map(([key, value]) => `${key}:${value}`)
+    .join("|");
+const trimmed = (value: string | undefined) => (value ?? "").trim().toUpperCase();
+
+// In-memory board served by the standalone fake. Line widths are checked up front so a bad
+// snapshot fails at startup instead of as malformed responses.
+export class FakeBoard {
+  readonly #records = new Map<string, BoardRecord>();
+  #nextBookingRef = 1;
+
+  constructor(records: BoardRecord[]) {
+    for (const record of records) {
+      const loadId = trimmed(record.LOAD_ID);
+      const query = summaryLine(record).length;
+      const get = detailLine(record).length;
+      if (query !== loadQueryLineLength || get !== loadGetLineLength) {
+        throw new Error(
+          `Load ${loadId} renders LOAD_QUERY ${query} bytes (expected ${loadQueryLineLength}) and LOAD_GET ${get} bytes (expected ${loadGetLineLength})`,
+        );
+      }
+      this.#records.set(loadId, { ...record });
+    }
+  }
+
+  get size(): number {
+    return this.#records.size;
+  }
+
+  query(fields: Map<string, string>): string[] {
+    const limit = Number(fields.get("MAX_RESULTS") ?? "10");
+    const pickupDate = fields.get("PICKUP_DATE")?.trim();
+    return [...this.#records.values()]
+      .filter((record) => trimmed(record.STATUS) === "OPEN")
+      .filter((record) => exactFilters.every((key) => !fields.has(key) || trimmed(record[key]) === trimmed(fields.get(key))))
+      .filter((record) => pickupDate === undefined || (record.PICKUP_DT ?? "").startsWith(pickupDate))
+      .slice(0, limit)
+      .map(summaryLine);
+  }
+
+  get(loadId: string): string | undefined {
+    const record = this.#records.get(trimmed(loadId));
+    return record && detailLine(record);
+  }
+
+  // Error codes follow the LOAD_BOOK transcripts in the TMS handbook.
+  book(fields: Map<string, string>): { line: string } | { error: string } {
+    const loadId = fields.get("LOAD_ID");
+    const rate = fields.get("AGREED_RATE");
+    if (!loadId || !fields.get("MC_NUM") || !rate) return { error: errorLine("MISSING_FIELD", "missing required field") };
+    const record = this.#records.get(trimmed(loadId));
+    if (!record) return { error: errorLine("UNKNOWN_LOAD", "load not found") };
+    if (!/^\d+$/.test(rate) || Number(rate) <= 0) return { error: errorLine("INVALID_RATE", "rate rejected") };
+    if (trimmed(record.STATUS) !== "OPEN") return { error: errorLine("ALREADY_BOOKED", "load not available") };
+
+    // Same padded width as OPEN, so booked loads still render byte-exact LOAD_GET lines.
+    record.STATUS = "BOOKED".padEnd((record.STATUS ?? "").length);
+    const bookingRef = `BR${String(this.#nextBookingRef++).padStart(14, "0")}`;
+    const timestamp = new Date().toISOString().replace(/\D/g, "").slice(0, 14);
+    return { line: `LOAD_ID:${trimmed(loadId)}|BOOKING_REF:${bookingRef}|STATUS:BOOKED  |TIMESTAMP:${timestamp}` };
+  }
+}
+
+function boardResponse(board: FakeBoard, fields: Map<string, string>): { lines: string[]; error?: string } | undefined {
+  switch (fields.get("CMD")) {
+    case "LOAD_QUERY":
+      return { lines: board.query(fields) };
+    case "LOAD_GET": {
+      const line = board.get(fields.get("LOAD_ID") ?? "");
+      return line ? { lines: [line] } : { lines: [], error: errorLine("NOT_FOUND", "Load not found") };
+    }
+    case "LOAD_BOOK": {
+      const result = board.book(fields);
+      return "error" in result ? { lines: [], error: result.error } : { lines: [result.line] };
+    }
+    default:
+      return undefined;
+  }
+}
+
 // Healthy response split into record lines and terminator so faults can reuse the pieces.
-function healthyResponse(fields: Map<string, string>, fieldCount: number): { lines: string[]; error?: string } {
+function healthyResponse(
+  fields: Map<string, string>,
+  fieldCount: number,
+  board?: FakeBoard,
+): { lines: string[]; error?: string } {
+  const fromBoard = board && boardResponse(board, fields);
+  if (fromBoard) return fromBoard;
   switch (fields.get("CMD")) {
     case "DEBUG_ECHO":
       return { lines: [`ECHO|AUTH:OK|FIELDS_PARSED:${fieldCount}|MSG:${fields.get("MSG") ?? ""}`] };
@@ -69,7 +181,13 @@ function healthyResponse(fields: Map<string, string>, fieldCount: number): { lin
 }
 
 // Each connection consumes the next scripted behavior; once the script is empty it answers "ok".
-export async function startFakeTms(options: { token: string; script?: FakeBehavior[] }): Promise<FakeTms> {
+// Without a board it serves the fixed sample lines; the port defaults to an ephemeral one.
+export async function startFakeTms(options: {
+  token: string;
+  script?: FakeBehavior[];
+  board?: FakeBoard;
+  port?: number;
+}): Promise<FakeTms> {
   const script = [...(options.script ?? [])];
   const requests: string[] = [];
   const sockets = new Set<net.Socket>();
@@ -83,7 +201,7 @@ export async function startFakeTms(options: { token: string; script?: FakeBehavi
       socket.end(errorLine("AUTH_FAILED", "Invalid or missing auth token"));
       return;
     }
-    const healthy = healthyResponse(fields, requestLine.split("|").length);
+    const healthy = healthyResponse(fields, requestLine.split("|").length, options.board);
     const body = healthy.error ?? healthy.lines.map((line) => `${line}\r\n`).join("") + "END\r\n";
 
     if (typeof behavior === "object") {
@@ -133,7 +251,7 @@ export async function startFakeTms(options: { token: string; script?: FakeBehavi
     });
   });
 
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  await new Promise<void>((resolve) => server.listen(options.port ?? 0, "127.0.0.1", resolve));
   const address = server.address();
   if (address === null || typeof address === "string") throw new Error("Fake TMS has no TCP address");
 
@@ -146,4 +264,20 @@ export async function startFakeTms(options: { token: string; script?: FakeBehavi
         server.close(() => resolve());
       }),
   };
+}
+
+const defaultSnapshotPath = fileURLToPath(new URL("../../docs/raw/tms-board-snapshot-2026-09-28.json", import.meta.url));
+
+// Standalone local TMS: `npm run fake:tms`, serving the OPEN loads of the board snapshot.
+if (import.meta.main) {
+  const token = process.env.TMS_TOKEN;
+  if (!token) throw new Error("TMS_TOKEN is required");
+  const snapshotPath = process.env.TMS_BOARD_SNAPSHOT ?? (existsSync(defaultSnapshotPath) ? defaultSnapshotPath : undefined);
+  if (!snapshotPath) throw new Error(`TMS_BOARD_SNAPSHOT is required (no snapshot at ${defaultSnapshotPath})`);
+  const port = Number(process.env.FAKE_TMS_PORT ?? "9400");
+
+  const records = JSON.parse(readFileSync(snapshotPath, "utf8")) as BoardRecord[];
+  const board = new FakeBoard(records.filter((record) => trimmed(record.STATUS) === "OPEN"));
+  const fake = await startFakeTms({ token, board, port });
+  console.log(`Fake TMS listening on 127.0.0.1:${fake.port} with ${board.size} open loads from ${snapshotPath}`);
 }
