@@ -6,6 +6,9 @@ export const concessionSchedule = [0.35, 0.6, 0.8] as const;
 // Counters round down to $25 so the agent never speaks cents and never exceeds the schedule.
 export const counterRoundingUsd = 25;
 
+// Load search: a voice pitch cannot hold more than ~3 options before the caller loses track.
+export const loadsPitchedPerSearch = 3;
+
 // OTP: NIST SP 800-63B allows up to 10 minutes; 5 is enough to read an SMS on a call.
 export const otpDigits = 6;
 export const otpTtlSeconds = 300;

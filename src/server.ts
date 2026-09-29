@@ -3,10 +3,13 @@ import { serializerCompiler, validatorCompiler } from "fastify-type-provider-zod
 import { loadConfig, type Config } from "./config.ts";
 import { CensusClient } from "./infra/census-client.ts";
 import { FmcsaClient } from "./infra/fmcsa-client.ts";
+import { TmsClient } from "./infra/tms/tms-client.ts";
 import { TwinClient } from "./infra/twin-client.ts";
 import { requireApiKey } from "./plugins/auth.ts";
 import { carrierRoutes } from "./routes/carriers.ts";
 import { healthRoutes } from "./routes/health.ts";
+import { loadRoutes } from "./routes/loads.ts";
+import { offerRoutes } from "./routes/offers.ts";
 
 export type RouteSets = {
   agentRoutes: FastifyPluginAsync[];
@@ -48,8 +51,9 @@ if (import.meta.main) {
   const fmcsa = new FmcsaClient({ webKey: config.FMCSA_API_KEY });
   const census = new CensusClient();
   const twin = new TwinClient({ apiKey: config.HAPPYROBOT_API_KEY });
+  const tms = new TmsClient({ host: config.TMS_HOST, port: config.TMS_PORT, token: config.TMS_TOKEN });
   const app = buildServer(config, {
-    agentRoutes: [carrierRoutes({ fmcsa, census, twin })],
+    agentRoutes: [carrierRoutes({ fmcsa, census, twin }), loadRoutes({ tms, twin }), offerRoutes({ tms, twin })],
     operatorRoutes: [],
   });
   await app.listen({ host: "0.0.0.0", port: config.PORT });

@@ -1,0 +1,328 @@
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Config } from "../src/config.ts";
+import type { LoadDetail, LoadSummary } from "../src/infra/tms/codec.ts";
+import { TmsBusinessError } from "../src/infra/tms/errors.ts";
+import { TmsClient } from "../src/infra/tms/tms-client.ts";
+import { TwinClient } from "../src/infra/twin-client.ts";
+import { loadRoutes, type LoadRouteDeps } from "../src/routes/loads.ts";
+import { offerRoutes } from "../src/routes/offers.ts";
+import { buildServer } from "../src/server.ts";
+import { startFakeTms, type FakeBehavior, type FakeTms } from "./fake-tms-server.ts";
+
+const config: Config = {
+  PORT: 0,
+  TMS_HOST: "127.0.0.1",
+  TMS_PORT: 1,
+  TMS_TOKEN: "fake-tms-token",
+  FMCSA_API_KEY: "f",
+  HAPPYROBOT_API_KEY: "h",
+  AGENT_API_KEY: "agent-key-0123456789",
+  OPERATOR_API_KEY: "operator-key-0123456789",
+  OTP_DELIVERY_MODE: "demo",
+  OTP_DEMO_EMAIL: "demo@example.com",
+  OTP_DEMO_PHONE: "+15555550100",
+};
+
+// Max buys of the fake board's loads (LD00881, LD00848): no response may ever carry them.
+const secretMaxBuys = ["2538", "7684"];
+const expectNoMaxBuy = (body: string) => {
+  expect(body).not.toMatch(/max_?buy/i);
+  for (const value of secretMaxBuys) expect(body).not.toContain(value);
+};
+
+const jsonResponse = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+
+// In-memory stand-in for the Twin tables, answering the statements the routes send.
+const verifiedCalls = new Map<string, boolean>();
+let offers: { callId: string; loadId: string; round: number; carrierAsk: number; decision: string; rateToSay: number | null }[] = [];
+const sqlLog: string[] = [];
+
+const twinFetch = vi.fn<typeof fetch>(async (_input, init) => {
+  const body: unknown = JSON.parse(typeof init?.body === "string" ? init.body : "{}");
+  const text = typeof body === "object" && body !== null && "sql" in body && typeof body.sql === "string" ? body.sql : "";
+  sqlLog.push(text);
+  const rows = (list: object[]) => jsonResponse({ command: "SELECT", rowCount: list.length, rows: list, truncated: false });
+
+  const insert = /INSERT INTO offers[\s\S]*VALUES \('([^']*)', '([^']*)', (\d+), (\d+), '(\w+)', (NULL|\d+)\)/.exec(text);
+  if (insert) {
+    const [, callId = "", loadId = "", round, carrierAsk, decision = "", rate] = insert;
+    const row = { callId, loadId, round: Number(round), carrierAsk: Number(carrierAsk), decision, rateToSay: rate === "NULL" ? null : Number(rate) };
+    if (offers.some((o) => o.callId === callId && o.loadId === loadId && o.round === row.round)) {
+      return jsonResponse({ message: 'duplicate key value violates unique constraint "offers_call_id_load_id_round_key"' }, 400);
+    }
+    offers.push(row);
+    return jsonResponse({ command: "INSERT", rowCount: 1, rows: [], truncated: false });
+  }
+  const callState = /FROM offers o WHERE o\.call_id = c\.call_id AND o\.load_id = '([^']*)'[\s\S]*WHERE c\.call_id = '([^']*)'/.exec(text);
+  if (callState) {
+    const [, loadId, callId = ""] = callState;
+    const verified = verifiedCalls.get(callId);
+    if (verified === undefined) return rows([]);
+    const prior = offers.filter((o) => o.callId === callId && o.loadId === loadId).length;
+    return rows([{ verified, prior_rounds: String(prior) }]);
+  }
+  const verifiedQuery = /SELECT verified FROM calls WHERE call_id = '([^']*)'/.exec(text);
+  if (verifiedQuery) {
+    const verified = verifiedCalls.get(verifiedQuery[1] ?? "");
+    return rows(verified === undefined ? [] : [{ verified }]);
+  }
+  return jsonResponse({ message: `unexpected SQL: ${text}` }, 400);
+});
+
+const twin = new TwinClient({ apiKey: "k", fetch: twinFetch });
+
+const tmsClient = (fake: FakeTms) =>
+  new TmsClient({ host: "127.0.0.1", port: fake.port, token: config.TMS_TOKEN, maxAttempts: 1, attemptDeadlineMs: 500 });
+
+function serverWith(tms: LoadRouteDeps["tms"]) {
+  return buildServer(config, { agentRoutes: [loadRoutes({ tms, twin }), offerRoutes({ tms, twin })], operatorRoutes: [] });
+}
+
+let fake: FakeTms;
+let app: ReturnType<typeof serverWith>;
+beforeAll(async () => {
+  fake = await startFakeTms({ token: config.TMS_TOKEN });
+  app = serverWith(tmsClient(fake));
+});
+afterAll(async () => {
+  await app.close();
+  await fake.close();
+});
+
+beforeEach(() => {
+  verifiedCalls.clear();
+  verifiedCalls.set("call-ok", true);
+  verifiedCalls.set("call-unverified", false);
+  offers = [];
+  sqlLog.length = 0;
+  twinFetch.mockClear();
+});
+
+const post = (url: string, payload: object, target = app, key = config.AGENT_API_KEY) =>
+  target.inject({ method: "POST", url, headers: { "x-api-key": key }, payload });
+const search = (payload: object, target = app) => post("/v1/loads/search", payload, target);
+const evaluate = (payload: object, target = app) => post("/v1/offers/evaluate", payload, target);
+
+async function withFake<T>(script: FakeBehavior[], run: (target: typeof app, tms: FakeTms) => Promise<T>): Promise<T> {
+  const scripted = await startFakeTms({ token: config.TMS_TOKEN, script });
+  const target = serverWith(tmsClient(scripted));
+  try {
+    return await run(target, scripted);
+  } finally {
+    await target.close();
+    await scripted.close();
+  }
+}
+
+const summary = (loadId: string, status: string): LoadSummary => ({
+  loadId,
+  origCity: "Savannah",
+  origState: "GA",
+  origZip: "31401",
+  destCity: "Wichita",
+  destState: "KS",
+  destZip: "67202",
+  pickupDateTime: "20261003141300",
+  equipmentType: "DRY_VAN",
+  rate: 2000,
+  miles: 997,
+  status,
+});
+const detail = (loadId: string, status: string): LoadDetail => ({
+  ...summary(loadId, status),
+  deliveryDateTime: "20261006111300",
+  weight: 29831,
+  commodity: "Frozen Goods",
+  pieces: 25,
+  dims: "41ft x 8ft x 9ft",
+  notes: "",
+  maxBuy: 2538,
+});
+
+describe("POST /v1/loads/search", () => {
+  it("pitches open loads with delivery details and never the max buy", async () => {
+    const res = await search({ callId: "call-ok", origin: { city: " Savannah ", state: "ga" }, equipmentType: "dry van", pickupDate: "2026-10-03" });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body).toMatchObject({ status: "ok", message: "I found 2 open loads that fit." });
+    expect(body.loads[0]).toEqual({
+      loadId: "LD00881",
+      origin: "Savannah, GA 31401",
+      destination: "Wichita, KS 67202",
+      pickupDateTime: "2026-10-03 14:13",
+      deliveryDateTime: "2026-10-06 11:13",
+      equipmentType: "DRY_VAN",
+      loadboardRate: 2093,
+      miles: 997,
+      weight: 29831,
+      commodity: "Frozen Goods",
+      pieces: 25,
+      dims: "41ft x 8ft x 9ft",
+      notes: "",
+    });
+    expectNoMaxBuy(res.body);
+    const [query] = fake.requests.slice(-3);
+    expect(query).toContain("CMD:LOAD_QUERY");
+    expect(query).toContain("ORIG_CITY:Savannah|ORIG_STATE:GA|EQTYPE:DRY_VAN|PICKUP_DATE:20261003");
+  });
+
+  it("refuses an unverified or unknown call without touching the TMS", async () => {
+    const before = fake.requests.length;
+    for (const callId of ["call-unverified", "call-unknown"]) {
+      const res = await search({ callId, origin: { state: "GA" }, equipmentType: "REEFER" });
+      expect(res.json()).toMatchObject({ status: "not_verified", loads: [] });
+    }
+    expect(fake.requests.length).toBe(before);
+  });
+
+  it("keeps only OPEN loads, caps the pitch at 3, and fetches details only for those", async () => {
+    const statuses = ["BOOKED", "OPEN", "COVERED", "OPEN", "OPEN", "OPEN", "open"];
+    const tms = {
+      queryLoads: vi.fn(async () => statuses.map((status, i) => summary(`LD${i}`, status))),
+      getLoad: vi.fn(async (loadId: string) => detail(loadId, loadId === "LD3" ? "BOOKED" : "OPEN")),
+    };
+    const target = serverWith(tms);
+    const res = await search({ callId: "call-ok", origin: { zip: "31401" }, equipmentType: "DRY_VAN" }, target);
+    await target.close();
+    expect(tms.getLoad.mock.calls.map(([id]) => id)).toEqual(["LD1", "LD3", "LD4"]);
+    // LD3 changed status between query and detail, so it is dropped rather than pitched.
+    expect(res.json().loads.map((l: { loadId: string }) => l.loadId)).toEqual(["LD1", "LD4"]);
+    expectNoMaxBuy(res.body);
+  });
+
+  it("drops a load the TMS no longer finds and answers no_loads when none are open", async () => {
+    const tms = {
+      queryLoads: vi.fn(async () => [summary("LD1", "OPEN"), summary("LD2", "BOOKED")]),
+      getLoad: vi.fn(async () => {
+        throw new TmsBusinessError("LOAD_GET", 1, false, "NOT_FOUND", "Load not found");
+      }),
+    };
+    const target = serverWith(tms);
+    const res = await search({ callId: "call-ok", origin: { state: "GA" }, equipmentType: "DRY_VAN" }, target);
+    await target.close();
+    expect(res.json()).toEqual({ status: "no_loads", message: "I don't have any open loads on that lane right now.", loads: [] });
+  });
+
+  it("answers tms_unavailable when the board does not respond", async () => {
+    const res = await withFake(["empty-close"], (target) =>
+      search({ callId: "call-ok", origin: { state: "GA" }, equipmentType: "DRY_VAN" }, target),
+    );
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ status: "tms_unavailable", loads: [] });
+    expect(res.body).not.toContain(config.TMS_TOKEN);
+  });
+
+  it("answers invalid_request with HTTP 200 for a malformed body", async () => {
+    for (const payload of [
+      { callId: "call-ok", origin: {}, equipmentType: "DRY_VAN" },
+      { callId: "call-ok", origin: { state: "Georgia" }, equipmentType: "DRY_VAN" },
+      { callId: "call-ok", origin: { state: "GA" }, equipmentType: "SPACESHIP" },
+      { callId: "call-ok", origin: { state: "GA" }, equipmentType: "DRY_VAN", pickupDate: "2026-02-30" },
+    ]) {
+      const res = await search(payload);
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({ status: "invalid_request", loads: [] });
+    }
+  });
+
+  it("stays behind the agent key", async () => {
+    const res = await post("/v1/loads/search", { callId: "call-ok", origin: { state: "GA" }, equipmentType: "DRY_VAN" }, app, config.OPERATOR_API_KEY);
+    expect(res.statusCode).toBe(401);
+  });
+});
+
+describe("POST /v1/offers/evaluate", () => {
+  // LD00881: posted 2093, max buy 2538, gap 445 -> scheduled counters 2225 / 2350 / 2425.
+  it("counts rounds server-side, follows the schedule, and rejects after round 3", async () => {
+    const responses = [];
+    for (let i = 0; i < 4; i++) {
+      const res = await evaluate({ callId: "call-ok", loadId: "ld00881", carrierAsk: 3000, round: 1 });
+      expectNoMaxBuy(res.body);
+      responses.push(res.json());
+    }
+    expect(responses.map((r) => [r.decision, r.rateToSay, r.round, r.isFinalRound])).toEqual([
+      ["counter", 2225, 1, false],
+      ["counter", 2350, 2, false],
+      ["counter", 2425, 3, true],
+      ["reject", null, 4, true],
+    ]);
+    expect(responses[2].message).toBe("$2,425 is the best I can do on this load.");
+    expect(offers.map((o) => [o.round, o.decision, o.rateToSay])).toEqual([
+      [1, "counter", 2225],
+      [2, "counter", 2350],
+      [3, "counter", 2425],
+      [4, "reject", null],
+    ]);
+  });
+
+  it("accepts at the carrier's ask and never says more than asked", async () => {
+    const low = (await evaluate({ callId: "call-ok", loadId: "LD00881", carrierAsk: 1950 })).json();
+    expect(low).toEqual({
+      status: "ok",
+      message: "$1,950 works for us on this load.",
+      decision: "accept",
+      rateToSay: 1950,
+      round: 1,
+      isFinalRound: false,
+    });
+    const between = (await evaluate({ callId: "call-ok", loadId: "LD00881", carrierAsk: 2300 })).json();
+    expect(between).toMatchObject({ decision: "accept", rateToSay: 2300, round: 2 });
+  });
+
+  it("keeps rounds separate per load", async () => {
+    await evaluate({ callId: "call-ok", loadId: "LD00881", carrierAsk: 3000 });
+    const other = (await evaluate({ callId: "call-ok", loadId: "LD00848", carrierAsk: 9000 })).json();
+    expect(other).toMatchObject({ decision: "counter", round: 1 });
+    expect(other.rateToSay).toBeLessThanOrEqual(7684);
+  });
+
+  it("refuses an unverified call without touching the TMS or recording an offer", async () => {
+    const before = fake.requests.length;
+    for (const callId of ["call-unverified", "call-unknown"]) {
+      const res = await evaluate({ callId, loadId: "LD00881", carrierAsk: 2000 });
+      expect(res.json()).toMatchObject({ status: "not_verified", decision: null, rateToSay: null });
+    }
+    expect(fake.requests.length).toBe(before);
+    expect(offers).toEqual([]);
+  });
+
+  it("answers load_unavailable for a load that is not OPEN or not found", async () => {
+    const tms = { queryLoads: vi.fn(async () => []), getLoad: vi.fn(async (id: string) => detail(id, "BOOKED")) };
+    const target = serverWith(tms);
+    const booked = (await evaluate({ callId: "call-ok", loadId: "LD1", carrierAsk: 2000 }, target)).json();
+    await target.close();
+    expect(booked).toMatchObject({ status: "load_unavailable", decision: null });
+    const missing = (await evaluate({ callId: "call-ok", loadId: "LD99999", carrierAsk: 2000 })).json();
+    expect(missing).toMatchObject({ status: "load_unavailable", decision: null });
+    expect(offers).toEqual([]);
+  });
+
+  it("answers tms_unavailable when the board does not respond", async () => {
+    const res = await withFake(["silence"], (target) => evaluate({ callId: "call-ok", loadId: "LD00881", carrierAsk: 2000 }, target));
+    expect(res.json()).toMatchObject({ status: "tms_unavailable", decision: null });
+    expect(offers).toEqual([]);
+  });
+
+  it("answers retry when a concurrent request already took the round", async () => {
+    twinFetch.mockImplementationOnce(async () =>
+      jsonResponse({ command: "SELECT", rowCount: 1, rows: [{ verified: true, prior_rounds: "0" }], truncated: false }),
+    );
+    offers.push({ callId: "call-ok", loadId: "LD00881", round: 1, carrierAsk: 2600, decision: "counter", rateToSay: 2225 });
+    const res = (await evaluate({ callId: "call-ok", loadId: "LD00881", carrierAsk: 2600 })).json();
+    expect(res).toMatchObject({ status: "retry", decision: null, rateToSay: null });
+  });
+
+  it("answers invalid_request with HTTP 200 for a malformed body", async () => {
+    for (const payload of [
+      { callId: "call-ok", loadId: "LD00881", carrierAsk: 0 },
+      { callId: "call-ok", loadId: "LD00881", carrierAsk: 2150.5 },
+      { callId: "call-ok", loadId: "LD-0|881", carrierAsk: 2150 },
+      { callId: "call-ok", carrierAsk: 2150 },
+    ]) {
+      const res = await evaluate(payload);
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({ status: "invalid_request", decision: null });
+    }
+  });
+});
