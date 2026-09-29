@@ -5,7 +5,7 @@ import { LuArrowUpRight, LuChevronLeft, LuInbox, LuChevronRight, LuHand, LuPacka
 import { Badge, CarrierStageDot, CarrierStagePill } from "@/components/inbox/stage-pill";
 import { PulseDot } from "@/components/pulse-dot";
 import type { inboxTabs, TowerCarrier, TowerCarriers } from "@/lib/contracts";
-import { carrierName, formatTimeAgo, lastSummary } from "@/lib/format";
+import { callSummary, carrierName, formatTimeAgo } from "@/lib/format";
 
 export type InboxTab = (typeof inboxTabs)[number];
 
@@ -67,7 +67,7 @@ function CarrierRow({
   onSelect: () => void;
   buttonRef: (node: HTMLButtonElement | null) => void;
 }) {
-  const summary = lastSummary(carrier.latestCall);
+  const summary = callSummary(carrier.latestCall);
   const numbers = [carrier.mcNumber && `MC ${carrier.mcNumber}`, carrier.dotNumber && `DOT ${carrier.dotNumber}`].filter(Boolean).join(" · ");
   const settled = carrier.carrierStage === "lost" || carrier.carrierStage === "arrived";
 

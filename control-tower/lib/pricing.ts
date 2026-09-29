@@ -97,3 +97,54 @@ export function carrierPricing(calls: PricedCall[]): CarrierPricing {
     avgRoundsToAgree: average(booked.flatMap((b) => b.round ?? [])),
   };
 }
+
+export type BreakdownLine = { usd: number; perMile: number | null };
+
+export type PricingBreakdown = {
+  posted: BreakdownLine;
+  ceiling: BreakdownLine;
+  // Ceiling minus posted: the room there is to pay over the approximate cost.
+  headroom: number;
+  // The carrier's first ask on the load and the round it came in; null without a recorded offer.
+  openingAsk: { round: number; usd: number } | null;
+  // Every counter we said, oldest first; rejects without a number are left out.
+  counters: { round: number; usd: number; at: string }[];
+  // The agreed rate, or the carrier's latest ask while nothing is agreed.
+  final: BreakdownLine & { kind: "agreed" | "ask" };
+  // Final minus posted: what closing costs over the approximate cost.
+  overPosted: number;
+  // Ceiling minus final, in dollars and as a share of the ceiling; negative over the ceiling.
+  margin: { usd: number; pct: number };
+  // Margin over headroom, 0..100 (below 0 over the ceiling); null when there is no headroom.
+  headroomSharePct: number | null;
+};
+
+// The receipt of a load's pricing, top to bottom: cost, ceiling, the negotiation, and what we kept.
+export function pricingBreakdown(input: {
+  postedRate: number;
+  maxBuy: number;
+  miles: number | null | undefined;
+  // Every recorded offer on the load, oldest first.
+  path: Pick<WallOffer, "round" | "carrierAsk" | "rateToSay" | "createdAt">[];
+  agreedRate: number | null;
+  latestAsk: number;
+}): PricingBreakdown {
+  const { postedRate, maxBuy, miles, path, agreedRate, latestAsk } = input;
+  const line = (usd: number): BreakdownLine => ({ usd, perMile: perMile(usd, miles) });
+  const headroom = maxBuy - postedRate;
+  const first = path[0];
+  const finalUsd = agreedRate ?? latestAsk;
+  const marginUsd = maxBuy - finalUsd;
+  const margin = { usd: marginUsd, pct: maxBuy > 0 ? (marginUsd / maxBuy) * 100 : 0 };
+  return {
+    posted: line(postedRate),
+    ceiling: line(maxBuy),
+    headroom,
+    openingAsk: first ? { round: first.round, usd: first.carrierAsk } : null,
+    counters: path.flatMap((offer) => (offer.rateToSay === null ? [] : [{ round: offer.round, usd: offer.rateToSay, at: offer.createdAt }])),
+    final: { kind: agreedRate !== null ? "agreed" : "ask", ...line(finalUsd) },
+    overPosted: finalUsd - postedRate,
+    margin,
+    headroomSharePct: headroom > 0 ? (margin.usd / headroom) * 100 : null,
+  };
+}

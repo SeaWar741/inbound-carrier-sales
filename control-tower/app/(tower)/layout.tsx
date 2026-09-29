@@ -54,7 +54,7 @@ export default function TowerLayout({ children }: { children: React.ReactNode })
         </nav>
 
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          <header className="flex shrink-0 items-center gap-6 border-b border-line bg-panel px-4 py-2.5">
+          <header className="flex min-w-0 shrink-0 items-center gap-6 border-b border-line bg-panel px-4 py-2.5">
             <div className="flex items-center gap-3">
               <span className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide">
                 {stale ? <span className="inline-flex size-2 rounded-full bg-warn" aria-hidden /> : <PulseDot tone="ok" />}
@@ -62,7 +62,7 @@ export default function TowerLayout({ children }: { children: React.ReactNode })
               </span>
               {wall && <span className="tabular text-xs text-fg-muted">{formatDay(wall.day)}</span>}
             </div>
-            <div className="ml-auto flex items-center gap-6">
+            <div className="ml-auto flex min-w-0 items-center gap-4">
               <AutonomySwitch mode={wall?.autonomy ?? null} />
               <TmsHealth health={wall?.tmsHealth ?? null} />
             </div>

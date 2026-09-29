@@ -4,7 +4,7 @@ import { LuChevronLeft, LuChevronRight } from "react-icons/lu";
 import { motion, useReducedMotion } from "motion/react";
 import { finalRound, type WallOffer } from "@/lib/contracts";
 import { formatClock, formatPercent, formatPerMile, formatSignedUsd, formatUsd, outcomeLabel } from "@/lib/format";
-import { marginKept, perMile, spreadVsPosted, type LoadOutcome } from "@/lib/pricing";
+import { pricingBreakdown, type LoadOutcome } from "@/lib/pricing";
 
 // Position on a min-to-max scale as a percentage, clamped to the track.
 function percentOf(value: number, min: number, max: number): number {
@@ -24,25 +24,32 @@ function Pinned({ at, className, children }: { at: number; className: string; ch
   );
 }
 
-// One key/value cell of the pricing grid: a label, the amount, and its $/mi under it when known.
-function Figure({
+// One line of the pricing receipt: a short muted label, the amount right-aligned, and a note
+// (usually $/mi) in its own right-aligned column so amounts line up down the card.
+function Line({
   label,
   value,
   tone = "text-fg",
-  sub,
-  className = "",
+  note,
+  total = false,
+  hint,
 }: {
   label: string;
   value: string;
   tone?: string;
-  sub?: React.ReactNode;
-  className?: string;
+  note?: string | null;
+  total?: boolean;
+  hint?: string;
 }) {
   return (
-    <div className={`min-w-0 ${className}`}>
-      <div className="truncate text-fg-muted">{label}</div>
-      <div className={`tabular truncate font-semibold ${tone}`}>{value}</div>
-      {sub && <div className="tabular truncate text-[11px] text-fg-faint">{sub}</div>}
+    <div
+      className={`grid grid-cols-[minmax(0,1fr)_auto_4.5rem] items-baseline gap-x-3 ${total ? "mt-1 border-t border-line-strong pt-1.5 font-semibold" : ""}`}
+    >
+      <dt className={`truncate ${total ? "text-fg" : "text-fg-muted"}`} title={hint}>
+        {label}
+      </dt>
+      <dd className={`tabular text-right ${tone}`}>{value}</dd>
+      <dd className="tabular truncate text-right text-[11px] font-normal text-fg-faint">{note}</dd>
     </div>
   );
 }
@@ -55,6 +62,8 @@ function NegotiationPath({ path, postedRate, maxBuy, outcome }: { path: WallOffe
   const ceiling = pct(maxBuy);
   const last = path.at(-1);
   const result = outcomeLabel(outcome);
+  // The agreed amount is on the receipt above; the result line only names the outcome.
+  const resultText = outcome.kind === "booked" ? "Booked" : outcome.kind === "holding" ? "Holding" : result.text;
   return (
     <div className="flex flex-col gap-1.5 border-t border-line pt-2.5">
       <div className="flex items-baseline justify-between text-[11px]">
@@ -83,12 +92,7 @@ function NegotiationPath({ path, postedRate, maxBuy, outcome }: { path: WallOffe
                 {counter !== null && <span className="absolute inset-y-0.5 w-0.5 -translate-x-1/2 rounded-full bg-accent" style={{ left: `${counter}%` }} />}
                 <span className="absolute inset-y-0.5 w-0.5 -translate-x-1/2 rounded-full bg-warn" style={{ left: `${ask}%` }} />
               </span>
-              <span className="tabular text-right leading-tight">
-                <span className="block text-warn">{formatUsd(offer.carrierAsk)}</span>
-                <span className={`block ${offer.rateToSay === null ? "text-fg-faint" : "text-accent"}`}>
-                  {offer.rateToSay === null ? offer.decision : formatUsd(offer.rateToSay)}
-                </span>
-              </span>
+              <span className="tabular text-right text-warn">{formatUsd(offer.carrierAsk)}</span>
             </li>
           );
         })}
@@ -96,7 +100,7 @@ function NegotiationPath({ path, postedRate, maxBuy, outcome }: { path: WallOffe
       <div className="flex items-baseline justify-between text-xs">
         <span className="text-fg-muted">Result</span>
         <span className={`tabular font-medium ${result.tone}`}>
-          {result.text}
+          {resultText}
           {last && (outcome.kind === "booked" || outcome.kind === "holding") && <span className="font-normal text-fg-faint"> in R{last.round}</span>}
         </span>
       </div>
@@ -105,8 +109,8 @@ function NegotiationPath({ path, postedRate, maxBuy, outcome }: { path: WallOffe
 }
 
 // Operator only: the load's max buy is on screen here and nowhere the agent can reach.
-// The pricing card of the load on the table: the meter from posted to ceiling, the key numbers
-// once each, and the negotiation that led here.
+// The pricing card of the load on the table: the meter from posted to ceiling, a receipt of the
+// numbers top to bottom, and the negotiation that led here.
 export function MarginMeter({
   offer,
   authorizedUsd,
@@ -170,14 +174,16 @@ export function MarginMeter({
   const askAbove = offer.carrierAsk > maxBuy;
   const askBelow = offer.carrierAsk < postedRate;
 
-  // The rate the margin is read against: the agreed one, else the carrier's latest ask.
-  const reference = agreedRate ?? offer.carrierAsk;
-  const margin = marginKept(maxBuy, reference);
-  const spread = spreadVsPosted(reference, postedRate);
-  const mile = (rate: number | null) => {
-    const value = perMile(rate, miles);
-    return value === null ? undefined : formatPerMile(value);
-  };
+  const agreed = agreedRate !== null;
+  const receipt = pricingBreakdown({
+    postedRate,
+    maxBuy,
+    miles,
+    path: path.length > 0 ? path : [offer],
+    agreedRate,
+    latestAsk: offer.carrierAsk,
+  });
+  const mile = (value: number | null) => (value === null ? null : formatPerMile(value));
 
   return (
     <div className="flex flex-col gap-3 px-3 py-3">
@@ -223,34 +229,39 @@ export function MarginMeter({
         )}
       </div>
 
-      <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 text-xs">
-        <Figure label="Approx. cost (posted)" value={formatUsd(postedRate)} sub={mile(postedRate)} />
-        <Figure label="Ceiling (max buy)" value={formatUsd(maxBuy)} sub={mile(maxBuy)} />
-        {agreedRate !== null ? (
-          <Figure label="Agreed" value={formatUsd(agreedRate)} tone="text-ok" sub={mile(agreedRate)} />
-        ) : (
-          <>
-            <Figure label="Carrier ask" value={formatUsd(offer.carrierAsk)} tone="text-warn" sub={mile(offer.carrierAsk)} />
-            <Figure
-              label="Our counter"
-              value={offer.rateToSay === null ? "-" : formatUsd(offer.rateToSay)}
-              tone="text-accent"
-              sub={authorizedUsd > 0 ? `+ ${formatUsd(authorizedUsd)} authorized` : mile(offer.rateToSay)}
-            />
-          </>
+      <dl className="flex flex-col gap-1 text-xs">
+        <Line label="Posted" hint="Approximate cost: the posted rate" value={formatUsd(postedRate)} note={mile(receipt.posted.perMile)} />
+        <Line label="Ceiling" hint="Max buy for this load" value={formatUsd(maxBuy)} note={mile(receipt.ceiling.perMile)} />
+        <Line label="Headroom" hint="Ceiling minus posted" value={formatUsd(receipt.headroom)} />
+        {receipt.openingAsk && (
+          <Line label={`Opening ask R${receipt.openingAsk.round}`} hint="The carrier's first ask on this load" value={formatUsd(receipt.openingAsk.usd)} tone="text-warn" />
         )}
-        <Figure
-          label={agreedRate !== null ? "Spread vs posted" : "Ask vs posted"}
-          value={spread === null ? "-" : formatSignedUsd(spread)}
-          tone={spread !== null && spread > 0 ? "text-fg" : "text-ok"}
+        {receipt.counters.map((counter) => (
+          <Line key={counter.at} label={`R${counter.round} counter`} value={formatUsd(counter.usd)} tone="text-accent" />
+        ))}
+        {agreedRate === null && authorizedUsd > 0 && (
+          <Line label="Authorized" hint="Raised by an operator, not yet offered" value={formatSignedUsd(authorizedUsd)} tone="text-accent" />
+        )}
+        <Line
+          label={agreed ? "Agreed" : "Latest ask"}
+          value={formatUsd(receipt.final.usd)}
+          tone={agreed ? "font-semibold text-fg" : "text-warn"}
+          note={mile(receipt.final.perMile)}
         />
-        <Figure
-          label={agreedRate !== null ? "Margin kept" : "Margin at ask"}
-          value={margin === null ? "-" : formatSignedUsd(margin.usd).replace(/^\+/, "")}
-          tone={margin !== null && margin.usd < 0 ? "text-risk" : "text-ok"}
-          sub={margin === null ? undefined : `${formatPercent(margin.pct)} of ceiling`}
+        <Line label="Over posted" hint={agreed ? "Agreed minus posted" : "Latest ask minus posted"} value={formatSignedUsd(receipt.overPosted)} />
+        <Line
+          total
+          label={agreed ? "Margin kept" : "Margin at ask"} hint={agreed ? "Ceiling minus agreed" : "Ceiling minus latest ask"}
+          value={formatUsd(receipt.margin.usd)}
+          tone={receipt.margin.usd < 0 ? "text-risk" : "text-ok"}
+          note={formatPercent(receipt.margin.pct)}
         />
-      </div>
+        <Line
+          label="Headroom kept" hint="Margin as a share of the headroom"
+          value={receipt.headroomSharePct === null ? "-" : `${Math.round(receipt.headroomSharePct)}%`}
+          tone={receipt.headroomSharePct !== null && receipt.headroomSharePct < 0 ? "text-risk" : "text-fg"}
+        />
+      </dl>
 
       {path.length > 0 && <NegotiationPath path={path} postedRate={postedRate} maxBuy={maxBuy} outcome={outcome} />}
 
