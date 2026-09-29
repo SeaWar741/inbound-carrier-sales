@@ -1,7 +1,11 @@
 import Fastify, { type FastifyPluginAsync } from "fastify";
 import { serializerCompiler, validatorCompiler } from "fastify-type-provider-zod";
 import { loadConfig, type Config } from "./config.ts";
+import { CensusClient } from "./infra/census-client.ts";
+import { FmcsaClient } from "./infra/fmcsa-client.ts";
+import { TwinClient } from "./infra/twin-client.ts";
 import { requireApiKey } from "./plugins/auth.ts";
+import { carrierRoutes } from "./routes/carriers.ts";
 import { healthRoutes } from "./routes/health.ts";
 
 export type RouteSets = {
@@ -41,6 +45,12 @@ export function buildServer(config: Config, routes: RouteSets = defaultRoutes) {
 
 if (import.meta.main) {
   const config = loadConfig();
-  const app = buildServer(config);
+  const fmcsa = new FmcsaClient({ webKey: config.FMCSA_API_KEY });
+  const census = new CensusClient();
+  const twin = new TwinClient({ apiKey: config.HAPPYROBOT_API_KEY });
+  const app = buildServer(config, {
+    agentRoutes: [carrierRoutes({ fmcsa, census, twin })],
+    operatorRoutes: [],
+  });
   await app.listen({ host: "0.0.0.0", port: config.PORT });
 }

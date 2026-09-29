@@ -23,3 +23,9 @@ export const tmsTotalBudgetMs = 5_000;
 // Twin SQL: measured p95 371 ms for an insert plus a read (~185 ms per statement) from a laptop.
 // 2 s is ~10x a statement and still leaves the tool call inside the agent's patience.
 export const twinRequestTimeoutMs = 2_000;
+
+// Carrier verification: QCMobile answered in ~0.3 s and Census in ~0.5-0.6 s from a laptop.
+// 2 s is ~3x the slower vendor; two sequential rounds still fit inside tmsTotalBudgetMs.
+export const verificationRequestTimeoutMs = 2_000;
+// An MCS-150 contact change this recent is a common precursor of carrier identity fraud.
+export const contactChangeWindowDays = 30;
