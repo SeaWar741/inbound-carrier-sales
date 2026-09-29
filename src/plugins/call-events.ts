@@ -3,7 +3,7 @@ import { z } from "zod";
 import { dollars } from "../domain/negotiation.ts";
 import { sql, type TwinClient } from "../infra/twin-client.ts";
 
-// Writes one call_events row per agent tool call so the operator wall can follow the call.
+// Writes one call_events row per named agent tool call (see toolNames) so the operator wall can follow the call.
 // The write starts after the response is sent and is never awaited: a slow or failing Twin
 // never changes what the agent hears or how fast it hears it.
 
@@ -71,7 +71,7 @@ export function summarize(tool: string, body: Fields, response: Fields): string 
 }
 
 const callIdField = z.string().trim().min(1).max(128);
-const maxSummaryLength = 200;
+export const maxSummaryLength = 200;
 
 const asFields = (value: unknown): Fields =>
   typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Fields) : {};

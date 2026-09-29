@@ -45,7 +45,7 @@ export const tableDdl = {
     created_at timestamp NOT NULL DEFAULT now(),
     updated_at timestamp NOT NULL DEFAULT now()
   )`,
-  // One row per agent tool call, written after the response; the operator wall reads it.
+  // One row per named agent tool call (request_human writes its own before answering); the operator wall reads it.
   call_events: `CREATE TABLE IF NOT EXISTS call_events (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     call_id text NOT NULL,

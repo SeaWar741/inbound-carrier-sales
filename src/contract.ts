@@ -257,7 +257,7 @@ export const requestHumanBody = z.object({
 export type RequestHumanBody = z.output<typeof requestHumanBody>;
 
 export const requestHumanResponse = z.object({
-  status: z.enum(["transferring", "invalid_request"]),
+  status: z.enum(["transferring", "service_unavailable", "invalid_request"]),
   message: z.string(),
 });
 export type RequestHumanResponse = z.infer<typeof requestHumanResponse>;

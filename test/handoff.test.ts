@@ -60,7 +60,7 @@ describe("POST /v1/calls/request-human", () => {
     const res = await post(app, { callId: "call-1", reason: "rates" });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({
-      status: "invalid_request",
+      status: "service_unavailable",
       message: "I couldn't reach a senior rep just now. Let me keep helping you in the meantime.",
     });
     expect(res.json().message).not.toMatch(/on the line/);
