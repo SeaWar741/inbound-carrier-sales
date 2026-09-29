@@ -16,13 +16,6 @@ export type OtpDeliveryClientOptions = {
 
 const triggerResponse = z.object({ run_id: z.string() });
 
-export class OtpDeliveryError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "OtpDeliveryError";
-  }
-}
-
 // Starts the per-channel delivery workflow. The code rides in the run payload only.
 export class OtpDeliveryClient {
   readonly #options: OtpDeliveryClientOptions;
@@ -37,7 +30,7 @@ export class OtpDeliveryClient {
 
   async send(channel: OtpChannel, to: string, code: string): Promise<string> {
     const workflowId = channel === "email" ? this.#options.emailWorkflowId : this.#options.smsWorkflowId;
-    if (!workflowId) throw new OtpDeliveryError(`no workflow configured for ${channel}`);
+    if (!workflowId) throw new Error(`no workflow configured for ${channel}`);
     try {
       const response = await this.#options.runner.workflows.triggerRun(workflowId, {
         environment: this.#options.environment,
@@ -46,7 +39,7 @@ export class OtpDeliveryClient {
       return triggerResponse.parse(response).run_id;
     } catch (error) {
       // Never echo the payload: it carries the code.
-      throw new OtpDeliveryError(`${channel} delivery failed (${error instanceof Error ? error.name : "unknown error"})`);
+      throw new Error(`${channel} delivery failed (${error instanceof Error ? error.name : "unknown error"})`);
     }
   }
 }

@@ -1,6 +1,5 @@
 // Pushes a workflow definition to HappyRobot and publishes it to an environment.
 // Usage: npm run push:workflow -- <name>   (inbound-carrier-sales | otp-email | otp-sms)
-import { mkdir, writeFile } from "node:fs/promises";
 import { HappyRobotClient } from "@happyrobot-ai/sdk";
 import type { NodeInput } from "@happyrobot-ai/workflow-sdk";
 import { z } from "zod";
@@ -134,9 +133,4 @@ if (definition.exposedToolFields) await exposeToolFields(versionId, definition.e
 if (definition.runDumpTable) await ensureRunDump(workflowId, definition.runDumpTable);
 await client.versions.publish(versionId, { environment, ...(liveVersionId && { unpublish_version_id: liveVersionId }) });
 
-await mkdir(new URL("./.push-output/", import.meta.url), { recursive: true });
-await writeFile(
-  new URL(`./.push-output/${definition.name}.json`, import.meta.url),
-  `${JSON.stringify({ workflowId, versionId, environment, pushedAt: new Date().toISOString() }, null, 2)}\n`,
-);
 console.log(`${definition.name}: workflow ${workflowId}, version ${versionId}, published to ${environment}`);

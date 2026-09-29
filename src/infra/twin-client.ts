@@ -42,12 +42,12 @@ const sqlResponseSchema = z.object({
 
 const errorResponseSchema = z.object({ message: z.string() });
 
+const twinBaseUrl = "https://platform.happyrobot.ai/api/v2";
+
 export class TwinError extends Error {
-  readonly httpStatus: number;
-  constructor(httpStatus: number, message: string) {
+  constructor(message: string) {
     super(message);
     this.name = "TwinError";
-    this.httpStatus = httpStatus;
   }
   get isUniqueViolation(): boolean {
     return this.message.includes("duplicate key value violates unique constraint");
@@ -56,26 +56,23 @@ export class TwinError extends Error {
 
 export type TwinClientOptions = {
   apiKey: string;
-  baseUrl?: string;
   timeoutMs?: number;
   fetch?: typeof fetch;
 };
 
 export class TwinClient {
   readonly #apiKey: string;
-  readonly #baseUrl: string;
   readonly #timeoutMs: number;
   readonly #fetch: typeof fetch;
 
   constructor(options: TwinClientOptions) {
     this.#apiKey = options.apiKey;
-    this.#baseUrl = options.baseUrl ?? "https://platform.happyrobot.ai/api/v2";
     this.#timeoutMs = options.timeoutMs ?? twinRequestTimeoutMs;
     this.#fetch = options.fetch ?? fetch;
   }
 
   async query<T>(statement: SqlStatement, rowSchema: z.ZodType<T>): Promise<T[]> {
-    const response = await this.#fetch(`${this.#baseUrl}/twin/sql`, {
+    const response = await this.#fetch(`${twinBaseUrl}/twin/sql`, {
       method: "POST",
       headers: { authorization: `Bearer ${this.#apiKey}`, "content-type": "application/json" },
       body: JSON.stringify({ sql: statement.text }),
@@ -84,11 +81,11 @@ export class TwinClient {
     const body: unknown = await response.json();
     if (!response.ok) {
       const parsed = errorResponseSchema.safeParse(body);
-      throw new TwinError(response.status, parsed.success ? parsed.data.message : `HTTP ${response.status}`);
+      throw new TwinError(parsed.success ? parsed.data.message : `HTTP ${response.status}`);
     }
     const result = sqlResponseSchema.parse(body);
     // A truncated read would silently drop rows; every query here is keyed, so treat it as a bug.
-    if (result.truncated) throw new TwinError(200, `Truncated result for: ${statement.text.slice(0, 80)}`);
+    if (result.truncated) throw new TwinError(`Truncated result for: ${statement.text.slice(0, 80)}`);
     return z.array(rowSchema).parse(result.rows);
   }
 }

@@ -1,5 +1,5 @@
 import type { FastifyPluginAsync } from "fastify";
-import { hasZodFastifySchemaValidationErrors, type ZodTypeProvider } from "fastify-type-provider-zod";
+import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import {
   confirmHoldHeaders,
@@ -15,17 +15,17 @@ import {
   type ReleaseHoldResponse,
 } from "../contract.ts";
 import { resolveBooking, type BookingAttempt } from "../domain/holds.ts";
+import { dollars } from "../domain/negotiation.ts";
 import type { BookingRequest } from "../infra/tms/codec.ts";
 import { TmsBusinessError, TmsUnavailableError } from "../infra/tms/errors.ts";
 import type { TmsClient } from "../infra/tms/tms-client.ts";
 import { sql, TwinError, type TwinClient } from "../infra/twin-client.ts";
 import { holdRowSchema, type HoldRow } from "../infra/twin-schemas.ts";
+import { invalidRequestHandler } from "../plugins/invalid-request.ts";
 
 export type HoldRouteDeps = { tms: Pick<TmsClient, "getLoad">; twin: Pick<TwinClient, "query"> };
 export type ConfirmHoldRouteDeps = { tms: Pick<TmsClient, "bookLoad">; twin: Pick<TwinClient, "query"> };
 export type ReleaseHoldRouteDeps = { twin: Pick<TwinClient, "query"> };
-
-const dollars = (usd: number) => `$${usd.toLocaleString("en-US")}`;
 
 const isUniqueViolation = (error: unknown) => error instanceof TwinError && error.isUniqueViolation;
 
@@ -66,12 +66,7 @@ export function holdRoutes(deps: HoldRouteDeps): FastifyPluginAsync {
   return async (plugin) => {
     const app = plugin.withTypeProvider<ZodTypeProvider>();
 
-    app.setErrorHandler((error, _request, reply) => {
-      if (hasZodFastifySchemaValidationErrors(error)) {
-        return reply.code(200).send(noHold("invalid_request", createMessages.invalid));
-      }
-      throw error;
-    });
+    app.setErrorHandler(invalidRequestHandler(() => noHold("invalid_request", createMessages.invalid)));
 
     app.post("/holds", { schema: { body: createHoldBody, response: { 200: createHoldResponse } } }, async (request) => {
       const { callId, loadId, agreedRate } = request.body;
@@ -140,9 +135,17 @@ const noResult = (
   holdId: string | null = null,
 ): ConfirmHoldResponse => ({ status, message, holdId, holdStatus: null, bookingRef: null, reason: null });
 
+// The hold fields shared by the confirm and release responses.
+const holdFields = (hold: HoldRow) => ({
+  holdId: hold.holdId,
+  holdStatus: hold.status,
+  bookingRef: hold.bookingRef,
+  reason: hold.releaseReason,
+});
+
 // Built from the stored row alone, so a replay returns exactly what the first confirm returned.
 function resultFor(hold: HoldRow): ConfirmHoldResponse {
-  const base = { holdId: hold.holdId, holdStatus: hold.status, bookingRef: hold.bookingRef, reason: hold.releaseReason };
+  const base = holdFields(hold);
   switch (hold.status) {
     case "booked":
       return { ...base, status: "booked", message: `Booked in the TMS. Reference ${hold.bookingRef ?? "unknown"}.` };
@@ -187,12 +190,7 @@ export function confirmHoldRoutes(deps: ConfirmHoldRouteDeps): FastifyPluginAsyn
   return async (plugin) => {
     const app = plugin.withTypeProvider<ZodTypeProvider>();
 
-    app.setErrorHandler((error, _request, reply) => {
-      if (hasZodFastifySchemaValidationErrors(error)) {
-        return reply.code(200).send(noResult("invalid_request", confirmMessages.invalid));
-      }
-      throw error;
-    });
+    app.setErrorHandler(invalidRequestHandler(() => noResult("invalid_request", confirmMessages.invalid)));
 
     app.post(
       "/holds/:holdId/confirm",
@@ -279,12 +277,7 @@ export function releaseHoldRoutes(deps: ReleaseHoldRouteDeps): FastifyPluginAsyn
   return async (plugin) => {
     const app = plugin.withTypeProvider<ZodTypeProvider>();
 
-    app.setErrorHandler((error, _request, reply) => {
-      if (hasZodFastifySchemaValidationErrors(error)) {
-        return reply.code(200).send(notReleased("invalid_request", releaseMessages.invalid));
-      }
-      throw error;
-    });
+    app.setErrorHandler(invalidRequestHandler(() => notReleased("invalid_request", releaseMessages.invalid)));
 
     app.post(
       "/holds/:holdId/release",
@@ -300,23 +293,17 @@ export function releaseHoldRoutes(deps: ReleaseHoldRouteDeps): FastifyPluginAsyn
           );
           if (released) {
             return {
+              ...holdFields(released),
               status: "released" as const,
               message: `Hold released (${reason}). The load is free for other calls.`,
-              holdId: released.holdId,
-              holdStatus: released.status,
-              bookingRef: released.bookingRef,
-              reason: released.releaseReason,
             };
           }
           const [current] = await deps.twin.query(sql`SELECT * FROM holds WHERE hold_id = ${holdId}`, holdRowSchema);
           if (!current) return notReleased("not_found", releaseMessages.notFound, holdId);
           return {
+            ...holdFields(current),
             status: "not_releasable" as const,
             message: `This hold is ${current.status} and cannot be released.`,
-            holdId: current.holdId,
-            holdStatus: current.status,
-            bookingRef: current.bookingRef,
-            reason: current.releaseReason,
           };
         } catch (error) {
           request.log.warn({ err: error, holdId }, "hold release unavailable");

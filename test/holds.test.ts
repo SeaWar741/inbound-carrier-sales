@@ -56,7 +56,7 @@ type Hold = {
   updated_at: string;
 };
 
-const unique = (name: string) => new TwinError(400, `duplicate key value violates unique constraint "${name}"`);
+const unique = (name: string) => new TwinError(`duplicate key value violates unique constraint "${name}"`);
 const text = (pattern: RegExp, sql: string) => pattern.exec(sql)?.[1] ?? "";
 const nullable = (literal: string | undefined) => (literal === undefined || literal === "NULL" ? null : literal.slice(2, -1));
 const stamp = "2026-09-29T12:00:00.000Z";
@@ -133,7 +133,7 @@ function fakeTwin() {
         rows.push(hold);
       }
     } else {
-      throw new TwinError(400, `unexpected SQL: ${sql}`);
+      throw new TwinError(`unexpected SQL: ${sql}`);
     }
     return rows.map((row) => rowSchema.parse({ ...row }));
   };

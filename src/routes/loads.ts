@@ -1,5 +1,5 @@
 import type { FastifyPluginAsync } from "fastify";
-import { hasZodFastifySchemaValidationErrors, type ZodTypeProvider } from "fastify-type-provider-zod";
+import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { loadsPitchedPerSearch } from "../constants.ts";
 import {
@@ -13,6 +13,7 @@ import type { LoadDetail, LoadQueryFilters } from "../infra/tms/codec.ts";
 import { TmsBusinessError, TmsUnavailableError } from "../infra/tms/errors.ts";
 import type { TmsClient } from "../infra/tms/tms-client.ts";
 import { sql, type TwinClient } from "../infra/twin-client.ts";
+import { invalidRequestHandler } from "../plugins/invalid-request.ts";
 
 export type LoadRouteDeps = { tms: Pick<TmsClient, "queryLoads" | "getLoad">; twin: TwinClient };
 
@@ -90,12 +91,7 @@ export function loadRoutes(deps: LoadRouteDeps): FastifyPluginAsync {
   return async (plugin) => {
     const app = plugin.withTypeProvider<ZodTypeProvider>();
 
-    app.setErrorHandler((error, _request, reply) => {
-      if (hasZodFastifySchemaValidationErrors(error)) {
-        return reply.code(200).send(noLoads("invalid_request", messages.invalid));
-      }
-      throw error;
-    });
+    app.setErrorHandler(invalidRequestHandler(() => noLoads("invalid_request", messages.invalid)));
 
     app.post(
       "/loads/search",

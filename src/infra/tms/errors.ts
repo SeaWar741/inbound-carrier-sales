@@ -12,16 +12,12 @@ export class TmsMalformedError extends Error {
 }
 
 export class TmsError extends Error {
-  readonly command: TmsCommand;
-  readonly attempts: number;
   // True when some attempt wrote the request and never got a terminal response,
   // so the server may have committed it (only meaningful for LOAD_BOOK).
   readonly ambiguous: boolean;
-  constructor(command: TmsCommand, attempts: number, ambiguous: boolean, message: string) {
+  constructor(ambiguous: boolean, message: string) {
     super(message);
     this.name = "TmsError";
-    this.command = command;
-    this.attempts = attempts;
     this.ambiguous = ambiguous;
   }
 }
@@ -30,7 +26,7 @@ export class TmsError extends Error {
 export class TmsBusinessError extends TmsError {
   readonly code: string;
   constructor(command: TmsCommand, attempts: number, ambiguous: boolean, code: string, serverMessage: string) {
-    super(command, attempts, ambiguous, `${command} rejected: ${code}${serverMessage ? ` (${serverMessage})` : ""}`);
+    super(ambiguous, `${command} rejected: ${code}${serverMessage ? ` (${serverMessage})` : ""}`);
     this.name = "TmsBusinessError";
     this.code = code;
   }
@@ -40,7 +36,7 @@ export class TmsBusinessError extends TmsError {
 export class TmsUnavailableError extends TmsError {
   readonly fault: TmsFault;
   constructor(command: TmsCommand, attempts: number, ambiguous: boolean, fault: TmsFault) {
-    super(command, attempts, ambiguous, `${command} unavailable after ${attempts} attempt(s): last fault ${fault}`);
+    super(ambiguous, `${command} unavailable after ${attempts} attempt(s): last fault ${fault}`);
     this.name = "TmsUnavailableError";
     this.fault = fault;
   }

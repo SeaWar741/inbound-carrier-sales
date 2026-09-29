@@ -178,10 +178,10 @@ export function parseErrorLine(line: string): { code: string; message: string } 
 
 // Callers speak loosely ("reefer", "tx", "2026-10-03"); the TMS rejects anything but the exact form.
 const noReserved = (s: string) => !reservedCharacters.test(s);
-const cityInput = z.string().trim().min(1).max(30).refine(noReserved);
-const stateInput = z.string().trim().toUpperCase().regex(/^[A-Z]{2}$/);
-const zipInput = z.string().trim().regex(/^\d{5}$/);
-const equipmentInput = z
+export const cityInput = z.string().trim().min(1).max(30).refine(noReserved);
+export const stateInput = z.string().trim().toUpperCase().regex(/^[A-Z]{2}$/);
+export const zipInput = z.string().trim().regex(/^\d{5}$/);
+export const equipmentInput = z
   .string()
   .trim()
   .toUpperCase()

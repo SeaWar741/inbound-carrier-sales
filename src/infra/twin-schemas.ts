@@ -47,44 +47,11 @@ export const tableDdl = {
   )`,
 } as const;
 
-export type TableName = keyof typeof tableDdl;
-
 // Changes to tables that already exist; each statement is idempotent and runs on every bootstrap.
 export const migrations = [
-  "ALTER TABLE calls ADD COLUMN IF NOT EXISTS eligible boolean NOT NULL DEFAULT FALSE",
-  // Tables created before release_reason was part of the DDL.
-  "ALTER TABLE holds ADD COLUMN IF NOT EXISTS release_reason text",
   // Two calls racing to hold one load: the index, not a read-then-insert, picks the winner.
   "CREATE UNIQUE INDEX IF NOT EXISTS holds_one_active_per_load ON holds (load_id) WHERE status <> 'released'",
 ] as const;
-
-export const callRowSchema = z
-  .object({
-    call_id: z.string(),
-    dot_number: z.string().nullable(),
-    mc_number: z.string().nullable(),
-    eligible: z.boolean(),
-    verified: z.boolean(),
-    otp_hash: z.string().nullable(),
-    otp_expires_at: timestamp.nullable(),
-    otp_attempts: int8,
-    otp_sends: int8,
-    otp_last_sent_at: timestamp.nullable(),
-    created_at: timestamp,
-  })
-  .transform((r) => ({
-    callId: r.call_id,
-    dotNumber: r.dot_number,
-    mcNumber: r.mc_number,
-    eligible: r.eligible,
-    verified: r.verified,
-    otpHash: r.otp_hash,
-    otpExpiresAt: r.otp_expires_at,
-    otpAttempts: r.otp_attempts,
-    otpSends: r.otp_sends,
-    otpLastSentAt: r.otp_last_sent_at,
-    createdAt: r.created_at,
-  }));
 
 export const holdStatuses = ["held", "confirming", "booked", "booked_unconfirmed", "released"] as const;
 

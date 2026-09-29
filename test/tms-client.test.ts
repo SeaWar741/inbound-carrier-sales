@@ -95,14 +95,14 @@ describe("TmsClient fault handling", () => {
     const { client, fake } = await setup(["empty-close", "partial", "malformed", "ok"]);
     const error = await rejection(client.queryLoads({ origState: "GA" }));
     expect(error).toBeInstanceOf(TmsUnavailableError);
-    expect(error).toMatchObject({ fault: "malformed", attempts: 3 });
+    expect(error).toMatchObject({ fault: "malformed", message: expect.stringContaining("after 3 attempt(s)") });
     expect(fake.requests).toHaveLength(3);
   });
 
   it("gives up after repeated RATE_LIMITED", async () => {
     const { client } = await setup(["rate-limited", "rate-limited", "rate-limited"]);
     const error = await rejection(client.debugEcho());
-    expect(error).toMatchObject({ fault: "rate-limited", attempts: 3, ambiguous: false });
+    expect(error).toMatchObject({ fault: "rate-limited", ambiguous: false, message: expect.stringContaining("after 3 attempt(s)") });
   });
 
   it("enforces the per-attempt deadline against a silent server", async () => {
@@ -110,7 +110,7 @@ describe("TmsClient fault handling", () => {
     const started = performance.now();
     const error = await rejection(client.getLoad("LD00881"));
     const elapsed = performance.now() - started;
-    expect(error).toMatchObject({ fault: "timeout", attempts: 1 });
+    expect(error).toMatchObject({ fault: "timeout", message: expect.stringContaining("after 1 attempt(s)") });
     expect(elapsed).toBeGreaterThanOrEqual(95);
     expect(elapsed).toBeLessThan(400);
   });
@@ -138,7 +138,7 @@ describe("TmsClient business errors", () => {
       const { client, fake } = await setup([{ errorCode: code, message: "nope" }]);
       const error = await rejection(client.getLoad("LD00881"));
       expect(error).toBeInstanceOf(TmsBusinessError);
-      expect(error).toMatchObject({ code, attempts: 1, command: "LOAD_GET" });
+      expect(error).toMatchObject({ code, message: expect.stringContaining("LOAD_GET rejected") });
       expect(fake.requests).toHaveLength(1);
     },
   );
@@ -151,10 +151,11 @@ describe("TmsClient business errors", () => {
 
 describe("TmsClient booking ambiguity", () => {
   it("flags ALREADY_BOOKED after a silent attempt as ambiguous", async () => {
-    const { client } = await setup(["silence", { errorCode: "ALREADY_BOOKED", message: "Load not available" }]);
+    const { client, fake } = await setup(["silence", { errorCode: "ALREADY_BOOKED", message: "Load not available" }]);
     const error = await rejection(client.bookLoad({ loadId: "LD00881", mcNumber: "872144", agreedRate: 2200 }));
     expect(error).toBeInstanceOf(TmsBusinessError);
-    expect(error).toMatchObject({ code: "ALREADY_BOOKED", ambiguous: true, attempts: 2 });
+    expect(error).toMatchObject({ code: "ALREADY_BOOKED", ambiguous: true });
+    expect(fake.requests).toHaveLength(2);
   });
 
   it("flags an exhausted booking as ambiguous when a request was written", async () => {
@@ -182,7 +183,8 @@ describe("TmsClient AUTH redaction", () => {
     const wrongToken = "t-wrong-token-456";
     const client = new TmsClient({ host: "127.0.0.1", port: fake.port, token: wrongToken, ...fastTiming });
     const error = await rejection(client.debugEcho());
-    expect(error).toMatchObject({ code: "AUTH_FAILED", attempts: 1 });
+    expect(error).toMatchObject({ code: "AUTH_FAILED" });
+    expect(fake.requests).toHaveLength(1);
     expect(`${String(error)} ${JSON.stringify(error)} ${error instanceof Error ? error.stack : ""}`).not.toContain(wrongToken);
   });
 

@@ -1,6 +1,4 @@
 node_modules/
 .env*
 !.env.example
-# workflow push output (ids and published versions)
-workflow/.push-output/
 coverage/

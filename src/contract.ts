@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { otpDigits } from "./constants.ts";
-import { equipmentTypes, loadIdInput } from "./infra/tms/codec.ts";
+import { cityInput, equipmentInput, loadIdInput, stateInput, zipInput } from "./infra/tms/codec.ts";
 import { holdStatuses } from "./infra/twin-schemas.ts";
 
 // Request and response schemas for the agent and operator APIs.
@@ -50,27 +50,18 @@ export type VerifyCarrierResponse = z.infer<typeof verifyCarrierResponse>;
 
 const callId = z.string().trim().min(1).max(128);
 
-// Mirrors the TMS codec's normalization so a bad filter is a 200 invalid_request, not a thrown error.
-const city = z.string().trim().min(1).max(30).regex(/^[^|\r\n]+$/);
-const state = z.string().trim().toUpperCase().regex(/^[A-Z]{2}$/);
-const zip = z.string().trim().regex(/^\d{5}$/);
-
 // Flat fields because each is one tool parameter; the route reads origin/destination objects.
+// The TMS codec's own inputs, so a bad filter is a 200 invalid_request, not a thrown error.
 export const searchLoadsBody = z
   .object({
     callId,
-    originCity: optionalField(city),
-    originState: optionalField(state),
-    originZip: optionalField(zip),
-    destinationCity: optionalField(city),
-    destinationState: optionalField(state),
-    destinationZip: optionalField(zip),
-    equipmentType: z
-      .string()
-      .trim()
-      .toUpperCase()
-      .transform((s) => s.replace(/[\s-]+/g, "_"))
-      .pipe(z.enum(equipmentTypes)),
+    originCity: optionalField(cityInput),
+    originState: optionalField(stateInput),
+    originZip: optionalField(zipInput),
+    destinationCity: optionalField(cityInput),
+    destinationState: optionalField(stateInput),
+    destinationZip: optionalField(zipInput),
+    equipmentType: equipmentInput,
     pickupDate: optionalField(z.iso.date()),
   })
   .refine((b) => b.originCity !== undefined || b.originState !== undefined || b.originZip !== undefined, {

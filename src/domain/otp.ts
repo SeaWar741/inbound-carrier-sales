@@ -1,5 +1,5 @@
 import { createHmac, randomInt, timingSafeEqual } from "node:crypto";
-import { otpDigits, otpMaxAttempts, otpMaxSendsPerDotPerHour } from "../constants.ts";
+import { otpDigits, otpMaxAttempts } from "../constants.ts";
 
 export function generateCode(): string {
   return String(randomInt(0, 10 ** otpDigits)).padStart(otpDigits, "0");
@@ -8,10 +8,6 @@ export function generateCode(): string {
 // Bound to the call, so a code issued on one call never verifies another.
 export function hashCode(secret: string, callId: string, code: string): string {
   return createHmac("sha256", secret).update(`${callId}:${code}`).digest("hex");
-}
-
-export function canSend(sendsInLastHour: number): boolean {
-  return sendsInLastHour < otpMaxSendsPerDotPerHour;
 }
 
 export type Challenge = { otpHash: string; expiresAt: Date; attempts: number };

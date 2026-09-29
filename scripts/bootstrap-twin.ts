@@ -3,14 +3,14 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { TwinClient, sql } from "../src/infra/twin-client.ts";
-import { callRowSchema, migrations, tableDdl, type TableName } from "../src/infra/twin-schemas.ts";
+import { migrations, tableDdl } from "../src/infra/twin-schemas.ts";
 
 const env = z.object({ HAPPYROBOT_API_KEY: z.string().min(1) }).parse(process.env);
 const twin = new TwinClient({ apiKey: env.HAPPYROBOT_API_KEY });
 
 const existsRow = z.object({ exists: z.boolean() });
 
-for (const [name, ddl] of Object.entries(tableDdl) as [TableName, string][]) {
+for (const [name, ddl] of Object.entries(tableDdl)) {
   const [before] = await twin.query(sql`SELECT to_regclass(${name}) IS NOT NULL AS exists`, existsRow);
   await twin.query({ text: ddl }, z.unknown());
   console.log(`${name}: ${before?.exists ? "skipped (exists)" : "created"}`);
@@ -27,7 +27,7 @@ for (let i = 0; i < 20; i++) {
   probeIds.push(callId);
   const started = performance.now();
   await twin.query(sql`INSERT INTO calls (call_id) VALUES (${callId}) RETURNING call_id`, z.unknown());
-  await twin.query(sql`SELECT * FROM calls WHERE call_id = ${callId}`, callRowSchema);
+  await twin.query(sql`SELECT * FROM calls WHERE call_id = ${callId}`, z.unknown());
   samples.push(performance.now() - started);
 }
 await twin.query(sql`DELETE FROM calls WHERE call_id LIKE ${"latency-probe-%"} RETURNING call_id`, z.unknown());

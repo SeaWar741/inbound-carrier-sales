@@ -38,6 +38,8 @@ const authorityResponseSchema = z.object({ content: z.array(z.object({ carrierAu
 // Rescinded orders drop out of this list, so every entry is an active out-of-service order.
 const outOfServiceResponseSchema = z.object({ content: z.array(z.object({ oos: outOfServiceSchema })) });
 
+const fmcsaBaseUrl = "https://mobile.fmcsa.dot.gov/qc/services";
+
 export class FmcsaError extends Error {
   constructor(message: string) {
     super(message);
@@ -47,20 +49,17 @@ export class FmcsaError extends Error {
 
 export type FmcsaClientOptions = {
   webKey: string;
-  baseUrl?: string;
   timeoutMs?: number;
   fetch?: typeof fetch;
 };
 
 export class FmcsaClient {
   readonly #webKey: string;
-  readonly #baseUrl: string;
   readonly #timeoutMs: number;
   readonly #fetch: typeof fetch;
 
   constructor(options: FmcsaClientOptions) {
     this.#webKey = options.webKey;
-    this.#baseUrl = options.baseUrl ?? "https://mobile.fmcsa.dot.gov/qc/services";
     this.#timeoutMs = options.timeoutMs ?? verificationRequestTimeoutMs;
     this.#fetch = options.fetch ?? fetch;
   }
@@ -88,7 +87,7 @@ export class FmcsaClient {
 
   // Errors carry only the path: the web key rides in the query string and must never be logged.
   async #get<T>(path: string, schema: z.ZodType<T>): Promise<T> {
-    const url = `${this.#baseUrl}${path}?webKey=${encodeURIComponent(this.#webKey)}`;
+    const url = `${fmcsaBaseUrl}${path}?webKey=${encodeURIComponent(this.#webKey)}`;
     let response: Response;
     try {
       response = await this.#fetch(url, { signal: AbortSignal.timeout(this.#timeoutMs) });

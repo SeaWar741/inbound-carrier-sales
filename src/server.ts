@@ -20,9 +20,7 @@ export type RouteSets = {
   operatorRoutes: FastifyPluginAsync[];
 };
 
-const defaultRoutes: RouteSets = { agentRoutes: [], operatorRoutes: [] };
-
-export function buildServer(config: Config, routes: RouteSets = defaultRoutes) {
+export function buildServer(config: Config, routes: RouteSets) {
   const app = Fastify({
     logger: { redact: ["req.headers[\"x-api-key\"]", "req.headers.authorization"] },
   });

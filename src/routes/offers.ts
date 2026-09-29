@@ -1,11 +1,12 @@
 import type { FastifyPluginAsync } from "fastify";
-import { hasZodFastifySchemaValidationErrors, type ZodTypeProvider } from "fastify-type-provider-zod";
+import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { evaluateOfferBody, evaluateOfferResponse, type EvaluateOfferResponse } from "../contract.ts";
-import { evaluateOffer, type OfferEvaluation } from "../domain/negotiation.ts";
+import { dollars, evaluateOffer, type OfferEvaluation } from "../domain/negotiation.ts";
 import { TmsBusinessError, TmsUnavailableError } from "../infra/tms/errors.ts";
 import type { TmsClient } from "../infra/tms/tms-client.ts";
 import { sql, TwinError, type TwinClient } from "../infra/twin-client.ts";
+import { invalidRequestHandler } from "../plugins/invalid-request.ts";
 
 export type OfferRouteDeps = { tms: Pick<TmsClient, "getLoad">; twin: TwinClient };
 
@@ -18,8 +19,6 @@ const messages = {
   invalid: "I need the load number and your rate in whole dollars to check that.",
   reject: "I'm sorry, I can't get to that number on this load.",
 } as const;
-
-const dollars = (usd: number) => `$${usd.toLocaleString("en-US")}`;
 
 function messageFor(evaluation: OfferEvaluation): string {
   if (evaluation.decision === "reject") return messages.reject;
@@ -44,12 +43,7 @@ export function offerRoutes(deps: OfferRouteDeps): FastifyPluginAsync {
   return async (plugin) => {
     const app = plugin.withTypeProvider<ZodTypeProvider>();
 
-    app.setErrorHandler((error, _request, reply) => {
-      if (hasZodFastifySchemaValidationErrors(error)) {
-        return reply.code(200).send(noDecision("invalid_request", messages.invalid));
-      }
-      throw error;
-    });
+    app.setErrorHandler(invalidRequestHandler(() => noDecision("invalid_request", messages.invalid)));
 
     app.post(
       "/offers/evaluate",

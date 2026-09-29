@@ -27,42 +27,34 @@ function parseCensusDate(value: string | undefined): Date | null {
 
 const blankToNull = (value: string | undefined) => (value?.trim() ? value.trim() : null);
 
-export class CensusError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "CensusError";
-  }
-}
+const censusUrl = "https://data.transportation.gov/resource/az4n-8mr2.json";
 
 export type CensusClientOptions = {
-  baseUrl?: string;
   timeoutMs?: number;
   fetch?: typeof fetch;
 };
 
 export class CensusClient {
-  readonly #baseUrl: string;
   readonly #timeoutMs: number;
   readonly #fetch: typeof fetch;
 
   constructor(options: CensusClientOptions = {}) {
-    this.#baseUrl = options.baseUrl ?? "https://data.transportation.gov/resource/az4n-8mr2.json";
     this.#timeoutMs = options.timeoutMs ?? verificationRequestTimeoutMs;
     this.#fetch = options.fetch ?? fetch;
   }
 
   // null when the census has no single row for the DOT: a contact we cannot pin down is no contact.
   async contactByDot(dotNumber: string): Promise<CensusContact | null> {
-    const url = `${this.#baseUrl}?dot_number=${encodeURIComponent(dotNumber)}`;
+    const url = `${censusUrl}?dot_number=${encodeURIComponent(dotNumber)}`;
     let response: Response;
     try {
       response = await this.#fetch(url, { signal: AbortSignal.timeout(this.#timeoutMs) });
     } catch (error) {
-      throw new CensusError(`census: request failed (${error instanceof Error ? error.name : "unknown error"})`);
+      throw new Error(`census: request failed (${error instanceof Error ? error.name : "unknown error"})`);
     }
-    if (!response.ok) throw new CensusError(`census: HTTP ${response.status}`);
+    if (!response.ok) throw new Error(`census: HTTP ${response.status}`);
     const parsed = z.array(censusRowSchema).safeParse(await response.json().catch(() => undefined));
-    if (!parsed.success) throw new CensusError("census: unexpected response shape");
+    if (!parsed.success) throw new Error("census: unexpected response shape");
     const [row, ...rest] = parsed.data;
     if (!row || rest.length > 0) return null;
     return {

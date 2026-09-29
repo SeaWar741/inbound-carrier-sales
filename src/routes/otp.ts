@@ -1,14 +1,15 @@
 import type { FastifyPluginAsync } from "fastify";
-import { hasZodFastifySchemaValidationErrors, type ZodTypeProvider } from "fastify-type-provider-zod";
+import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import type { Config } from "../config.ts";
-import { otpTtlSeconds } from "../constants.ts";
+import { otpMaxSendsPerDotPerHour, otpTtlSeconds } from "../constants.ts";
 import { checkOtpBody, checkOtpResponse, sendOtpBody, sendOtpResponse, type CheckOtpResponse, type SendOtpResponse } from "../contract.ts";
-import { canSend, checkCode, generateCode, hashCode } from "../domain/otp.ts";
+import { checkCode, generateCode, hashCode } from "../domain/otp.ts";
 import { maskEmail, maskPhone } from "../domain/verification.ts";
 import type { CensusClient } from "../infra/census-client.ts";
 import type { OtpChannel, OtpDeliveryClient } from "../infra/otp-delivery-client.ts";
 import { sql, type TwinClient } from "../infra/twin-client.ts";
+import { invalidRequestHandler } from "../plugins/invalid-request.ts";
 
 export type OtpRouteDeps = {
   config: Pick<Config, "OTP_DELIVERY_MODE" | "OTP_DEMO_EMAIL" | "OTP_DEMO_PHONE" | "OTP_HASH_SECRET">;
@@ -83,14 +84,13 @@ export function otpRoutes(deps: OtpRouteDeps): FastifyPluginAsync {
   return async (plugin) => {
     const app = plugin.withTypeProvider<ZodTypeProvider>();
 
-    app.setErrorHandler((error, request, reply) => {
-      if (hasZodFastifySchemaValidationErrors(error)) {
-        return request.url.endsWith("/send")
-          ? reply.code(200).send(notSent("invalid_request", messages.invalidSend))
-          : reply.code(200).send(notVerified("invalid_request", messages.invalidCheck));
-      }
-      throw error;
-    });
+    app.setErrorHandler(
+      invalidRequestHandler((request) =>
+        request.url.endsWith("/send")
+          ? notSent("invalid_request", messages.invalidSend)
+          : notVerified("invalid_request", messages.invalidCheck),
+      ),
+    );
 
     app.post("/otp/send", { schema: { body: sendOtpBody, response: { 200: sendOtpResponse } } }, async (request) => {
       const { callId, channel } = request.body;
@@ -105,7 +105,7 @@ export function otpRoutes(deps: OtpRouteDeps): FastifyPluginAsync {
           sendStateRow,
         );
         if (!call?.eligible || !call.dot_number) return notSent("not_eligible", messages.notEligible);
-        if (!canSend(call.sends_last_hour)) return notSent("too_many_requests", messages.tooMany);
+        if (call.sends_last_hour >= otpMaxSendsPerDotPerHour) return notSent("too_many_requests", messages.tooMany);
         if (!deps.delivery.supports(channel)) return notSent("channel_unavailable", messages.channelUnavailable);
 
         const destination = await destinationFor(channel, call.dot_number);

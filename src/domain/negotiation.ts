@@ -2,6 +2,9 @@ import { concessionSchedule, counterRoundingUsd } from "../constants.ts";
 
 export const finalRound = concessionSchedule.length;
 
+// How a rate is spoken back to the carrier.
+export const dollars = (usd: number) => `$${usd.toLocaleString("en-US")}`;
+
 export type OfferInput = { postedRate: number; maxBuy: number; carrierAsk: number; round: number };
 
 export type OfferEvaluation =

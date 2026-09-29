@@ -1,11 +1,12 @@
 import type { FastifyPluginAsync } from "fastify";
-import { hasZodFastifySchemaValidationErrors, type ZodTypeProvider } from "fastify-type-provider-zod";
+import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { verifyCarrierBody, verifyCarrierResponse, type VerifyCarrierResponse } from "../contract.ts";
 import { maskEmail, maskPhone, verifyCarrier, type Verification } from "../domain/verification.ts";
 import type { CensusClient, CensusContact } from "../infra/census-client.ts";
 import type { FmcsaAuthority, FmcsaCarrier, FmcsaClient } from "../infra/fmcsa-client.ts";
 import { sql, type TwinClient } from "../infra/twin-client.ts";
+import { invalidRequestHandler } from "../plugins/invalid-request.ts";
 
 export type CarrierRouteDeps = { fmcsa: FmcsaClient; census: CensusClient; twin: TwinClient };
 
@@ -58,13 +59,7 @@ export function carrierRoutes(deps: CarrierRouteDeps): FastifyPluginAsync {
   return async (plugin) => {
     const app = plugin.withTypeProvider<ZodTypeProvider>();
 
-    // The voice agent speaks every answer, so a malformed number is a 200 it can read back.
-    app.setErrorHandler((error, _request, reply) => {
-      if (hasZodFastifySchemaValidationErrors(error)) {
-        return reply.code(200).send(noResult("invalid_request", messages.invalid));
-      }
-      throw error;
-    });
+    app.setErrorHandler(invalidRequestHandler(() => noResult("invalid_request", messages.invalid)));
 
     app.post(
       "/carriers/verify",
