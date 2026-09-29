@@ -48,3 +48,7 @@ export const tmsHealthLatencySamples = 500;
 // Trip ETA: there is no delivery time in the TMS, so ETA = pickup + miles at a long-haul average
 // that already absorbs stops and hours-of-service breaks. Cycle 4 replaces it with a routed time.
 export const avgTransitMph = 50;
+// Operator inbox: one screen of carriers at 1280 px; the page size is not a parameter.
+export const inboxPageSize = 25;
+// A carrier's timeline shows its recent calls, not its full history.
+export const carrierCallsLimit = 50;

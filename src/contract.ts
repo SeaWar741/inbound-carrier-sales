@@ -409,3 +409,73 @@ export type OperatorLoad = z.infer<typeof operatorLoad>;
 
 export const operatorLoadsResponse = z.object({ status: z.literal("ok"), loads: z.array(operatorLoad) });
 export type OperatorLoadsResponse = z.infer<typeof operatorLoadsResponse>;
+
+export const carrierStages = ["live", "negotiating", "needs_approval", "booked", "in_transit", "arrived", "lost"] as const;
+export type CarrierStage = (typeof carrierStages)[number];
+export const inboxTabs = ["needs_you", "live", "active", "closed", "all"] as const;
+export const inboxSorts = ["priority", "recent", "rate", "pickup"] as const;
+
+// A repeated key (`stage=live&stage=booked`) arrives as an array and a single one as a string;
+// both may also carry a comma list. Empty entries are dropped, so `stage=` is no filter.
+const listParam = <T extends z.ZodType>(item: T, max: number) =>
+  z.preprocess(
+    (value) =>
+      (Array.isArray(value) ? value : value === undefined ? [] : [value])
+        .flatMap((v) => (typeof v === "string" ? v.split(",") : [v]))
+        .filter((v) => !(typeof v === "string" && v.trim() === "")),
+    z.array(item).max(max),
+  );
+
+export const operatorCarriersQuery = z.object({
+  tab: z.enum(inboxTabs).default("all"),
+  stage: listParam(z.enum(carrierStages), carrierStages.length),
+  equipment: listParam(equipmentInput, 10),
+  origin: optionalField(stateInput),
+  destination: optionalField(stateInput),
+  // today is the desk's (Chicago) calendar day, like the wall; 7d and 30d are rolling windows.
+  since: z.enum(["today", "7d", "30d"]).default("7d"),
+  // MC, DOT, carrier name or a load id the carrier was offered.
+  q: optionalField(z.string().trim().max(64)),
+  sort: z.enum(inboxSorts).default("priority"),
+  page: z.coerce.number().int().min(1).max(10_000).default(1),
+  // Call ids HappyRobot reports as running; only the tower knows which calls are live.
+  live: listParam(z.string().trim().min(1).max(128), 200),
+});
+export type OperatorCarriersQuery = z.output<typeof operatorCarriersQuery>;
+
+const operatorCarrier = z.object({
+  // COALESCE(mc_number, dot_number, call_id) of the carrier's calls.
+  key: z.string(),
+  mcNumber: z.string().nullable(),
+  dotNumber: z.string().nullable(),
+  // The latest FMCSA name stored on one of its calls; null when none was stored.
+  carrierName: z.string().nullable(),
+  // Calls and distinct offered loads inside the `since` window.
+  callsCount: z.number().int(),
+  loadsCount: z.number().int(),
+  lastActivityAt: z.iso.datetime(),
+  carrierStage: z.enum(carrierStages),
+  // The latest call is live and asked for a human.
+  needsHuman: z.boolean(),
+  // The trip of the carrier's latest booked hold; times are null when its load has no lane stored.
+  nextTrip: z
+    .object({ pickupAt: z.iso.datetime().nullable(), etaAt: z.iso.datetime().nullable(), status: z.enum(tripStatuses).nullable() })
+    .nullable(),
+  latestCall: wallCall,
+});
+export type OperatorCarrier = z.infer<typeof operatorCarrier>;
+
+export const operatorCarriersResponse = z.object({
+  status: z.literal("ok"),
+  rows: z.array(operatorCarrier),
+  // Carriers in the selected tab after the filters; counts are per tab after the same filters.
+  total: z.number().int(),
+  page: z.number().int(),
+  counts: z.object({ needsYou: z.number().int(), live: z.number().int(), active: z.number().int(), closed: z.number().int() }),
+});
+export type OperatorCarriersResponse = z.infer<typeof operatorCarriersResponse>;
+
+export const operatorCarrierCallsParams = z.object({ key: z.string().trim().min(1).max(128) });
+// Newest call first; an unknown key answers an empty list.
+export const operatorCarrierCallsResponse = z.object({ status: z.literal("ok"), calls: z.array(wallCall) });
+export type OperatorCarrierCallsResponse = z.infer<typeof operatorCarrierCallsResponse>;
