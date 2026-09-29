@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import type { TowerWall } from "@/lib/contracts";
 
-const pollMs = 1_000;
+const pollMs = 2_000;
 
 export type WallState = {
   wall: TowerWall | null;
@@ -13,7 +13,7 @@ export type WallState = {
   updatedAt: number | null;
 };
 
-// Polls /api/wall once a second while the tab is visible. A failed poll keeps the last good wall.
+// Polls /api/wall every 2 s while the tab is visible. A failed poll keeps the last good wall.
 export function useWall(): WallState {
   const [state, setState] = useState<WallState>({ wall: null, error: null, loading: true, updatedAt: null });
 

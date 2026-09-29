@@ -6,7 +6,8 @@ import { listRunningRuns, type RunningRun } from "@/lib/happyrobot";
 // Stages the call data settles on its own; every other stage of a call that is no longer running is "ended".
 const settledStages = new Set<TowerCall["stage"]>(["holding", "booked", "released"]);
 
-const cacheMs = 1_000;
+// Shared by every open tab; with the 2 s browser poll it keeps the tower well inside the API quota.
+const cacheMs = 2_000;
 type WallAnswer = { httpStatus: number; body: TowerWall | ErrorResponse };
 // One upstream fetch per second, shared by every open tab; concurrent requests share the in-flight one.
 let cached: { at: number; answer: Promise<WallAnswer> } | undefined;

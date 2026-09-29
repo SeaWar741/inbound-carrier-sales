@@ -33,7 +33,23 @@ export type RunningRun = {
   session: { id: string; channel: Channel } | null;
 };
 
-// Every running run of the workflow with its in-progress session. Throws when HappyRobot is unreachable.
+// A run's session never changes once it exists, so it is fetched once per run and kept for the
+// life of the server. The wall then costs two HappyRobot requests a tick however many calls are live.
+const sessionByRun = new Map<string, { id: string; channel: Channel | null }>();
+
+async function sessionOf(runId: string): Promise<{ id: string; channel: Channel | null } | null> {
+  const known = sessionByRun.get(runId);
+  if (known) return known;
+  const sessions = sessionsPage.parse(await happyRobot().runs.getSessions(runId));
+  const session = sessions.data.at(-1);
+  if (!session) return null;
+  const channel: Channel | null = session.type === "voice" || session.type === "text" ? session.type : null;
+  const found = { id: session.id, channel };
+  sessionByRun.set(runId, found);
+  return found;
+}
+
+// Every running run of the workflow with its session. Throws when HappyRobot is unreachable.
 export async function listRunningRuns(): Promise<RunningRun[]> {
   const { WORKFLOW_ID } = env();
   const runs = runsPage.parse(await happyRobot().workflows.listRuns(WORKFLOW_ID, { status: "running" }));
@@ -41,30 +57,19 @@ export async function listRunningRuns(): Promise<RunningRun[]> {
     runs.data
       .filter((run) => run.status === "running")
       .map(async (run) => {
-        const sessions = sessionsPage.parse(await happyRobot().runs.getSessions(run.id));
-        const live = sessions.data.find((session) => session.status === "in-progress");
-        const channel: Channel | undefined = live?.type === "voice" || live?.type === "text" ? live.type : undefined;
+        const session = await sessionOf(run.id);
         return {
           runId: run.id,
           startedAt: new Date(run.timestamp).toISOString(),
-          session: live && channel ? { id: live.id, channel } : null,
+          session: session?.channel ? { id: session.id, channel: session.channel } : null,
         };
       }),
   );
 }
 
-// A run's session never changes once it exists, so found ids are kept for the life of the server.
-const sessionByRun = new Map<string, string>();
-
 // The newest session of a run, live or ended; HappyRobot keeps its messages after the call.
 export async function sessionForRun(runId: string): Promise<string | null> {
-  const known = sessionByRun.get(runId);
-  if (known) return known;
-  const sessions = sessionsPage.parse(await happyRobot().runs.getSessions(runId));
-  const session = sessions.data.at(-1);
-  if (!session) return null;
-  sessionByRun.set(runId, session.id);
-  return session.id;
+  return (await sessionOf(runId))?.id ?? null;
 }
 
 const voiceToken = z.object({ url: z.string(), token: z.string(), room_name: z.string() });
