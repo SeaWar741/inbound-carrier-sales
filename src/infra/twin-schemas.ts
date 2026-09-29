@@ -77,6 +77,16 @@ export const migrations = [
   "ALTER TABLE offers ADD COLUMN IF NOT EXISTS max_buy int8",
   "ALTER TABLE holds ADD COLUMN IF NOT EXISTS posted_rate int8",
   "ALTER TABLE holds ADD COLUMN IF NOT EXISTS max_buy int8",
+  // The load's lane at decision time, so the operator map needs no TMS read.
+  "ALTER TABLE offers ADD COLUMN IF NOT EXISTS origin_city text",
+  "ALTER TABLE offers ADD COLUMN IF NOT EXISTS origin_state text",
+  "ALTER TABLE offers ADD COLUMN IF NOT EXISTS origin_zip text",
+  "ALTER TABLE offers ADD COLUMN IF NOT EXISTS destination_city text",
+  "ALTER TABLE offers ADD COLUMN IF NOT EXISTS destination_state text",
+  "ALTER TABLE offers ADD COLUMN IF NOT EXISTS destination_zip text",
+  "ALTER TABLE offers ADD COLUMN IF NOT EXISTS equipment text",
+  "ALTER TABLE offers ADD COLUMN IF NOT EXISTS miles int8",
+  "ALTER TABLE offers ADD COLUMN IF NOT EXISTS pickup_at text",
   "CREATE INDEX IF NOT EXISTS call_events_by_call ON call_events (call_id, created_at)",
   "CREATE INDEX IF NOT EXISTS interventions_by_call ON interventions (call_id, created_at)",
 ] as const;

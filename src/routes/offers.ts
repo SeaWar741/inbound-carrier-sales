@@ -83,9 +83,12 @@ export function offerRoutes(deps: OfferRouteDeps): FastifyPluginAsync {
             authorizedUsd: call.authorized_usd,
           });
           await deps.twin.query(
-            sql`INSERT INTO offers (call_id, load_id, round, carrier_ask, decision, rate_to_say, posted_rate, max_buy)
+            sql`INSERT INTO offers (call_id, load_id, round, carrier_ask, decision, rate_to_say, posted_rate, max_buy,
+                  origin_city, origin_state, origin_zip, destination_city, destination_state, destination_zip, equipment, miles, pickup_at)
                 VALUES (${callId}, ${loadId}, ${round}, ${carrierAsk}, ${evaluation.decision}, ${evaluation.rateToSay},
-                  ${load.rate}, ${load.maxBuy})`,
+                  ${load.rate}, ${load.maxBuy},
+                  ${load.origCity}, ${load.origState}, ${load.origZip}, ${load.destCity}, ${load.destState}, ${load.destZip},
+                  ${load.equipmentType}, ${load.miles}, ${load.pickupDateTime})`,
             z.unknown(),
           );
 

@@ -10,6 +10,7 @@ import {
   operatorWallUnavailableResponse,
   type OperatorWallResponse,
   type WallCall,
+  type WallLane,
 } from "../contract.ts";
 import { otpMaxAttempts, operatorTimeZone, wallEventsPerCall } from "../constants.ts";
 import { assessCall, otpLocked } from "../domain/call-stage.ts";
@@ -38,6 +39,7 @@ export function wallQuery(): SqlStatement {
         EXISTS (SELECT 1 FROM call_events e WHERE e.call_id = t.call_id AND e.tool = 'request_human') AS human_requested,
         COALESCE((SELECT json_agg(o ORDER BY o.created_at) FROM (
           SELECT DISTINCT ON (load_id) load_id, round, carrier_ask, decision, rate_to_say, posted_rate, max_buy,
+            origin_city, origin_state, origin_zip, destination_city, destination_state, destination_zip, equipment, miles, pickup_at,
             created_at::timestamptz AS created_at
           FROM offers WHERE call_id = t.call_id ORDER BY load_id, round DESC
         ) o), '[]'::json) AS offers,
@@ -68,6 +70,7 @@ export function wallQuery(): SqlStatement {
 const count = z.coerce.number().int();
 const money = z.coerce.number();
 const optionalMoney = z.coerce.number().nullable();
+const optionalText = z.string().nullish();
 const timestamp = z.coerce.date();
 
 const offerRow = z.object({
@@ -78,8 +81,32 @@ const offerRow = z.object({
   rate_to_say: optionalMoney,
   posted_rate: optionalMoney,
   max_buy: optionalMoney,
+  origin_city: optionalText,
+  origin_state: optionalText,
+  origin_zip: optionalText,
+  destination_city: optionalText,
+  destination_state: optionalText,
+  destination_zip: optionalText,
+  equipment: optionalText,
+  miles: count.nullish(),
+  pickup_at: optionalText,
   created_at: timestamp,
 });
+type OfferRow = z.output<typeof offerRow>;
+
+// Offers stored before lanes were kept have no lane columns set.
+function laneOf(o: OfferRow): WallLane | null {
+  const { origin_city, origin_state, origin_zip, destination_city, destination_state, destination_zip, equipment, miles, pickup_at } = o;
+  if (!origin_city || !origin_state || !origin_zip || !destination_city || !destination_state || !destination_zip) return null;
+  if (!equipment || miles == null || !pickup_at) return null;
+  return {
+    origin: { city: origin_city, state: origin_state, zip: origin_zip },
+    destination: { city: destination_city, state: destination_state, zip: destination_zip },
+    equipment,
+    miles,
+    pickupAt: pickup_at,
+  };
+}
 
 const holdRow = z.object({
   hold_id: z.string(),
@@ -145,6 +172,9 @@ export function toWallCall(row: CallRow): WallCall {
     hold: row.hold && { status: row.hold.status, createdAt: row.hold.created_at },
     events: row.events,
   });
+  // The offers are already the latest round per load of this call, so the hold's lane comes from its load's row.
+  const holdOffer = row.hold && row.offers.find((o) => o.load_id === row.hold?.load_id);
+  const holdLane = holdOffer ? laneOf(holdOffer) : null;
   return {
     callId: row.call_id,
     mcNumber: row.mc_number,
@@ -165,6 +195,7 @@ export function toWallCall(row: CallRow): WallCall {
       rateToSay: o.rate_to_say,
       postedRate: o.posted_rate,
       maxBuy: o.max_buy,
+      lane: laneOf(o),
       createdAt: o.created_at.toISOString(),
     })),
     hold: row.hold && {
@@ -175,6 +206,7 @@ export function toWallCall(row: CallRow): WallCall {
       postedRate: row.hold.posted_rate,
       maxBuy: row.hold.max_buy,
       bookingRef: row.hold.booking_ref,
+      lane: holdLane,
       createdAt: row.hold.created_at.toISOString(),
     },
     events: row.events.map((e) => ({ tool: e.tool, summary: e.summary, status: e.status, createdAt: e.created_at.toISOString() })),

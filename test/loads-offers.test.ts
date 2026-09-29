@@ -29,7 +29,7 @@ const activeHolds = new Map<string, string>();
 // Summed operator authorizations, keyed "callId|loadId".
 const authorized = new Map<string, number>();
 type OfferRow = { callId: string; loadId: string; round: number; carrierAsk: number; decision: string; rateToSay: number | null };
-let offers: (OfferRow & { postedRate?: number; maxBuy?: number })[] = [];
+let offers: (OfferRow & { postedRate?: number; maxBuy?: number; lane?: string[] })[] = [];
 const sqlLog: string[] = [];
 
 const twinFetch = vi.fn<typeof fetch>(async (_input, init) => {
@@ -39,9 +39,9 @@ const twinFetch = vi.fn<typeof fetch>(async (_input, init) => {
   const rows = (list: object[]) => jsonResponse({ command: "SELECT", rowCount: list.length, rows: list, truncated: false });
 
   const insert =
-    /INSERT INTO offers[\s\S]*VALUES \(E'([^']*)', E'([^']*)', (\d+), (\d+), E'(\w+)', (NULL|\d+),\s+(\d+), (\d+)\)/.exec(text);
+    /INSERT INTO offers[\s\S]*VALUES \(E'([^']*)', E'([^']*)', (\d+), (\d+), E'(\w+)', (NULL|\d+),\s+(\d+), (\d+),\s+([^)]*)\)/.exec(text);
   if (insert) {
-    const [, callId = "", loadId = "", round, carrierAsk, decision = "", rate, postedRate, maxBuy] = insert;
+    const [, callId = "", loadId = "", round, carrierAsk, decision = "", rate, postedRate, maxBuy, laneValues = ""] = insert;
     const row = {
       callId,
       loadId,
@@ -51,6 +51,7 @@ const twinFetch = vi.fn<typeof fetch>(async (_input, init) => {
       rateToSay: rate === "NULL" ? null : Number(rate),
       postedRate: Number(postedRate),
       maxBuy: Number(maxBuy),
+      lane: laneValues.split(/,\s+/),
     };
     if (offers.some((o) => o.callId === callId && o.loadId === loadId && o.round === row.round)) {
       return jsonResponse({ message: 'duplicate key value violates unique constraint "offers_call_id_load_id_round_key"' }, 400);
@@ -362,8 +363,28 @@ describe("POST /v1/offers/evaluate", () => {
   it("stores the load's posted rate and max buy with the offer, never in the response", async () => {
     const res = await evaluate({ callId: "call-ok", loadId: "LD00881", carrierAsk: 3000 });
     expectNoMaxBuy(res.body);
-    expect(sqlLog.find((text) => text.startsWith("INSERT INTO offers"))).toMatch(/posted_rate, max_buy\)/);
+    expect(sqlLog.find((text) => text.startsWith("INSERT INTO offers"))).toMatch(/posted_rate, max_buy,/);
     expect(offers).toEqual([expect.objectContaining({ round: 1, postedRate: 2093, maxBuy: 2538 })]);
+  });
+
+  it("stores the load's lane with the offer so the operator map needs no TMS read", async () => {
+    const res = await evaluate({ callId: "call-ok", loadId: "LD00881", carrierAsk: 2300 });
+    expectNoMaxBuy(res.body);
+    expect(res.body).not.toMatch(/Savannah|31401|origin/i);
+    expect(sqlLog.find((text) => text.startsWith("INSERT INTO offers"))).toMatch(
+      /origin_city, origin_state, origin_zip, destination_city, destination_state, destination_zip, equipment, miles, pickup_at\)/,
+    );
+    expect(offers[0]?.lane).toEqual([
+      "E'Savannah'",
+      "E'GA'",
+      "E'31401'",
+      "E'Wichita'",
+      "E'KS'",
+      "E'67202'",
+      "E'DRY_VAN'",
+      "997",
+      "E'20261003141300'",
+    ]);
   });
 
   it("reads the carrier's ask when the agent sends it as a digit string", async () => {

@@ -35,7 +35,35 @@ const wallRow = {
           rate_to_say: 2300,
           posted_rate: 2100,
           max_buy: 2500,
+          origin_city: "Savannah",
+          origin_state: "GA",
+          origin_zip: "31401",
+          destination_city: "Wichita",
+          destination_state: "KS",
+          destination_zip: "67202",
+          equipment: "DRY_VAN",
+          miles: "997",
+          pickup_at: "20261003141300",
           created_at: "2026-09-29T15:08:00+00:00",
+        },
+        {
+          load_id: "LD00848",
+          round: 1,
+          carrier_ask: 7000,
+          decision: "counter",
+          rate_to_say: 6886,
+          posted_rate: 6886,
+          max_buy: 7684,
+          origin_city: null,
+          origin_state: null,
+          origin_zip: null,
+          destination_city: null,
+          destination_state: null,
+          destination_zip: null,
+          equipment: null,
+          miles: null,
+          pickup_at: null,
+          created_at: "2026-09-29T15:02:00+00:00",
         },
       ],
       hold: {
@@ -127,15 +155,26 @@ describe("GET /v1/operator/wall", () => {
       ["call-a", "ended", "red"],
     ]);
     const [booked] = wall.calls;
+    const lane = {
+      origin: { city: "Savannah", state: "GA", zip: "31401" },
+      destination: { city: "Wichita", state: "KS", zip: "67202" },
+      equipment: "DRY_VAN",
+      miles: 997,
+      pickupAt: "20261003141300",
+    };
     expect(booked).toMatchObject({
       mcNumber: "123456",
       otp: { attempts: 1, locked: false, expiresAt: "2026-09-29T15:05:00.123Z" },
       round: 2,
       riskReason: null,
-      offers: [{ loadId: "LD00881", round: 2, carrierAsk: 2300, decision: "accept", rateToSay: 2300, postedRate: 2100, maxBuy: 2500 }],
-      hold: { status: "booked", agreedRate: 2300, maxBuy: 2500, bookingRef: "BR-1", createdAt: "2026-09-29T15:09:00.000Z" },
+      offers: [
+        { loadId: "LD00881", round: 2, carrierAsk: 2300, decision: "accept", rateToSay: 2300, postedRate: 2100, maxBuy: 2500, lane },
+        { loadId: "LD00848", round: 1, lane: null },
+      ],
+      hold: { status: "booked", agreedRate: 2300, maxBuy: 2500, bookingRef: "BR-1", lane, createdAt: "2026-09-29T15:09:00.000Z" },
     });
     expect(booked?.events.map((e) => e.tool)).toEqual(["verify_carrier", "create_hold"]);
+    expect(statements[0]).toContain("origin_city, origin_state, origin_zip, destination_city, destination_state, destination_zip, equipment, miles, pickup_at");
     expect(booked?.interventions).toEqual([
       { kind: "authorization", loadId: "LD00881", amountUsd: 50, message: "Authorize +$50", createdAt: "2026-09-29T15:07:00.000Z" },
     ]);

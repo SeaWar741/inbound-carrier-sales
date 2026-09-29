@@ -262,6 +262,19 @@ export const requestHumanResponse = z.object({
 });
 export type RequestHumanResponse = z.infer<typeof requestHumanResponse>;
 
+const wallPlace = z.object({ city: z.string(), state: z.string(), zip: z.string() });
+
+// The load's lane as stored with the offer; null for offers recorded before lanes were kept.
+// pickupAt is the TMS wall clock, YYYYMMDDHHMMSS with no timezone.
+const wallLane = z.object({
+  origin: wallPlace,
+  destination: wallPlace,
+  equipment: z.string(),
+  miles: z.number().int(),
+  pickupAt: z.string(),
+});
+export type WallLane = z.infer<typeof wallLane>;
+
 // Operator only: posted rate and max buy are shown here and nowhere on the agent API.
 const wallOffer = z.object({
   loadId: z.string(),
@@ -271,6 +284,7 @@ const wallOffer = z.object({
   rateToSay: z.number().nullable(),
   postedRate: z.number().nullable(),
   maxBuy: z.number().nullable(),
+  lane: wallLane.nullable(),
   createdAt: z.iso.datetime(),
 });
 
@@ -282,6 +296,8 @@ const wallHold = z.object({
   postedRate: z.number().nullable(),
   maxBuy: z.number().nullable(),
   bookingRef: z.string().nullable(),
+  // From the latest offer of the same call on this load.
+  lane: wallLane.nullable(),
   createdAt: z.iso.datetime(),
 });
 
