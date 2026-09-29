@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { otpDigits } from "./constants.ts";
 import { equipmentTypes, loadIdInput } from "./infra/tms/codec.ts";
 
 // Request and response schemas for the agent and operator APIs.
@@ -112,3 +113,35 @@ export const evaluateOfferResponse = z.object({
   isFinalRound: z.boolean(),
 });
 export type EvaluateOfferResponse = z.infer<typeof evaluateOfferResponse>;
+
+export const sendOtpBody = z.object({ callId, channel: z.enum(["email", "sms"]) });
+export type SendOtpBody = z.output<typeof sendOtpBody>;
+
+export const sendOtpResponse = z.object({
+  status: z.enum([
+    "ok",
+    "not_eligible",
+    "too_many_requests",
+    "no_contact_on_file",
+    "channel_unavailable",
+    "delivery_unavailable",
+    "service_unavailable",
+    "invalid_request",
+  ]),
+  message: z.string(),
+  sent: z.boolean(),
+  maskedDestination: z.string().nullable(),
+  expiresInSeconds: z.number().int().nullable(),
+});
+export type SendOtpResponse = z.infer<typeof sendOtpResponse>;
+
+export const checkOtpBody = z.object({ callId, code: z.string().trim().regex(new RegExp(`^\\d{${otpDigits}}$`), `code must be ${otpDigits} digits`) });
+export type CheckOtpBody = z.output<typeof checkOtpBody>;
+
+export const checkOtpResponse = z.object({
+  status: z.enum(["ok", "wrong_code", "expired", "locked", "no_active_code", "service_unavailable", "invalid_request"]),
+  message: z.string(),
+  verified: z.boolean(),
+  attemptsLeft: z.number().int().nullable(),
+});
+export type CheckOtpResponse = z.infer<typeof checkOtpResponse>;

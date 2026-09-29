@@ -1,25 +1,14 @@
 import { readFileSync } from "node:fs";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Config } from "../src/config.ts";
+import { testConfig } from "./test-config.ts";
 import { CensusClient } from "../src/infra/census-client.ts";
 import { FmcsaClient, FmcsaError } from "../src/infra/fmcsa-client.ts";
 import { TwinClient } from "../src/infra/twin-client.ts";
 import { carrierRoutes } from "../src/routes/carriers.ts";
 import { buildServer } from "../src/server.ts";
 
-const config: Config = {
-  PORT: 0,
-  TMS_HOST: "localhost",
-  TMS_PORT: 1,
-  TMS_TOKEN: "t",
-  FMCSA_API_KEY: "fmcsa-web-key-secret",
-  HAPPYROBOT_API_KEY: "h",
-  AGENT_API_KEY: "agent-key-0123456789",
-  OPERATOR_API_KEY: "operator-key-0123456789",
-  OTP_DELIVERY_MODE: "demo",
-  OTP_DEMO_EMAIL: "demo@example.com",
-  OTP_DEMO_PHONE: "+15555550100",
-};
+const config: Config = { ...testConfig };
 
 const fixture = (name: string): unknown =>
   JSON.parse(readFileSync(new URL(`./fixtures/fmcsa/${name}.json`, import.meta.url), "utf8"));
@@ -98,7 +87,7 @@ describe("POST /v1/carriers/verify", () => {
     });
     expect(res.body).not.toContain("dispatch@example-carrier.com");
     expect(res.body).not.toContain("5555550142");
-    expect(lastSql()).toContain("VALUES ('call-1', '80806', '135797', FALSE)");
+    expect(lastSql()).toContain("VALUES ('call-1', '80806', '135797', TRUE, FALSE)");
     expect(lastSql()).toContain("ON CONFLICT (call_id) DO UPDATE");
   });
 
@@ -135,7 +124,7 @@ describe("POST /v1/carriers/verify", () => {
       dotNumber: null,
       mcNumber: "135797",
     });
-    expect(lastSql()).toContain("VALUES ('call-4', NULL, '135797', FALSE)");
+    expect(lastSql()).toContain("VALUES ('call-4', NULL, '135797', FALSE, FALSE)");
   });
 
   it("sends an unknown MC or DOT to review", async () => {

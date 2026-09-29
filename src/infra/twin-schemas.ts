@@ -11,6 +11,7 @@ export const tableDdl = {
     call_id text PRIMARY KEY,
     dot_number text,
     mc_number text,
+    eligible boolean NOT NULL DEFAULT FALSE,
     verified boolean NOT NULL DEFAULT FALSE,
     otp_hash text,
     otp_expires_at timestamp,
@@ -47,11 +48,17 @@ export const tableDdl = {
 
 export type TableName = keyof typeof tableDdl;
 
+// Changes to tables that already exist; each statement is idempotent and runs on every bootstrap.
+export const migrations = [
+  "ALTER TABLE calls ADD COLUMN IF NOT EXISTS eligible boolean NOT NULL DEFAULT FALSE",
+] as const;
+
 export const callRowSchema = z
   .object({
     call_id: z.string(),
     dot_number: z.string().nullable(),
     mc_number: z.string().nullable(),
+    eligible: z.boolean(),
     verified: z.boolean(),
     otp_hash: z.string().nullable(),
     otp_expires_at: timestamp.nullable(),
@@ -64,6 +71,7 @@ export const callRowSchema = z
     callId: r.call_id,
     dotNumber: r.dot_number,
     mcNumber: r.mc_number,
+    eligible: r.eligible,
     verified: r.verified,
     otpHash: r.otp_hash,
     otpExpiresAt: r.otp_expires_at,

@@ -1,21 +1,10 @@
 import type { FastifyPluginAsync } from "fastify";
 import { afterAll, describe, expect, it } from "vitest";
 import type { Config } from "../src/config.ts";
+import { testConfig } from "./test-config.ts";
 import { buildServer } from "../src/server.ts";
 
-const config: Config = {
-  PORT: 0,
-  TMS_HOST: "localhost",
-  TMS_PORT: 1,
-  TMS_TOKEN: "t",
-  FMCSA_API_KEY: "f",
-  HAPPYROBOT_API_KEY: "h",
-  AGENT_API_KEY: "agent-key-0123456789",
-  OPERATOR_API_KEY: "operator-key-0123456789",
-  OTP_DELIVERY_MODE: "demo",
-  OTP_DEMO_EMAIL: "demo@example.com",
-  OTP_DEMO_PHONE: "+15555550100",
-};
+const config: Config = { ...testConfig };
 
 const agentRoute: FastifyPluginAsync = async (app) => {
   app.post("/loads/search", async () => ({ status: "ok" }));

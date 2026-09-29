@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Config } from "../src/config.ts";
+import { testConfig } from "./test-config.ts";
 import type { LoadDetail, LoadSummary } from "../src/infra/tms/codec.ts";
 import { TmsBusinessError } from "../src/infra/tms/errors.ts";
 import { TmsClient } from "../src/infra/tms/tms-client.ts";
@@ -9,19 +10,7 @@ import { offerRoutes } from "../src/routes/offers.ts";
 import { buildServer } from "../src/server.ts";
 import { startFakeTms, type FakeBehavior, type FakeTms } from "./fake-tms-server.ts";
 
-const config: Config = {
-  PORT: 0,
-  TMS_HOST: "127.0.0.1",
-  TMS_PORT: 1,
-  TMS_TOKEN: "fake-tms-token",
-  FMCSA_API_KEY: "f",
-  HAPPYROBOT_API_KEY: "h",
-  AGENT_API_KEY: "agent-key-0123456789",
-  OPERATOR_API_KEY: "operator-key-0123456789",
-  OTP_DELIVERY_MODE: "demo",
-  OTP_DEMO_EMAIL: "demo@example.com",
-  OTP_DEMO_PHONE: "+15555550100",
-};
+const config: Config = { ...testConfig };
 
 // Max buys of the fake board's loads (LD00881, LD00848): no response may ever carry them.
 const secretMaxBuys = ["2538", "7684"];

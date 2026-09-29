@@ -100,10 +100,12 @@ export function carrierRoutes(deps: CarrierRouteDeps): FastifyPluginAsync {
           }
 
           await deps.twin.query(
-            sql`INSERT INTO calls (call_id, dot_number, mc_number, verified)
-                VALUES (${callId}, ${resolvedDot}, ${resolvedMc}, FALSE)
+            // A new lookup resets identity: the OTP must be passed again for whatever carrier this is.
+            sql`INSERT INTO calls (call_id, dot_number, mc_number, eligible, verified)
+                VALUES (${callId}, ${resolvedDot}, ${resolvedMc}, ${verification.eligible}, FALSE)
                 ON CONFLICT (call_id) DO UPDATE SET dot_number = EXCLUDED.dot_number,
-                  mc_number = EXCLUDED.mc_number, verified = FALSE`,
+                  mc_number = EXCLUDED.mc_number, eligible = EXCLUDED.eligible, verified = FALSE,
+                  otp_hash = NULL`,
             z.unknown(),
           );
 

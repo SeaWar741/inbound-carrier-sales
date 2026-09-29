@@ -3,7 +3,7 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { TwinClient, sql } from "../src/infra/twin-client.ts";
-import { callRowSchema, tableDdl, type TableName } from "../src/infra/twin-schemas.ts";
+import { callRowSchema, migrations, tableDdl, type TableName } from "../src/infra/twin-schemas.ts";
 
 const env = z.object({ HAPPYROBOT_API_KEY: z.string().min(1) }).parse(process.env);
 const twin = new TwinClient({ apiKey: env.HAPPYROBOT_API_KEY });
@@ -15,6 +15,9 @@ for (const [name, ddl] of Object.entries(tableDdl) as [TableName, string][]) {
   await twin.query({ text: ddl }, z.unknown());
   console.log(`${name}: ${before?.exists ? "skipped (exists)" : "created"}`);
 }
+
+for (const statement of migrations) await twin.query({ text: statement }, z.unknown());
+console.log(`migrations: ${migrations.length} applied`);
 
 // One OTP-style write followed by the read that would verify it: the hot path of a call.
 const samples: number[] = [];
