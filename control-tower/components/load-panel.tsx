@@ -1,10 +1,11 @@
 "use client";
 
+import { useMemo } from "react";
 import { LuMousePointerClick, LuTruck } from "react-icons/lu";
 import { EmptyState } from "@/components/empty-state";
 import { equipmentLabel, HoldCard, LaneText } from "@/components/hold-card";
 import { MarginMeter } from "@/components/margin-meter";
-import { UsMap, type MapArc } from "@/components/us-map";
+import { LaneMap, type LaneMapLoad } from "@/components/lane-map";
 import type { TowerCall, WallOffer } from "@/lib/contracts";
 
 // The load on the table: the held one while a hold stands, otherwise the one offered most recently.
@@ -17,16 +18,29 @@ function currentOffer(call: TowerCall): WallOffer | null {
   return call.offers.at(-1) ?? null;
 }
 
-export function LoadPanel({ calls, selectedCall }: { calls: TowerCall[]; selectedCall: TowerCall | null }) {
+export function LoadPanel({ selectedCall }: { calls: TowerCall[]; selectedCall: TowerCall | null }) {
   const offer = selectedCall ? currentOffer(selectedCall) : null;
   const hold = selectedCall?.hold ?? null;
+  const lane = offer?.lane ?? null;
 
-  const arcs: MapArc[] =
-    selectedCall?.offers.map((o) => ({ loadId: o.loadId, lane: o.lane, current: o.loadId === offer?.loadId })) ?? [];
-  const otherOrigins = calls
-    .filter((call) => call.live && call.callId !== selectedCall?.callId)
-    .map((call) => currentOffer(call)?.lane?.origin.zip)
-    .filter((zip): zip is string => zip !== undefined);
+  // The lane on the table; the load has not been picked up while the carrier is on the call.
+  const loadId = offer?.loadId ?? null;
+  const mapLoads = useMemo<LaneMapLoad[]>(
+    () =>
+      loadId && lane
+        ? [
+            {
+              id: loadId,
+              originZip: lane.origin.zip,
+              destinationZip: lane.destination.zip,
+              progress: 0,
+              status: "upcoming",
+              label: `${loadId} ${lane.origin.city}, ${lane.origin.state} to ${lane.destination.city}, ${lane.destination.state}`,
+            },
+          ]
+        : [],
+    [loadId, lane],
+  );
 
   // Authorizations before the latest offer are already inside its counter (evaluate_offer adds
   // them); only newer ones are headroom the agent has not priced yet.
@@ -36,7 +50,6 @@ export function LoadPanel({ calls, selectedCall }: { calls: TowerCall[]; selecte
         .reduce((sum, i) => sum + (i.amountUsd ?? 0), 0)
     : 0;
   const agreedRate = hold && hold.status !== "released" && hold.loadId === offer?.loadId ? hold.agreedRate : null;
-  const lane = offer?.lane ?? null;
 
   return (
     <div className="flex flex-col">
@@ -44,16 +57,7 @@ export function LoadPanel({ calls, selectedCall }: { calls: TowerCall[]; selecte
 
       <div className="border-b border-line">
         <div className="aspect-[16/10] px-2 pt-2">
-          <UsMap
-            arcs={arcs}
-            live={selectedCall?.live ?? false}
-            otherOrigins={otherOrigins}
-            label={
-              lane
-                ? `Lane from ${lane.origin.city}, ${lane.origin.state} to ${lane.destination.city}, ${lane.destination.state}`
-                : "United States map"
-            }
-          />
+          <LaneMap loads={mapLoads} selectedId={loadId} />
         </div>
         {offer && (
           <div className="flex items-center gap-2 px-3 pb-2 text-xs">
