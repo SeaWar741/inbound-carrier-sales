@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { TowerCall, WallOffer } from "./contracts.ts";
-import { average, carrierPricing, loadOutcome, marginKept, negotiationPath, perMile, pricingBreakdown, spreadVsPosted } from "./pricing.ts";
+import { average, carrierPricing, loadOutcome, marginKept, negotiationPath, perMile, pricingBreakdown } from "./pricing.ts";
 
 const lane = (miles: number) => ({
   origin: { city: "Albuquerque", state: "NM", zip: "87102" },
@@ -52,18 +52,13 @@ describe("marginKept", () => {
   });
 });
 
-describe("perMile and spreadVsPosted", () => {
+describe("perMile", () => {
   it("divides by known miles only", () => {
     assert.equal(perMile(2000, 1000), 2);
     assert.equal(perMile(2000, 0), null);
     assert.equal(perMile(2000, null), null);
     assert.equal(perMile(2000, undefined), null);
     assert.equal(perMile(null, 1000), null);
-  });
-  it("signs the distance from posted", () => {
-    assert.equal(spreadVsPosted(2150, 2016), 134);
-    assert.equal(spreadVsPosted(1950, 2000), -50);
-    assert.equal(spreadVsPosted(2150, null), null);
   });
 });
 

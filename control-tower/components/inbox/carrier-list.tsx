@@ -2,15 +2,13 @@
 
 import { useRef } from "react";
 import { LuArrowUpRight, LuChevronLeft, LuInbox, LuChevronRight, LuHand, LuPackage, LuPhone, LuTriangleAlert } from "react-icons/lu";
+import { TabStrip } from "@/components/inbox/filter-bar";
 import { Badge, CarrierStageDot, CarrierStagePill } from "@/components/inbox/stage-pill";
 import { PulseDot } from "@/components/pulse-dot";
 import type { inboxTabs, TowerCarrier, TowerCarriers } from "@/lib/contracts";
 import { callSummary, carrierName, formatTimeAgo } from "@/lib/format";
 
 export type InboxTab = (typeof inboxTabs)[number];
-
-// Mirrors the adapter's inbox page size.
-export const inboxPageSize = 25;
 
 type Counts = TowerCarriers["counts"];
 const tabs: { tab: InboxTab; label: string; title: string; count: (counts: Counts) => number; urgent?: boolean }[] = [
@@ -21,37 +19,6 @@ const tabs: { tab: InboxTab; label: string; title: string; count: (counts: Count
   { tab: "active", label: "Active", title: "Active", count: (c) => c.active },
   { tab: "closed", label: "Closed", title: "Closed", count: (c) => c.closed },
 ];
-
-// The cortex tab strip: an underlined tab with a count pill; "Needs you" keeps a red pill while it has carriers.
-function TabStrip({ active, counts, onTab }: { active: InboxTab; counts: Counts | null; onTab: (tab: InboxTab) => void }) {
-  return (
-    <div role="tablist" aria-label="Carrier tabs" className="flex shrink-0 border-b border-line">
-      {tabs.map(({ tab, label, count, urgent }) => {
-        const selected = tab === active;
-        const n = counts ? count(counts) : null;
-        const pill = selected ? "bg-accent-soft text-accent" : urgent && n ? "bg-risk-soft text-risk" : "bg-panel-raised text-fg-muted";
-        return (
-          <button
-            key={tab}
-            type="button"
-            role="tab"
-            aria-selected={selected}
-            aria-label={label ? undefined : "All"}
-            onClick={() => onTab(tab)}
-            className={`-mb-px flex flex-1 cursor-pointer items-center justify-center gap-1 border-b-2 px-1.5 py-2 text-xs font-medium whitespace-nowrap outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:ring-inset ${
-              selected ? "border-accent text-accent" : "border-transparent text-fg-muted hover:text-fg"
-            }`}
-          >
-            {label || <LuInbox size={14} aria-hidden />}
-            <span className={`tabular min-w-4 rounded-full px-1 py-0.5 text-center text-[10px] leading-none font-semibold ${pill}`}>
-              {n ?? "-"}
-            </span>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
 
 // The cortex lead row: dot and name, numbers, last message, badges, time and counts.
 function CarrierRow({
@@ -179,8 +146,9 @@ export function CarrierList({
   const buttons = useRef(new Map<string, HTMLButtonElement>());
   const rows = data?.rows ?? [];
   const total = data?.total ?? 0;
-  const first = (page - 1) * inboxPageSize + 1;
-  const last = Math.min(page * inboxPageSize, total);
+  const pageSize = data?.pageSize ?? 0;
+  const first = (page - 1) * pageSize + 1;
+  const last = Math.min(page * pageSize, total);
   const everything = data ? tabs[0]!.count(data.counts) : 0;
   const title = tabs.find((t) => t.tab === tab)?.title ?? "Carriers";
 
@@ -274,7 +242,18 @@ export function CarrierList({
         )}
       </div>
 
-      <TabStrip active={tab} counts={data?.counts ?? null} onTab={onTab} />
+      <TabStrip
+        label="Carrier tabs"
+        tabs={tabs.map((t) => ({
+          value: t.tab,
+          label: t.label || <LuInbox size={14} aria-hidden />,
+          ariaLabel: t.label ? undefined : "All",
+          count: data ? t.count(data.counts) : null,
+          urgent: t.urgent,
+        }))}
+        active={tab}
+        onTab={onTab}
+      />
 
       <div className="min-h-0 flex-1 overflow-y-auto">{body}</div>
 

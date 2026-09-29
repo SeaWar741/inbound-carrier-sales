@@ -365,8 +365,6 @@ export const operatorWallResponse = z.object({
   tmsHealth,
   // "human": a rep confirms every hold. "autonomous": create_hold books right away.
   autonomy: z.enum(autonomyModes),
-  // Newest call first.
-  calls: z.array(wallCall),
 });
 export type OperatorWallResponse = z.infer<typeof operatorWallResponse>;
 
@@ -471,11 +469,16 @@ export const operatorCarriersResponse = z.object({
   // Carriers in the selected tab after the filters; counts are per tab after the same filters.
   total: z.number().int(),
   page: z.number().int(),
+  pageSize: z.number().int(),
   counts: z.object({ needsYou: z.number().int(), live: z.number().int(), active: z.number().int(), closed: z.number().int() }),
 });
 export type OperatorCarriersResponse = z.infer<typeof operatorCarriersResponse>;
 
 export const operatorCarrierCallsParams = z.object({ key: z.string().trim().min(1).max(128) });
-// Newest call first; an unknown key answers an empty list.
-export const operatorCarrierCallsResponse = z.object({ status: z.literal("ok"), calls: z.array(wallCall) });
+// The carrier summary reads the same window and live calls as the list, so it matches the carrier's row.
+export const operatorCarrierCallsQuery = operatorCarriersQuery.pick({ since: true, live: true });
+export type OperatorCarrierCallsQuery = z.output<typeof operatorCarrierCallsQuery>;
+// Newest call first; an unknown key answers an empty list. The carrier is its list row in the
+// `since` window, null when it has no call there.
+export const operatorCarrierCallsResponse = z.object({ status: z.literal("ok"), calls: z.array(wallCall), carrier: operatorCarrier.nullable() });
 export type OperatorCarrierCallsResponse = z.infer<typeof operatorCarrierCallsResponse>;

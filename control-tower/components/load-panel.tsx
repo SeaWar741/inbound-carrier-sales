@@ -58,7 +58,6 @@ export function LoadPanel({
         .reduce((sum, i) => sum + (i.amountUsd ?? 0), 0)
     : 0;
   const path = useMemo(() => (loadId ? negotiationPath(history, loadId) : []), [history, loadId]);
-  const outcome = useMemo(() => (loadId ? loadOutcome(history, loadId) : null), [history, loadId]);
   const agreedRate = hold && hold.status !== "released" && hold.loadId === offer?.loadId ? hold.agreedRate : null;
 
   return (
@@ -99,7 +98,7 @@ export function LoadPanel({
             authorizedUsd={authorizedUsd}
             agreedRate={agreedRate}
             path={path}
-            outcome={outcome ?? { kind: "no_offer" }}
+            outcome={loadOutcome(history, offer.loadId)}
           />
         </div>
       )}

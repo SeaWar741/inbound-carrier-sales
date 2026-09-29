@@ -26,7 +26,7 @@ export type OperatorRouteDeps = { twin: Pick<TwinClient, "query">; tmsHealth: Pi
 // round of each load, the live hold, the last events and every intervention. Nested timestamps
 // are cast to timestamptz so the JSON carries an offset. The sql tag cannot nest statements,
 // so queries splice this fragment's text between their own tagged parts.
-export const callColumns = sql`EXISTS (SELECT 1 FROM call_events e WHERE e.call_id = t.call_id AND e.tool = 'request_human') AS human_requested,
+const callColumns = sql`EXISTS (SELECT 1 FROM call_events e WHERE e.call_id = t.call_id AND e.tool = 'request_human') AS human_requested,
         COALESCE((SELECT json_agg(o ORDER BY o.created_at) FROM (
           SELECT DISTINCT ON (load_id) load_id, round, carrier_ask, decision, rate_to_say, posted_rate, max_buy,
             origin_city, origin_state, origin_zip, destination_city, destination_state, destination_zip, equipment, miles, pickup_at,
@@ -54,7 +54,7 @@ export const wallCallColumns: SqlStatement = {
 };
 
 // Stored timestamps are session-zone wall clock; bounds are converted back to that clock so the
-// created_at comparison stays index-friendly. The wall and its counters come back in a single row.
+// created_at comparison stays index-friendly. The day's counters come back in a single row.
 export function wallQuery(): SqlStatement {
   const text = sql`WITH bounds AS (
       SELECT date_trunc('day', now() AT TIME ZONE ${operatorTimeZone}) AS local_start
@@ -65,9 +65,6 @@ export function wallQuery(): SqlStatement {
     ), today_holds AS (
       SELECT h.* FROM holds h JOIN today t ON t.call_id = h.call_id
       WHERE h.status IN ('booked', 'booked_unconfirmed')
-    ), wall AS (
-      SELECT `.text + wallCallColumns.text + sql`
-      FROM today t
     )
     SELECT to_char((SELECT local_start FROM bounds), 'YYYY-MM-DD') AS day,
       (SELECT count(*) FROM today) AS calls_count,
@@ -75,8 +72,7 @@ export function wallQuery(): SqlStatement {
       (SELECT count(*) FROM today WHERE NOT eligible OR (NOT verified AND otp_attempts >= ${otpMaxAttempts})) AS blocked,
       (SELECT COALESCE(sum(agreed_rate), 0) FROM today_holds) AS dollars_generated,
       (SELECT COALESCE(sum(max_buy - agreed_rate), 0) FROM today_holds) AS margin_saved,
-      COALESCE((SELECT value FROM settings WHERE key = 'autonomy'), 'human') AS autonomy,
-      COALESCE((SELECT json_agg(w ORDER BY w.created_at DESC) FROM wall w), '[]'::json) AS calls`.text;
+      COALESCE((SELECT value FROM settings WHERE key = 'autonomy'), 'human') AS autonomy`.text;
   return { text };
 }
 
@@ -153,7 +149,7 @@ const interventionRow = z.object({
   created_at: timestamp,
 });
 
-const callRow = z.object({
+export const callRow = z.object({
   call_id: z.string(),
   mc_number: z.string().nullable(),
   dot_number: z.string().nullable(),
@@ -178,7 +174,6 @@ export const wallRow = z.object({
   dollars_generated: money,
   margin_saved: money,
   autonomy: z.enum(autonomyModes),
-  calls: z.array(callRow),
 });
 export type WallRow = z.output<typeof wallRow>;
 
@@ -264,7 +259,6 @@ export function operatorWallRoutes(deps: OperatorRouteDeps): FastifyPluginAsync 
             },
             tmsHealth: deps.tmsHealth.snapshot(),
             autonomy: row.autonomy,
-            calls: row.calls.map(toWallCall),
           };
           return wall;
         } catch (error) {

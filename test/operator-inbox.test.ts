@@ -130,6 +130,7 @@ const twin = {
     statements.push(statement.text);
     if (failTwin) throw new TwinError("connection reset");
     const text = statement.text;
+    if (text.endsWith("FROM staged p")) return text.includes("'unknown'") ? [] : [rowSchema.parse(carriersRow.rows[0])];
     if (text.startsWith("WITH scoped")) return [rowSchema.parse(carriersRow)];
     if (text.includes("FROM calls t WHERE COALESCE('mc:' || t.mc_number")) {
       return text.includes("'unknown'") ? [] : [callRow, { ...callRow, call_id: "call-a", hold: null }].map((r) => rowSchema.parse(r));
@@ -248,7 +249,7 @@ describe("GET /v1/operator/carriers", () => {
     expect(res.statusCode).toBe(200);
     expect(statements).toHaveLength(1);
     const body = operatorCarriersResponse.parse(res.json());
-    expect(body).toMatchObject({ total: 2, page: 2, counts: { needsYou: 1, live: 0, active: 1, closed: 3 } });
+    expect(body).toMatchObject({ total: 2, page: 2, pageSize: 25, counts: { needsYou: 1, live: 0, active: 1, closed: 3 } });
     expect(body.rows[0]).toMatchObject({
       key: "mc:123456",
       carrierName: "ACME TRUCKING LLC",
@@ -268,15 +269,17 @@ describe("GET /v1/operator/carriers", () => {
     expect(text).toContain("SELECT c.*, COALESCE('mc:' || c.mc_number, 'dot:' || c.dot_number, 'call:' || c.call_id) AS carrier_key");
   });
 
-  it("takes the trip from the latest booked hold across every call in the window, not only the latest call", () => {
+  it("takes the trip and the open hold from every call in the window, not only the latest call", () => {
     const text = carriersQuery(operatorCarriersQuery.parse({})).text;
     const booked = text.slice(text.indexOf("booked AS ("), text.indexOf("booked_trip AS ("));
     expect(booked).toContain("FROM scoped s JOIN holds h ON h.call_id = s.call_id");
     expect(booked).toContain("WHERE h.status IN ('booked', 'booked_unconfirmed')");
     expect(booked).toContain("ORDER BY s.carrier_key, h.created_at DESC");
     expect(booked).not.toContain("latest_call_id");
-    // needs_approval still reads the latest call's open hold.
-    expect(text).toContain("h.call_id = k.latest_call_id AND h.status IN ('held', 'confirming')) THEN 'needs_approval'");
+    const approval = text.slice(text.indexOf("CASE\n"), text.indexOf("THEN 'needs_approval'"));
+    expect(approval).toContain("FROM scoped s JOIN holds h ON h.call_id = s.call_id");
+    expect(approval).toContain("WHERE s.carrier_key = k.carrier_key AND h.status IN ('held', 'confirming')");
+    expect(approval).not.toContain("latest_call_id");
   });
 
   it("omits every absent or empty filter instead of rendering IN ()", () => {
@@ -334,8 +337,12 @@ describe("GET /v1/operator/carriers", () => {
 });
 
 describe("GET /v1/operator/carriers/:key/calls", () => {
-  const getCalls = (key: string) =>
-    app.inject({ method: "GET", url: `/v1/operator/carriers/${encodeURIComponent(key)}/calls`, headers: { "x-api-key": testConfig.OPERATOR_API_KEY } });
+  const getCalls = (key: string, query = "") =>
+    app.inject({
+      method: "GET",
+      url: `/v1/operator/carriers/${encodeURIComponent(key)}/calls${query}`,
+      headers: { "x-api-key": testConfig.OPERATOR_API_KEY },
+    });
 
   it("returns the carrier's calls as wall calls, newest first, capped at 50", async () => {
     statements.length = 0;
@@ -344,17 +351,37 @@ describe("GET /v1/operator/carriers/:key/calls", () => {
     const { calls } = operatorCarrierCallsResponse.parse(res.json());
     expect(calls.map((c) => c.callId)).toEqual(["call-b", "call-a"]);
     expect(calls[0]).toMatchObject({ otp: { attempts: 1 }, hold: { holdId: "7b0c2a5e-8a39-4b8e-9d7e-0f3f2d1c4b5a" } });
-    const [text] = statements;
+    const text = statements.find((t) => t.startsWith("SELECT")) ?? "";
     expect(text).toContain("COALESCE('mc:' || t.mc_number, 'dot:' || t.dot_number, 'call:' || t.call_id) = E'mc:123456'");
     expect(text).toContain("ORDER BY t.created_at DESC, t.call_id DESC");
     expect(text).toContain("LIMIT 50");
     expect(text).toContain("AS human_requested");
   });
 
-  it("answers an empty list for an unknown key", async () => {
+  it("returns the carrier's list row, read from the same stage CTEs narrowed to its key", async () => {
+    statements.length = 0;
+    const res = await getCalls("mc:123456", "?since=30d&live=run-1");
+    expect(res.statusCode).toBe(200);
+    const { carrier } = operatorCarrierCallsResponse.parse(res.json());
+    expect(carrier).toMatchObject({ key: "mc:123456", callsCount: 3, loadsCount: 2, carrierStage: "in_transit", latestCall: { callId: "call-b" } });
+    expect(statements).toHaveLength(2);
+    const text = statements.find((t) => t.startsWith("WITH scoped")) ?? "";
+    expect(text).toContain(
+      "c.created_at >= (now() - interval '30 days')::timestamp AND COALESCE('mc:' || c.mc_number, 'dot:' || c.dot_number, 'call:' || c.call_id) = E'mc:123456'",
+    );
+    expect(text).toContain("k.latest_call_id IN (E'run-1') AS latest_live");
+    expect(text).toContain("THEN 'needs_approval'");
+    expect(text).not.toContain("tabbed AS");
+  });
+
+  it("rejects an unknown since", async () => {
+    expect((await getCalls("mc:123456", "?since=1y")).statusCode).toBe(400);
+  });
+
+  it("answers an empty list and no carrier for an unknown key", async () => {
     const res = await getCalls("unknown");
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ status: "ok", calls: [] });
+    expect(res.json()).toEqual({ status: "ok", calls: [], carrier: null });
   });
 
   it("answers 503 when Twin fails", async () => {

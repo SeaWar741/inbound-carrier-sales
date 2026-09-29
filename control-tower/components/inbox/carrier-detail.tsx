@@ -12,6 +12,7 @@ import {
   LuTruck,
 } from "react-icons/lu";
 import { CallDetail } from "@/components/call-detail";
+import { equipmentLabel } from "@/components/hold-card";
 import { Badge, CarrierStagePill } from "@/components/inbox/stage-pill";
 import { LoadPanel } from "@/components/load-panel";
 import { PulseDot } from "@/components/pulse-dot";
@@ -64,8 +65,9 @@ function Fact({ label, children }: { label: string; children: React.ReactNode })
   );
 }
 
-// The cortex CRM card: an icon square and title over a two-column grid of facts.
-function FactsCard({ carrier, calls }: { carrier: TowerCarrier | undefined; calls: TowerCall[] }) {
+// The cortex CRM card: an icon square and title over a two-column grid of facts. Every count reads
+// the calls on file, so the card never mixes them with the list's `since` window.
+function FactsCard({ carrier, calls }: { carrier: TowerCarrier | null; calls: TowerCall[] }) {
   const hold = openHold(calls);
   const pricing = useMemo(() => carrierPricing(calls), [calls]);
   const orDash = (value: number | null, format: (v: number) => string) => (value === null ? "-" : format(value));
@@ -78,8 +80,8 @@ function FactsCard({ carrier, calls }: { carrier: TowerCarrier | undefined; call
         <div className="min-w-0 flex-1 text-sm font-semibold text-fg">Carrier record</div>
       </div>
       <div className="grid grid-cols-2 gap-3 p-3 text-xs">
-        <Fact label="Calls">{carrier?.callsCount ?? calls.length}</Fact>
-        <Fact label="Loads offered">{carrier ? carrier.loadsCount : "-"}</Fact>
+        <Fact label="Calls">{calls.length}</Fact>
+        <Fact label="Loads offered">{pricing.loadsOffered}</Fact>
         <Fact label="Next pickup">{carrier?.nextTrip?.pickupAt ? formatDateTime(carrier.nextTrip.pickupAt) : "-"}</Fact>
         <Fact label="ETA">{carrier?.nextTrip?.etaAt ? formatDateTime(carrier.nextTrip.etaAt) : "-"}</Fact>
         <div className="col-span-2 min-w-0">
@@ -106,7 +108,7 @@ function FactsCard({ carrier, calls }: { carrier: TowerCarrier | undefined; call
   );
 }
 
-function Aside({ carrier, calls, selected }: { carrier: TowerCarrier | undefined; calls: TowerCall[]; selected: TowerCall | null }) {
+function Aside({ carrier, calls, selected }: { carrier: TowerCarrier | null; calls: TowerCall[]; selected: TowerCall | null }) {
   return (
     <div className="space-y-3 p-3 pb-6">
       <FactsCard carrier={carrier} calls={calls} />
@@ -124,12 +126,6 @@ const outcomeTone: Record<LoadOutcome["kind"], string> = {
   lost: "bg-panel-raised text-fg-muted",
   no_offer: "bg-panel-raised text-fg-muted",
 };
-
-// "FLATBED" or "DRY_VAN" as the card words it.
-function equipmentLabel(equipment: string): string {
-  const words = equipment.replaceAll("_", " ").toLowerCase();
-  return words.charAt(0).toUpperCase() + words.slice(1);
-}
 
 function laneOf(card: LoadCard<TowerCall>): WallLane | null {
   for (const call of card.calls) {
@@ -339,24 +335,27 @@ function Timeline({
 // call's live detail, and the carrier facts with the load on the table.
 export function CarrierDetail({
   carrierKey,
-  carrier,
+  since,
   selectedCallId,
   now,
   onSelectCall,
 }: {
   carrierKey: string;
-  // The carrier's row when it is on the list page; the header falls back to its calls otherwise.
-  carrier: TowerCarrier | undefined;
+  // The list's window, so the carrier's row here matches its row there; empty for the default.
+  since: string;
   selectedCallId: string | null;
   now: number;
   onSelectCall: (callId: string) => void;
 }) {
-  const { data, error, loading } = usePoll<TowerCarrierCalls>(`/api/carriers/${encodeURIComponent(carrierKey)}/calls`, callsPollMs, "call list");
+  const url = `/api/carriers/${encodeURIComponent(carrierKey)}/calls${since ? `?since=${encodeURIComponent(since)}` : ""}`;
+  const { data, error, loading } = usePoll<TowerCarrierCalls>(url, callsPollMs, "call list");
   // The call the operator is speaking on, so its timeline entry stays marked.
   const [takenOverCallId, setTakenOverCallId] = useState<string | null>(null);
   const wide = useWide();
 
   const calls = data?.calls ?? [];
+  // The carrier's list row; null when it has no call in the window, and the header falls back to its calls.
+  const carrier = data?.carrier ?? null;
   const latest = calls[0];
   const selected = calls.find((call) => call.callId === selectedCallId) ?? latest ?? null;
   const name = carrier ? carrierName(carrier) : latest ? carrierId(latest) : "Carrier";
@@ -367,7 +366,7 @@ export function CarrierDetail({
   const eta = carrier?.nextTrip?.etaAt ?? null;
 
   const callPane = selected ? (
-    <CallDetail key={selected.callId} call={selected} now={now} onTakeoverChange={setTakenOverCallId} hideCarrier endedFooter />
+    <CallDetail key={selected.callId} call={selected} now={now} onTakeoverChange={setTakenOverCallId} />
   ) : (
     <div className="grid flex-1 place-items-center text-sm text-fg-muted">{loading ? "Loading calls..." : "No calls for this carrier"}</div>
   );

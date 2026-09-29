@@ -140,7 +140,7 @@ export function outcomeLabel(outcome: LoadOutcome): { text: string; tone: string
 }
 
 // The newest summary the agent wrote on a call.
-export function lastSummary(call: Pick<TowerCall, "events">): string | null {
+function lastSummary(call: Pick<TowerCall, "events">): string | null {
   return call.events.findLast((event) => event.summary)?.summary ?? null;
 }
 

@@ -120,9 +120,8 @@ export const adapterWallResponse = z.object({
   tmsHealth,
   // Defaults to the safe mode when an older adapter does not send it.
   autonomy: z.enum(autonomyModes).default("human"),
-  calls: z.array(adapterWallCall),
 });
-export type AdapterWallResponse = z.infer<typeof adapterWallResponse>;
+export type TowerWall = z.infer<typeof adapterWallResponse>;
 
 // A wall call as the tower serves it: the adapter row plus the live HappyRobot session, if any.
 export type TowerCall = Omit<AdapterWallCall, "stage"> & {
@@ -130,12 +129,6 @@ export type TowerCall = Omit<AdapterWallCall, "stage"> & {
   live: boolean;
   sessionId: string | null;
   channel: Channel | null;
-};
-
-export type TowerWall = Omit<AdapterWallResponse, "calls"> & {
-  calls: TowerCall[];
-  // True when HappyRobot could not be reached; calls then carry the adapter stage and live: false.
-  liveUnavailable: boolean;
 };
 
 // The live state HappyRobot reports for one call, keyed by call id (run id).
@@ -205,6 +198,7 @@ export const adapterCarriersResponse = z.object({
   // Carriers in the selected tab after the filters; counts are per tab after the same filters.
   total: z.number().int(),
   page: z.number().int(),
+  pageSize: z.number().int(),
   counts: z.object({ needsYou: z.number().int(), live: z.number().int(), active: z.number().int(), closed: z.number().int() }),
 });
 export type AdapterCarriersResponse = z.infer<typeof adapterCarriersResponse>;
@@ -217,12 +211,14 @@ export type TowerCarriers = Omit<AdapterCarriersResponse, "rows"> & {
   liveUnavailable: boolean;
 };
 
-// Newest call first; an unknown key answers an empty list.
-export const adapterCarrierCallsResponse = z.object({ status: z.literal("ok"), calls: z.array(adapterWallCall) });
+// Newest call first; an unknown key answers an empty list. The carrier is its list row in the
+// `since` window, null when it has no call there.
+export const adapterCarrierCallsResponse = z.object({ status: z.literal("ok"), calls: z.array(adapterWallCall), carrier: adapterCarrier.nullable() });
 export type AdapterCarrierCallsResponse = z.infer<typeof adapterCarrierCallsResponse>;
 // One carrier's calls as the tower serves them: each carries the live HappyRobot session, like the wall.
-export type TowerCarrierCalls = Omit<AdapterCarrierCallsResponse, "calls"> & {
+export type TowerCarrierCalls = Omit<AdapterCarrierCallsResponse, "calls" | "carrier"> & {
   calls: TowerCall[];
+  carrier: TowerCarrier | null;
   // True when HappyRobot could not be reached; calls then carry the adapter stage and live: false.
   liveUnavailable: boolean;
 };

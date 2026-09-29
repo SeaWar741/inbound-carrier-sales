@@ -18,12 +18,6 @@ export function perMile(rate: number | null, miles: number | null | undefined): 
   return rate / miles;
 }
 
-// Signed distance from the posted rate: positive pays over the target buy.
-export function spreadVsPosted(rate: number | null, postedRate: number | null): number | null {
-  if (rate === null || postedRate === null) return null;
-  return rate - postedRate;
-}
-
 export function average(values: number[]): number | null {
   if (values.length === 0) return null;
   return values.reduce((sum, value) => sum + value, 0) / values.length;

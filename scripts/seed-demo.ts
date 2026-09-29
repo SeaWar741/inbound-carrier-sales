@@ -16,7 +16,7 @@ async function teardown() {
   for (const table of ["interventions", "call_events", "offers", "calls"]) {
     await run({ text: `DELETE FROM ${table} WHERE call_id LIKE 'demo-%'` });
   }
-  await run({ text: "DELETE FROM holds WHERE call_id LIKE 'demo-%' OR load_id LIKE 'DM%'" });
+  await run({ text: "DELETE FROM holds WHERE call_id LIKE 'demo-%'" });
 }
 
 await teardown();
@@ -27,17 +27,17 @@ if (process.argv.includes("--teardown")) {
 
 type Lane = [string, string, string, string, string, string, number, string];
 const lanes: Lane[] = [
-  ["Chicago", "IL", "60601", "Dallas", "TX", "75201", 925, "DRY VAN"],
+  ["Chicago", "IL", "60601", "Dallas", "TX", "75201", 925, "DRY_VAN"],
   ["Atlanta", "GA", "30303", "Nashville", "TN", "37203", 250, "REEFER"],
-  ["Los Angeles", "CA", "90012", "Phoenix", "AZ", "85004", 370, "DRY VAN"],
+  ["Los Angeles", "CA", "90012", "Phoenix", "AZ", "85004", 370, "DRY_VAN"],
   ["Denver", "CO", "80202", "Kansas City", "MO", "64105", 605, "FLATBED"],
   ["Houston", "TX", "77002", "Memphis", "TN", "38103", 565, "REEFER"],
-  ["Columbus", "OH", "43215", "Charlotte", "NC", "28202", 425, "DRY VAN"],
+  ["Columbus", "OH", "43215", "Charlotte", "NC", "28202", 425, "DRY_VAN"],
   ["Seattle", "WA", "98104", "Salt Lake City", "UT", "84101", 840, "FLATBED"],
-  ["Indianapolis", "IN", "46204", "Minneapolis", "MN", "55401", 590, "DRY VAN"],
+  ["Indianapolis", "IN", "46204", "Minneapolis", "MN", "55401", 590, "DRY_VAN"],
   ["Philadelphia", "PA", "19103", "Pittsburgh", "PA", "15222", 305, "REEFER"],
   ["Miami", "FL", "33101", "Atlanta", "GA", "30303", 660, "REEFER"],
-  ["Portland", "OR", "97204", "Los Angeles", "CA", "90012", 965, "DRY VAN"],
+  ["Portland", "OR", "97204", "Los Angeles", "CA", "90012", 965, "DRY_VAN"],
   ["Dallas", "TX", "75201", "Denver", "CO", "80202", 790, "FLATBED"],
 ];
 

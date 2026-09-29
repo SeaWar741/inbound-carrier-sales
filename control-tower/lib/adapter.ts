@@ -10,12 +10,12 @@ import {
   releaseHoldResponse,
   type AdapterCarrierCallsResponse,
   type AdapterCarriersResponse,
-  type AdapterWallResponse,
   type AutonomyMode,
   type ConfirmHoldResponse,
   type ErrorResponse,
   type ReleaseHoldResponse,
   type TowerLoads,
+  type TowerWall,
 } from "./contracts";
 import { env } from "./env";
 
@@ -53,7 +53,7 @@ async function json(response: Response): Promise<unknown> {
   return response.json().catch(() => undefined);
 }
 
-export async function getWall(): Promise<AdapterResult<AdapterWallResponse>> {
+export async function getWall(): Promise<AdapterResult<TowerWall>> {
   const response = await call("/v1/operator/wall", { method: "GET", timeoutMs: readTimeoutMs });
   if (!response?.ok) return unavailable("The call data is unavailable right now. Retry shortly.");
   const parsed = adapterWallResponse.safeParse(await json(response));
@@ -82,9 +82,10 @@ export async function getCarriers(query: URLSearchParams): Promise<AdapterResult
   return read(`/v1/operator/carriers?${query.toString()}`, adapterCarriersResponse, "The carrier data is unavailable right now. Retry shortly.");
 }
 
-export async function getCarrierCalls(key: string): Promise<AdapterResult<AdapterCarrierCallsResponse>> {
+// query carries the list's `since` and the running call ids, so the carrier row matches its list row.
+export async function getCarrierCalls(key: string, query: URLSearchParams): Promise<AdapterResult<AdapterCarrierCallsResponse>> {
   return read(
-    `/v1/operator/carriers/${encodeURIComponent(key)}/calls`,
+    `/v1/operator/carriers/${encodeURIComponent(key)}/calls?${query.toString()}`,
     adapterCarrierCallsResponse,
     "The call data is unavailable right now. Retry shortly.",
   );

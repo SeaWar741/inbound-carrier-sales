@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { IconType } from "react-icons";
 import { LuArrowDownUp, LuArrowRight, LuCalendarDays, LuChevronDown, LuCircleDot, LuRoute, LuSearch, LuTruck, LuX } from "react-icons/lu";
 import { equipmentLabel } from "@/components/hold-card";
@@ -37,6 +37,107 @@ const sortLabels: Record<(typeof inboxSorts)[number], string> = {
   pickup: "Pickup",
 };
 const searchDebounceMs = 300;
+
+// The box follows the typing; onSearch follows the box once typing pauses. A q changed from
+// outside the box ("Clear filters", a pasted URL) resets it.
+export function SearchInput({
+  q,
+  onSearch,
+  placeholder,
+  label,
+  className = "",
+}: {
+  q: string;
+  onSearch: (q: string) => void;
+  placeholder: string;
+  label: string;
+  className?: string;
+}) {
+  const [search, setSearch] = useState(q);
+  const lastSent = useRef(q);
+
+  useEffect(() => {
+    if (q !== lastSent.current) {
+      lastSent.current = q;
+      setSearch(q);
+    }
+  }, [q]);
+
+  useEffect(() => {
+    const next = search.trim();
+    if (next === lastSent.current) return;
+    const timer = setTimeout(() => {
+      lastSent.current = next;
+      onSearch(next);
+    }, searchDebounceMs);
+    return () => clearTimeout(timer);
+  }, [search, onSearch]);
+
+  return (
+    <div className={`relative ${className}`}>
+      <LuSearch size={16} className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-fg-faint" aria-hidden />
+      <input
+        type="search"
+        value={search}
+        onChange={(event) => setSearch(event.target.value)}
+        maxLength={64}
+        placeholder={placeholder}
+        aria-label={label}
+        className="h-9 w-full min-w-0 rounded-md border border-line bg-transparent py-1 pr-3 pl-9 text-sm text-fg shadow-xs outline-none transition-[color,box-shadow] placeholder:text-fg-faint focus-visible:border-accent focus-visible:ring-[3px] focus-visible:ring-accent/30"
+      />
+    </div>
+  );
+}
+
+export type Tab<T extends string> = {
+  value: T;
+  label: React.ReactNode;
+  // Names a tab whose label is only an icon.
+  ariaLabel?: string;
+  count: number | null;
+  // Keeps a red pill while its count is not zero.
+  urgent?: boolean;
+};
+
+// The cortex tab strip: an underlined tab with a count pill.
+export function TabStrip<T extends string>({
+  label,
+  tabs,
+  active,
+  onTab,
+}: {
+  label: string;
+  tabs: Tab<T>[];
+  active: T;
+  onTab: (value: T) => void;
+}) {
+  return (
+    <div role="tablist" aria-label={label} className="flex shrink-0 border-b border-line">
+      {tabs.map((tab) => {
+        const selected = tab.value === active;
+        const pill = selected ? "bg-accent-soft text-accent" : tab.urgent && tab.count ? "bg-risk-soft text-risk" : "bg-panel-raised text-fg-muted";
+        return (
+          <button
+            key={tab.value}
+            type="button"
+            role="tab"
+            aria-selected={selected}
+            aria-label={tab.ariaLabel}
+            onClick={() => onTab(tab.value)}
+            className={`-mb-px flex min-w-0 flex-1 cursor-pointer items-center justify-center gap-1 border-b-2 px-1.5 py-2 text-xs font-medium whitespace-nowrap outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:ring-inset ${
+              selected ? "border-accent text-accent" : "border-transparent text-fg-muted hover:text-fg"
+            }`}
+          >
+            {tab.label}
+            <span className={`tabular min-w-4 rounded-full px-1 py-0.5 text-center text-[10px] leading-none font-semibold ${pill}`}>
+              {tab.count ?? "-"}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 // The cortex filter chip (an h-8 select trigger with a leading icon), on a native select.
 export function FilterSelect({
@@ -125,44 +226,12 @@ export function FilterBar({
   onChange: (key: keyof InboxFilters, value: string) => void;
   onClear: () => void;
 }) {
-  // The box follows the typing; the URL (and the poll) follows the box once typing pauses.
-  const [search, setSearch] = useState(filters.q);
-  const lastSent = useRef(filters.q);
-
-  // "Clear filters" or a pasted URL changes q from outside the box.
-  useEffect(() => {
-    if (filters.q !== lastSent.current) {
-      lastSent.current = filters.q;
-      setSearch(filters.q);
-    }
-  }, [filters.q]);
-
-  useEffect(() => {
-    const next = search.trim();
-    if (next === lastSent.current) return;
-    const timer = setTimeout(() => {
-      lastSent.current = next;
-      onChange("q", next);
-    }, searchDebounceMs);
-    return () => clearTimeout(timer);
-  }, [search, onChange]);
-
+  const onSearch = useCallback((q: string) => onChange("q", q), [onChange]);
   const narrowed = [filters.stage, filters.equipment, filters.origin, filters.destination, filters.since, filters.q].some((v) => v !== "");
 
   return (
     <>
-      <div className="relative mb-2">
-        <LuSearch size={16} className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-fg-faint" aria-hidden />
-        <input
-          type="search"
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-          maxLength={64}
-          placeholder="Search MC, DOT, carrier, load..."
-          aria-label="Search carriers"
-          className="h-9 w-full min-w-0 rounded-md border border-line bg-transparent py-1 pr-3 pl-9 text-sm text-fg shadow-xs outline-none transition-[color,box-shadow] placeholder:text-fg-faint focus-visible:border-accent focus-visible:ring-[3px] focus-visible:ring-accent/30"
-        />
-      </div>
+      <SearchInput q={filters.q} onSearch={onSearch} placeholder="Search MC, DOT, carrier, load..." label="Search carriers" className="mb-2" />
 
       {/* Starts at the left and wraps to a second row when the chips outgrow the pane; never scrolls or clips a label. */}
       <div className="flex flex-wrap items-center gap-1.5">

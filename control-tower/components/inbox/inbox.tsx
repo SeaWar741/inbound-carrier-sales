@@ -74,8 +74,6 @@ export function Inbox() {
     [update],
   );
 
-  const carrier = data?.rows.find((row) => row.key === selectedKey);
-
   return (
     <div className="flex h-full min-h-0 overflow-hidden">
       <div className="h-full min-h-0 w-[22rem] shrink-0">
@@ -98,7 +96,7 @@ export function Inbox() {
 
       {selectedKey ? (
         // Keyed so a new carrier starts with an empty call list instead of the last carrier's.
-        <CarrierDetail key={selectedKey} carrierKey={selectedKey} carrier={carrier} selectedCallId={selectedCallId} now={now} onSelectCall={onSelectCall} />
+        <CarrierDetail key={selectedKey} carrierKey={selectedKey} since={filters.since} selectedCallId={selectedCallId} now={now} onSelectCall={onSelectCall} />
       ) : (
         <div className="grid h-full min-w-0 flex-1 place-items-center bg-bg">
           <div className="text-center text-fg-muted">

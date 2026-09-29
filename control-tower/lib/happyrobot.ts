@@ -13,7 +13,7 @@ const signalTimeoutMs = 20_000;
 
 let client: HappyRobotClient | undefined;
 function happyRobot(): HappyRobotClient {
-  // The wall refreshes every 2 s, so a slow answer is dropped rather than retried.
+  // The inbox polls every 5 s, so a slow answer is dropped rather than retried.
   client ??= new HappyRobotClient({ apiKey: env().HAPPYROBOT_API_KEY, timeout: 5_000, maxRetries: 0 });
   return client;
 }
@@ -34,7 +34,7 @@ export type RunningRun = {
 };
 
 // A run's session never changes once it exists, so it is fetched once per run and kept for the
-// life of the server. The wall then costs two HappyRobot requests a tick however many calls are live.
+// life of the server. A poll then costs two HappyRobot requests however many calls are live.
 const sessionByRun = new Map<string, { id: string; channel: Channel | null }>();
 
 async function sessionOf(runId: string): Promise<{ id: string; channel: Channel | null } | null> {

@@ -4,19 +4,21 @@ import { z } from "zod";
 import {
   carrierStages,
   operatorCarrierCallsParams,
+  operatorCarrierCallsQuery,
   operatorCarrierCallsResponse,
   operatorCarriersQuery,
   operatorCarriersResponse,
   operatorLoadsResponse,
   operatorWallUnavailableResponse,
   type OperatorCarrier,
+  type OperatorCarrierCallsQuery,
   type OperatorCarriersQuery,
   type OperatorLoad,
 } from "../contract.ts";
 import { carrierCallsLimit, dashboardLoadsLimit, inboxPageSize, operatorTimeZone } from "../constants.ts";
 import { tripProgress, tripSql, tripStatuses } from "../domain/trip.ts";
 import { sql, type SqlStatement, type TwinClient } from "../infra/twin-client.ts";
-import { laneOf, toWallCall, wallCallColumns, wallRow } from "./operator.ts";
+import { callRow, laneOf, toWallCall, wallCallColumns } from "./operator.ts";
 
 export type OperatorInboxDeps = { twin: Pick<TwinClient, "query"> };
 
@@ -109,37 +111,17 @@ const sortOrders: Record<OperatorCarriersQuery["sort"], string> = {
 // LIKE wildcards in the search box are literal characters.
 const containsPattern = (q: string) => `%${q.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_")}%`;
 
-// One round trip: the page of carriers, the tab total and the four tab counts. A carrier is every
-// call sharing carrierKey inside the `since` window. needs_approval, negotiating and live come from
-// its latest call; booked, in_transit and arrived from its latest booked hold across all those calls.
-// `filtered` applies the bar filters; the counts group it by tab and the total and page add the tab,
-// so all three read one predicate.
-export function carriersQuery(params: OperatorCarriersQuery): SqlStatement {
-  const latestLive = params.live.length > 0 ? sql`k.latest_call_id IN (${params.live})`.text : "FALSE";
-
-  const filters: string[] = [];
-  if (params.stage.length > 0) filters.push(sql`st.carrier_stage IN (${params.stage})`.text);
-  const laneFilters: string[] = [];
-  if (params.equipment.length > 0) laneFilters.push(sql`o.equipment IN (${params.equipment})`.text);
-  if (params.origin) laneFilters.push(sql`o.origin_state = ${params.origin}`.text);
-  if (params.destination) laneFilters.push(sql`o.destination_state = ${params.destination}`.text);
-  if (laneFilters.length > 0) {
-    filters.push(`EXISTS (SELECT 1 FROM scoped s JOIN offers o ON o.call_id = s.call_id
-        WHERE s.carrier_key = st.carrier_key AND ${laneFilters.join(" AND ")})`);
-  }
-  if (params.q) {
-    const pattern = containsPattern(params.q);
-    filters.push(sql`EXISTS (SELECT 1 FROM scoped s WHERE s.carrier_key = st.carrier_key AND (
-        s.mc_number ILIKE ${pattern} OR s.dot_number ILIKE ${pattern} OR s.carrier_name ILIKE ${pattern}
-        OR EXISTS (SELECT 1 FROM offers o WHERE o.call_id = s.call_id AND o.load_id ILIKE ${pattern})))`.text);
-  }
-  const tabFilter = params.tab === "all" ? "TRUE" : sql`f.tab = ${params.tab}`.text;
-  const offset = (params.page - 1) * inboxPageSize;
-
-  const text =
+// The CTEs up to `staged`: one row per carrier with its stage. A carrier is every call sharing
+// carrierKey inside the `since` window, narrowed to one carrier when `key` is given. needs_approval
+// comes from an open hold on any of those calls, negotiating and live from its latest call, and
+// booked, in_transit and arrived from its latest booked hold across all those calls.
+function stagedCtes(since: OperatorCarriersQuery["since"], live: string[], key?: string): string {
+  const latestLive = live.length > 0 ? sql`k.latest_call_id IN (${live})`.text : "FALSE";
+  const keyFilter = key === undefined ? "" : ` AND ` + carrierKey("c") + sql` = ${key}`.text;
+  return (
     `WITH scoped AS (
       SELECT c.*, ` + carrierKey("c") + ` AS carrier_key
-      FROM calls c WHERE c.created_at >= ` + sinceBounds[params.since].text + `
+      FROM calls c WHERE c.created_at >= ` + sinceBounds[since].text + keyFilter + `
     ), grouped AS (
       SELECT s.carrier_key, count(*) AS calls_count, max(s.created_at) AS last_call_at,
         (array_agg(s.call_id ORDER BY s.created_at DESC, s.call_id DESC))[1] AS latest_call_id,
@@ -177,7 +159,10 @@ export function carriersQuery(params: OperatorCarriersQuery): SqlStatement {
         GREATEST(k.last_call_at, os.last_offer_at, es.last_event_at, hs.last_hold_at) AS last_activity_at,
         bt.carrier_key IS NOT NULL AS has_booking, bt.agreed_rate, bt.pickup_ts, bt.eta_ts, bt.trip_status,
         CASE
-          WHEN EXISTS (SELECT 1 FROM holds h WHERE h.call_id = k.latest_call_id AND h.status IN ('held', 'confirming')) THEN 'needs_approval'
+          WHEN EXISTS (
+            SELECT 1 FROM scoped s JOIN holds h ON h.call_id = s.call_id
+            WHERE s.carrier_key = k.carrier_key AND h.status IN ('held', 'confirming')
+          ) THEN 'needs_approval'
           WHEN k.latest_live AND EXISTS (SELECT 1 FROM offers o WHERE o.call_id = k.latest_call_id) THEN 'negotiating'
           WHEN k.latest_live THEN 'live'
           WHEN bt.trip_status = 'in_transit' THEN 'in_transit'
@@ -193,7 +178,43 @@ export function carriersQuery(params: OperatorCarriersQuery): SqlStatement {
       LEFT JOIN event_stats es ON es.carrier_key = k.carrier_key
       LEFT JOIN hold_stats hs ON hs.carrier_key = k.carrier_key
       LEFT JOIN booked_trip bt ON bt.carrier_key = k.carrier_key
-    ), tabbed AS (
+    )`
+  );
+}
+
+// A carrier row's columns from a `staged` row aliased `p`, as carrierRow parses them.
+const carrierColumns =
+  `p.carrier_key, p.mc_number, p.dot_number, p.carrier_name, p.calls_count, p.loads_count,
+          p.last_activity_at::timestamptz AS last_activity_at, p.carrier_stage, p.needs_human,
+          p.has_booking, p.pickup_ts, p.eta_ts, p.trip_status,
+          (SELECT row_to_json(w) FROM (SELECT ` + wallCallColumns.text + `
+            FROM calls t WHERE t.call_id = p.latest_call_id) w) AS latest_call`;
+
+// One round trip: the page of carriers, the tab total and the four tab counts. `filtered` applies
+// the bar filters; the counts group it by tab and the total and page add the tab, so all three
+// read one predicate.
+export function carriersQuery(params: OperatorCarriersQuery): SqlStatement {
+  const filters: string[] = [];
+  if (params.stage.length > 0) filters.push(sql`st.carrier_stage IN (${params.stage})`.text);
+  const laneFilters: string[] = [];
+  if (params.equipment.length > 0) laneFilters.push(sql`o.equipment IN (${params.equipment})`.text);
+  if (params.origin) laneFilters.push(sql`o.origin_state = ${params.origin}`.text);
+  if (params.destination) laneFilters.push(sql`o.destination_state = ${params.destination}`.text);
+  if (laneFilters.length > 0) {
+    filters.push(`EXISTS (SELECT 1 FROM scoped s JOIN offers o ON o.call_id = s.call_id
+        WHERE s.carrier_key = st.carrier_key AND ${laneFilters.join(" AND ")})`);
+  }
+  if (params.q) {
+    const pattern = containsPattern(params.q);
+    filters.push(sql`EXISTS (SELECT 1 FROM scoped s WHERE s.carrier_key = st.carrier_key AND (
+        s.mc_number ILIKE ${pattern} OR s.dot_number ILIKE ${pattern} OR s.carrier_name ILIKE ${pattern}
+        OR EXISTS (SELECT 1 FROM offers o WHERE o.call_id = s.call_id AND o.load_id ILIKE ${pattern})))`.text);
+  }
+  const tabFilter = params.tab === "all" ? "TRUE" : sql`f.tab = ${params.tab}`.text;
+  const offset = (params.page - 1) * inboxPageSize;
+
+  const text =
+    stagedCtes(params.since, params.live) + `, tabbed AS (
       SELECT st.*, CASE
           WHEN st.carrier_stage = 'needs_approval' OR st.needs_human THEN 'needs_you'
           WHEN st.carrier_stage IN ('live', 'negotiating') THEN 'live'
@@ -215,18 +236,13 @@ export function carriersQuery(params: OperatorCarriersQuery): SqlStatement {
       (SELECT count(*) FROM filtered WHERE tab = 'active') AS active,
       (SELECT count(*) FROM filtered WHERE tab = 'closed') AS closed,
       COALESCE((SELECT json_agg(r ORDER BY r.ord) FROM (
-        SELECT p.ord, p.carrier_key, p.mc_number, p.dot_number, p.carrier_name, p.calls_count, p.loads_count,
-          p.last_activity_at::timestamptz AS last_activity_at, p.carrier_stage, p.needs_human,
-          p.has_booking, p.pickup_ts, p.eta_ts, p.trip_status,
-          (SELECT row_to_json(w) FROM (SELECT ` + wallCallColumns.text + `
-            FROM calls t WHERE t.call_id = p.latest_call_id) w) AS latest_call
+        SELECT p.ord, ` + carrierColumns + `
         FROM ordered p WHERE p.ord > ` + sql`${offset}`.text + ` AND p.ord <= ` + sql`${offset + inboxPageSize}`.text + `
       ) r), '[]'::json) AS rows`;
   return { text };
 }
 
 const count = z.coerce.number().int();
-const callRow = wallRow.shape.calls.element;
 
 const carrierRow = z.object({
   carrier_key: z.string(),
@@ -274,6 +290,13 @@ function toOperatorCarrier(row: CarrierRow): OperatorCarrier {
   };
 }
 
+// One carrier's list row, the same columns and stage the list computes, for the detail header.
+export function carrierSummaryQuery(key: string, params: OperatorCarrierCallsQuery): SqlStatement {
+  return { text: stagedCtes(params.since, params.live, key) + `
+    SELECT ` + carrierColumns + `
+    FROM staged p` };
+}
+
 // The carrier's latest calls, newest first, with the same columns the wall reads.
 export function carrierCallsQuery(key: string): SqlStatement {
   const text =
@@ -316,6 +339,7 @@ export function operatorInboxRoutes(deps: OperatorInboxDeps): FastifyPluginAsync
             rows: row.rows.map(toOperatorCarrier),
             total: row.total,
             page: params.page,
+            pageSize: inboxPageSize,
             counts: { needsYou: row.needs_you, live: row.live, active: row.active, closed: row.closed },
           };
         } catch (error) {
@@ -327,11 +351,21 @@ export function operatorInboxRoutes(deps: OperatorInboxDeps): FastifyPluginAsync
 
     app.get(
       "/operator/carriers/:key/calls",
-      { schema: { params: operatorCarrierCallsParams, response: { 200: operatorCarrierCallsResponse, 503: operatorWallUnavailableResponse } } },
+      {
+        schema: {
+          params: operatorCarrierCallsParams,
+          querystring: operatorCarrierCallsQuery,
+          response: { 200: operatorCarrierCallsResponse, 503: operatorWallUnavailableResponse },
+        },
+      },
       async (request, reply) => {
+        const { key } = request.params;
         try {
-          const rows = await deps.twin.query(carrierCallsQuery(request.params.key), callRow);
-          return { status: "ok" as const, calls: rows.map(toWallCall) };
+          const [rows, [summary]] = await Promise.all([
+            deps.twin.query(carrierCallsQuery(key), callRow),
+            deps.twin.query(carrierSummaryQuery(key, request.query), carrierRow),
+          ]);
+          return { status: "ok" as const, calls: rows.map(toWallCall), carrier: summary ? toOperatorCarrier(summary) : null };
         } catch (error) {
           request.log.warn({ err: error }, "operator carrier calls unavailable");
           return reply.code(503).send({ status: "service_unavailable", message: "The call data is unavailable right now. Retry shortly." });

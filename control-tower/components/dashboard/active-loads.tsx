@@ -1,28 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { LuArrowDownUp, LuArrowRight, LuList, LuSearch, LuTriangleAlert, LuTruck, LuX } from "react-icons/lu";
+import { useCallback, useEffect, useRef } from "react";
+import { LuArrowDownUp, LuArrowRight, LuList, LuTriangleAlert, LuTruck, LuX } from "react-icons/lu";
 import { tripLabels, tripTones } from "@/components/dashboard/kpi-tiles";
 import { EmptyState } from "@/components/empty-state";
 import { equipmentLabel } from "@/components/hold-card";
-import { FilterSelect } from "@/components/inbox/filter-bar";
+import { FilterSelect, SearchInput, TabStrip } from "@/components/inbox/filter-bar";
 import type { TowerLoad, TripStatus } from "@/lib/contracts";
-import { formatUsd } from "@/lib/format";
+import { carrierName, formatDateTime, formatUsd } from "@/lib/format";
 import type { LoadFilters, LoadSort } from "@/lib/load-filters";
-
-// ETAs are instants; the desk reads them on Chicago time.
-const etaFormat = new Intl.DateTimeFormat("en-US", {
-  timeZone: "America/Chicago",
-  month: "short",
-  day: "numeric",
-  hour: "numeric",
-  minute: "2-digit",
-});
-
-export function carrierLabel(load: TowerLoad): string {
-  if (load.carrierName) return load.carrierName;
-  return load.mcNumber ? `MC ${load.mcNumber}` : "Unidentified carrier";
-}
 
 function LoadRow({ load, selected, onSelect }: { load: TowerLoad; selected: boolean; onSelect: (id: string) => void }) {
   const ref = useRef<HTMLButtonElement>(null);
@@ -59,8 +45,8 @@ function LoadRow({ load, selected, onSelect }: { load: TowerLoad; selected: bool
         </span>
       </div>
       <div className="flex min-w-0 items-center justify-between gap-3 text-xs text-fg-muted">
-        <span className="truncate">{carrierLabel(load)}</span>
-        <span className="tabular shrink-0">ETA {etaFormat.format(new Date(load.etaAt))}</span>
+        <span className="truncate">{carrierName({ ...load, dotNumber: null })}</span>
+        <span className="tabular shrink-0">ETA {formatDateTime(load.etaAt)}</span>
       </div>
       <div
         className="h-1 overflow-hidden rounded-full bg-panel-raised"
@@ -76,8 +62,6 @@ function LoadRow({ load, selected, onSelect }: { load: TowerLoad; selected: bool
   );
 }
 
-const searchDebounceMs = 200;
-
 const statusTabs: { status: TripStatus | ""; label: string }[] = [
   { status: "", label: "All" },
   { status: "in_transit", label: tripLabels.in_transit },
@@ -92,86 +76,6 @@ const sortOptions: { value: LoadSort; label: string }[] = [
   { value: "rate", label: "Rate high to low" },
   { value: "progress", label: "Progress" },
 ];
-
-// The box follows the typing; the filter follows the box once typing pauses.
-function SearchBox({ q, onSearch }: { q: string; onSearch: (q: string) => void }) {
-  const [search, setSearch] = useState(q);
-  const lastSent = useRef(q);
-
-  // The Clear button resets q from outside the box.
-  useEffect(() => {
-    if (q !== lastSent.current) {
-      lastSent.current = q;
-      setSearch(q);
-    }
-  }, [q]);
-
-  useEffect(() => {
-    const next = search.trim();
-    if (next === lastSent.current) return;
-    const timer = setTimeout(() => {
-      lastSent.current = next;
-      onSearch(next);
-    }, searchDebounceMs);
-    return () => clearTimeout(timer);
-  }, [search, onSearch]);
-
-  return (
-    <div className="relative">
-      <LuSearch size={16} className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-fg-faint" aria-hidden />
-      <input
-        type="search"
-        value={search}
-        onChange={(event) => setSearch(event.target.value)}
-        maxLength={64}
-        placeholder="Search load, city, carrier, MC"
-        aria-label="Search loads"
-        className="h-9 w-full min-w-0 rounded-md border border-line bg-transparent py-1 pr-3 pl-9 text-sm text-fg shadow-xs outline-none transition-[color,box-shadow] placeholder:text-fg-faint focus-visible:border-accent focus-visible:ring-[3px] focus-visible:ring-accent/30"
-      />
-    </div>
-  );
-}
-
-// The inbox tab strip: an underlined tab with a count pill.
-function StatusTabs({
-  active,
-  counts,
-  onTab,
-}: {
-  active: TripStatus | "";
-  counts: Record<TripStatus | "all", number> | null;
-  onTab: (status: TripStatus | "") => void;
-}) {
-  return (
-    <div role="tablist" aria-label="Load status" className="flex shrink-0 border-b border-line">
-      {statusTabs.map(({ status, label }) => {
-        const selected = status === active;
-        const n = counts ? counts[status || "all"] : null;
-        return (
-          <button
-            key={label}
-            type="button"
-            role="tab"
-            aria-selected={selected}
-            onClick={() => onTab(status)}
-            className={`-mb-px flex min-w-0 flex-1 cursor-pointer items-center justify-center gap-1 border-b-2 px-1 py-2 text-xs font-medium whitespace-nowrap outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:ring-inset ${
-              selected ? "border-accent text-accent" : "border-transparent text-fg-muted hover:text-fg"
-            }`}
-          >
-            {label}
-            <span
-              className={`tabular min-w-4 rounded-full px-1 py-0.5 text-center text-[10px] leading-none font-semibold ${
-                selected ? "bg-accent-soft text-accent" : "bg-panel-raised text-fg-muted"
-              }`}
-            >
-              {n ?? "-"}
-            </span>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
 
 export function ActiveLoads({
   loads,
@@ -221,7 +125,7 @@ export function ActiveLoads({
             </span>
           )}
         </div>
-        <SearchBox q={filters.q} onSearch={onSearch} />
+        <SearchInput q={filters.q} onSearch={onSearch} placeholder="Search load, city, carrier, MC" label="Search loads" />
         <div className="flex min-w-0 items-center gap-1.5">
           <FilterSelect
             label="Equipment"
@@ -246,7 +150,12 @@ export function ActiveLoads({
           </span>
         </div>
       </div>
-      <StatusTabs active={filters.status} counts={counts} onTab={(status) => onFilter("status", status)} />
+      <TabStrip
+        label="Load status"
+        tabs={statusTabs.map(({ status, label }) => ({ value: status, label, count: counts ? counts[status || "all"] : null }))}
+        active={filters.status}
+        onTab={(status) => onFilter("status", status)}
+      />
       <div className="min-h-0 flex-1 overflow-y-auto">
         {loads === null ? (
           <EmptyState className="h-full py-16" icon={<LuTruck size={20} />} title="Loading loads" />
