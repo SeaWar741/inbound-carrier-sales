@@ -50,7 +50,11 @@ export function summarize(tool: string, body: Fields, response: Fields): string 
     case "check_otp":
       return "Checking verification code";
     case "search_loads": {
-      const place = [text(body.originCity), text(body.originState)].filter(Boolean).join(", ") || text(body.originZip);
+      // Validation reshapes the body into `origin: {city, state, zip}`; an unvalidated one is still flat.
+      const origin = asFields(body.origin);
+      const city = text(origin.city) ?? text(body.originCity);
+      const state = text(origin.state) ?? text(body.originState);
+      const place = [city, state].filter(Boolean).join(", ") || text(origin.zip) || text(body.originZip);
       return place ? `Searching loads near ${place}` : "Searching loads";
     }
     case "evaluate_offer": {

@@ -108,6 +108,7 @@ describe("toolName and summarize", () => {
     expect(summarize("check_otp", { code: "123456" }, {})).toBe("Checking verification code");
     expect(summarize("search_loads", { originCity: "Dallas", originState: "TX" }, {})).toBe("Searching loads near Dallas, TX");
     expect(summarize("search_loads", { originZip: "75201" }, {})).toBe("Searching loads near 75201");
+    expect(summarize("search_loads", { origin: { city: "Savannah", state: "GA" } }, {})).toBe("Searching loads near Savannah, GA");
     expect(summarize("evaluate_offer", { loadId: "LD1", carrierAsk: 2150 }, { decision: null, round: null })).toBe(
       "Offer on LD1: carrier asks $2,150",
     );
