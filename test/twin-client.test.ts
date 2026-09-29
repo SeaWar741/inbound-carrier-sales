@@ -7,14 +7,26 @@ describe("sql", () => {
   it("renders escaped literals", () => {
     const at = new Date("2026-09-28T12:00:00Z");
     expect(sql`SELECT ${"O'Brien"}, ${42}, ${true}, ${null}, ${at}`.text).toBe(
-      "SELECT 'O''Brien', 42, TRUE, NULL, '2026-09-28T12:00:00.000Z'",
+      "SELECT E'O''Brien', 42, TRUE, NULL, E'2026-09-28T12:00:00.000Z'",
     );
   });
 
   it("keeps an injection attempt inside one literal", () => {
     expect(sql`WHERE call_id = ${"x'; DROP TABLE calls; --"}`.text).toBe(
-      "WHERE call_id = 'x''; DROP TABLE calls; --'",
+      "WHERE call_id = E'x''; DROP TABLE calls; --'",
     );
+  });
+
+  it("doubles backslashes so one cannot escape the closing quote", () => {
+    expect(sql`WHERE call_id = ${"x\\'; DROP TABLE calls; --"}`.text).toBe(
+      String.raw`WHERE call_id = E'x\\''; DROP TABLE calls; --'`,
+    );
+    expect(sql`${"a\\b"}`.text).toBe(String.raw`E'a\\b'`);
+  });
+
+  it("renders a list as escaped literals for IN, and an empty list as NULL", () => {
+    expect(sql`WHERE load_id IN (${["LD1", "O'B"]})`.text).toBe("WHERE load_id IN (E'LD1', E'O''B')");
+    expect(sql`WHERE load_id IN (${[]})`.text).toBe("WHERE load_id IN (NULL)");
   });
 
   it("rejects values Postgres cannot hold safely", () => {
@@ -33,7 +45,7 @@ describe("TwinClient", () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
       jsonResponse(200, okBody([{
         hold_id: "h1", call_id: "c1", load_id: "LD00001", mc_number: null, agreed_rate: "2100",
-        status: "held", booking_ref: null, idempotency_key: null,
+        status: "held", booking_ref: null, idempotency_key: null, release_reason: null,
         created_at: "2026-09-28T12:00:00.000Z", updated_at: "2026-09-28T12:00:00.000Z",
       }])),
     );
@@ -43,7 +55,7 @@ describe("TwinClient", () => {
     expect(hold).toMatchObject({ holdId: "h1", agreedRate: 2100, status: "held" });
     const [url, init] = fetchMock.mock.calls[0] ?? [];
     expect(url).toBe("https://platform.happyrobot.ai/api/v2/twin/sql");
-    expect(init?.body).toBe(JSON.stringify({ sql: "SELECT * FROM holds WHERE hold_id = 'h1'" }));
+    expect(init?.body).toBe(JSON.stringify({ sql: "SELECT * FROM holds WHERE hold_id = E'h1'" }));
   });
 
   it("surfaces unique violations as a typed error", async () => {

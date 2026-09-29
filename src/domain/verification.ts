@@ -19,7 +19,8 @@ export type VerificationInput =
       carrier: FmcsaCarrier;
       authorities: FmcsaAuthority[];
       outOfService: FmcsaOutOfService[];
-      contact: CensusContact | null;
+      // null: the census has no single row for the carrier; undefined: the census could not be read.
+      contact: CensusContact | null | undefined;
       now: Date;
     };
 
@@ -69,13 +70,16 @@ function safetyRatingGate(carrier: FmcsaCarrier): Gate {
 
 const dayMs = 86_400_000;
 
-export function riskFlagsFor(contact: CensusContact | null, now: Date): RiskFlag[] {
+export function riskFlagsFor(contact: CensusContact | null | undefined, now: Date): RiskFlag[] {
   const flags: RiskFlag[] = [];
   const changedAt = contact?.mcs150Date;
   if (changedAt && now.getTime() - changedAt.getTime() < contactChangeWindowDays * dayMs) {
     flags.push("contact_changed_recently");
   }
-  if (!contact || (!contact.email && !contact.phone && !contact.cellPhone)) flags.push("no_contact_on_file");
+  // An unread census says nothing about the contact, so it raises no flag.
+  if (contact === null || (contact && !contact.email && !contact.phone && !contact.cellPhone)) {
+    flags.push("no_contact_on_file");
+  }
   return flags;
 }
 

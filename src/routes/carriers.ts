@@ -47,7 +47,7 @@ function soleMcDocket(authorities: FmcsaAuthority[]): string | null {
 }
 
 // SMS reaches a cell phone, so it wins over the business line when both are on file.
-function maskContact(contact: CensusContact | null): VerifyCarrierResponse["maskedContact"] {
+function maskContact(contact: CensusContact | null | undefined): VerifyCarrierResponse["maskedContact"] {
   const email = contact?.email ? maskEmail(contact.email) : undefined;
   const phoneNumber = contact?.cellPhone ?? contact?.phone;
   const phone = phoneNumber ? maskPhone(phoneNumber) : undefined;
@@ -82,7 +82,7 @@ export function carrierRoutes(deps: CarrierRouteDeps): FastifyPluginAsync {
           const carrier = candidates.length === 1 ? candidates[0] : undefined;
 
           let verification: Verification;
-          let contact: CensusContact | null = null;
+          let contact: CensusContact | null | undefined = null;
           let resolvedDot = dotNumber ?? null;
           let resolvedMc = mcNumber ?? null;
           if (carrier) {
@@ -90,7 +90,11 @@ export function carrierRoutes(deps: CarrierRouteDeps): FastifyPluginAsync {
             const [authorities, outOfService, censusContact] = await Promise.all([
               deps.fmcsa.authorities(resolvedDot),
               deps.fmcsa.outOfServiceOrders(resolvedDot),
-              deps.census.contactByDot(resolvedDot),
+              // The contact only feeds masking and risk flags, so a census outage leaves it unknown.
+              deps.census.contactByDot(resolvedDot).catch((error: unknown) => {
+                request.log.warn({ err: error }, "census contact unavailable");
+                return undefined;
+              }),
             ]);
             contact = censusContact;
             resolvedMc ??= soleMcDocket(authorities);

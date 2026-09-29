@@ -40,6 +40,16 @@ async function isCallVerified(twin: TwinClient, callId: string): Promise<boolean
   return rows[0]?.verified === true;
 }
 
+// One query for the whole list: a load another call is holding is not pitched.
+async function loadsHeldByOtherCalls(twin: TwinClient, callId: string, loadIds: string[]): Promise<Set<string>> {
+  if (loadIds.length === 0) return new Set();
+  const rows = await twin.query(
+    sql`SELECT load_id FROM holds WHERE load_id IN (${loadIds}) AND status <> 'released' AND call_id <> ${callId}`,
+    z.object({ load_id: z.string() }),
+  );
+  return new Set(rows.map((row) => row.load_id));
+}
+
 // YYYYMMDDHHMMSS carries no timezone on the wire, so none is invented here.
 const readableDateTime = (wire: string) =>
   `${wire.slice(0, 4)}-${wire.slice(4, 6)}-${wire.slice(6, 8)} ${wire.slice(8, 10)}:${wire.slice(10, 12)}`;
@@ -102,17 +112,27 @@ export function loadRoutes(deps: LoadRouteDeps): FastifyPluginAsync {
 
         try {
           const summaries = await deps.tms.queryLoads(toFilters(request.body));
-          const shortlist = summaries.filter((load) => isOpen(load.status)).slice(0, loadsPitchedPerSearch);
-          // A load that vanished or changed status since the query is dropped, not pitched.
+          const open = summaries.filter((load) => isOpen(load.status));
+          const heldElsewhere = await loadsHeldByOtherCalls(deps.twin, request.body.callId, open.map((load) => load.loadId));
+          const shortlist = open.filter((load) => !heldElsewhere.has(load.loadId)).slice(0, loadsPitchedPerSearch);
+          // A load that vanished, changed status or could not be read since the query is dropped, not pitched.
           const details = await Promise.all(
             shortlist.map((load) =>
               deps.tms.getLoad(load.loadId).catch((error: unknown) => {
-                if (error instanceof TmsBusinessError) return null;
+                if (error instanceof TmsBusinessError) return "gone" as const;
+                if (error instanceof TmsUnavailableError) {
+                  request.log.warn({ err: error, loadId: load.loadId }, "load detail unavailable");
+                  return "unavailable" as const;
+                }
                 throw error;
               }),
             ),
           );
-          const loads = details.filter((load): load is LoadDetail => load !== null && isOpen(load.status)).map(toPitchedLoad);
+          const loads = details.filter((load): load is LoadDetail => typeof load === "object" && isOpen(load.status)).map(toPitchedLoad);
+          const noneRead = details.every((load) => typeof load !== "object");
+          if (noneRead && details.includes("unavailable")) {
+            return noLoads("tms_unavailable", messages.tmsUnavailable);
+          }
           if (loads.length === 0) return noLoads("no_loads", messages.noLoads);
           return { status: "ok" as const, message: found(loads.length), loads };
         } catch (error) {

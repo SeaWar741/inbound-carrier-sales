@@ -52,10 +52,12 @@ type CallState = {
   verified: boolean;
 };
 
-// In-memory stand-in for the three statements the OTP routes run against Twin.
+// In-memory stand-in for the statements the OTP routes run against Twin.
 function fakeTwin(calls: Map<string, CallState>) {
   const statements: string[] = [];
-  const idOf = (text: string) => /call_id = '([^']+)'/.exec(text)?.[1] ?? "";
+  // Runs just before the verify UPDATE, to interleave a concurrent change.
+  const hooks: { beforeVerify?: () => void } = {};
+  const idOf = (text: string) => /call_id = E'([^']+)'/.exec(text)?.[1] ?? "";
   const query = async <T>(statement: SqlStatement, rowSchema: z.ZodType<T>): Promise<T[]> => {
     const text = statement.text;
     statements.push(text);
@@ -64,7 +66,7 @@ function fakeTwin(calls: Map<string, CallState>) {
     if (text.startsWith("SELECT c.dot_number")) {
       if (call) rows.push({ dot_number: call.dotNumber, eligible: call.eligible, sends_last_hour: String(call.sendsLastHour) });
     } else if (text.includes("SET otp_hash =") && call) {
-      call.otpHash = /otp_hash = '([0-9a-f]+)'/.exec(text)?.[1] ?? null;
+      call.otpHash = /otp_hash = E'([0-9a-f]+)'/.exec(text)?.[1] ?? null;
       call.otpExpiresAt = new Date(Date.now() + 300_000);
       call.otpAttempts = 0;
       rows.push({ call_id: idOf(text) });
@@ -79,13 +81,17 @@ function fakeTwin(calls: Map<string, CallState>) {
         });
       }
     } else if (text.includes("SET verified = TRUE") && call) {
-      call.verified = true;
-      call.otpHash = null;
-      rows.push({ call_id: idOf(text) });
+      hooks.beforeVerify?.();
+      const expected = /AND otp_hash = E'([0-9a-f]+)'/.exec(text)?.[1];
+      if (expected !== undefined && call.otpHash === expected) {
+        call.verified = true;
+        call.otpHash = null;
+        rows.push({ call_id: idOf(text) });
+      }
     }
     return rows.map((row) => rowSchema.parse(row));
   };
-  return { twin: { query }, statements };
+  return { twin: { query }, statements, hooks };
 }
 
 const eligibleCall = (): CallState => ({
@@ -100,7 +106,7 @@ const eligibleCall = (): CallState => ({
 
 describe("OTP routes", () => {
   const calls = new Map<string, CallState>();
-  const { twin, statements } = fakeTwin(calls);
+  const { twin, statements, hooks } = fakeTwin(calls);
   const send = vi.fn<(channel: "email" | "sms", to: string, code: string) => Promise<string>>();
   const supports = vi.fn<(channel: "email" | "sms") => boolean>();
   const contactByDot = vi.fn<OtpRouteDeps["census"]["contactByDot"]>();
@@ -125,6 +131,7 @@ describe("OTP routes", () => {
       mcs150Date: null,
     });
     routeConfig.OTP_DELIVERY_MODE = "demo";
+    delete hooks.beforeVerify;
   });
 
   it("sends to the demo recipient by default and never returns or stores the code", async () => {
@@ -192,6 +199,42 @@ describe("OTP routes", () => {
     expect((await post("/v1/otp/check", { callId: "call-1", code: wrong })).json()).toMatchObject({ status: "locked", attemptsLeft: 0 });
     expect((await post("/v1/otp/check", { callId: "call-1", code: sentCode() })).json()).toMatchObject({ status: "locked", verified: false });
     expect(calls.get("call-1")?.verified).toBe(false);
+  });
+
+  it("spends only the challenge it compared: a code replaced meanwhile verifies nothing", async () => {
+    calls.set("call-1", eligibleCall());
+    await post("/v1/otp/send", { callId: "call-1", channel: "email" });
+    const code = sentCode();
+    hooks.beforeVerify = () => {
+      const call = calls.get("call-1");
+      if (call) call.otpHash = hashCode(testConfig.OTP_HASH_SECRET, "call-1", code === "000000" ? "000001" : "000000");
+    };
+    const res = await post("/v1/otp/check", { callId: "call-1", code });
+    expect(res.json()).toMatchObject({ status: "no_active_code", verified: false });
+    expect(calls.get("call-1")?.verified).toBe(false);
+    const verify = statements.find((text) => text.includes("SET verified = TRUE")) ?? "";
+    expect(verify).toContain(`AND otp_hash = E'${hashCode(testConfig.OTP_HASH_SECRET, "call-1", code)}'`);
+  });
+
+  it("reads a spoken code with spaces or dashes and a loosely named channel", async () => {
+    calls.set("call-1", eligibleCall());
+    for (const channel of [" Text ", "SMS message", "txt"]) {
+      expect((await post("/v1/otp/send", { callId: "call-1", channel })).json()).toMatchObject({ status: "ok" });
+      expect(send).toHaveBeenLastCalledWith("sms", "+15555550100", expect.any(String));
+    }
+    for (const channel of ["E-mail", "mail", "EMAIL"]) {
+      expect((await post("/v1/otp/send", { callId: "call-1", channel })).json()).toMatchObject({ status: "ok" });
+      expect(send).toHaveBeenLastCalledWith("email", "demo@example.com", expect.any(String));
+    }
+    const code = sentCode();
+    const spoken = `${code.slice(0, 3)} - ${code.slice(3)}`;
+    expect((await post("/v1/otp/check", { callId: "call-1", code: spoken })).json()).toMatchObject({ status: "ok", verified: true });
+  });
+
+  it("answers invalid_request for an unknown channel", async () => {
+    const res = await post("/v1/otp/send", { callId: "call-1", channel: "fax" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ status: "invalid_request", sent: false });
   });
 
   it("answers invalid_request with HTTP 200 for a malformed code", async () => {

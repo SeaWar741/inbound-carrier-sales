@@ -4,11 +4,18 @@ import { twinRequestTimeoutMs } from "../constants.ts";
 // Twin is Postgres behind `POST /twin/sql`. It takes no bind parameters, so values are
 // rendered as escaped literals by `sql`; identifiers are never interpolated.
 
-export type SqlValue = string | number | boolean | null | Date;
+type SqlScalar = string | number | boolean | null | Date;
+// A list renders as comma-separated literals for `IN (...)`; an empty list renders NULL, which matches nothing.
+export type SqlValue = SqlScalar | readonly SqlScalar[];
 
 export type SqlStatement = { readonly text: string };
 
 function literal(value: SqlValue): string {
+  if (value instanceof Date || typeof value !== "object" || value === null) return scalarLiteral(value);
+  return value.length === 0 ? "NULL" : value.map(scalarLiteral).join(", ");
+}
+
+function scalarLiteral(value: SqlScalar): string {
   if (value === null) return "NULL";
   if (typeof value === "boolean") return value ? "TRUE" : "FALSE";
   if (typeof value === "number") {
@@ -17,8 +24,9 @@ function literal(value: SqlValue): string {
   }
   const text = value instanceof Date ? value.toISOString() : value;
   if (text.includes("\0")) throw new TypeError("NUL byte in SQL literal");
-  // standard_conforming_strings is on, so doubling the quote is the complete escape.
-  return `'${text.replaceAll("'", "''")}'`;
+  // Twin reported standard_conforming_strings = on when checked on 2026-09-29, but an E-string
+  // reads backslashes the same way under either setting, so the escape does not depend on it.
+  return `E'${text.replaceAll("\\", "\\\\").replaceAll("'", "''")}'`;
 }
 
 export function sql(strings: TemplateStringsArray, ...values: SqlValue[]): SqlStatement {

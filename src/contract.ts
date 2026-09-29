@@ -136,7 +136,21 @@ export const evaluateOfferResponse = z.object({
 });
 export type EvaluateOfferResponse = z.infer<typeof evaluateOfferResponse>;
 
-export const sendOtpBody = z.object({ callId, channel: z.enum(["email", "sms"]) });
+// Callers and the agent name the channel loosely: "Text", "e-mail", "SMS message".
+const channelAliases = new Map([
+  ["text", "sms"],
+  ["sms message", "sms"],
+  ["txt", "sms"],
+  ["e-mail", "email"],
+  ["mail", "email"],
+]);
+const otpChannel = z
+  .string()
+  .transform((value) => value.trim().toLowerCase().replace(/\s+/g, " "))
+  .transform((value) => channelAliases.get(value) ?? value)
+  .pipe(z.enum(["email", "sms"]));
+
+export const sendOtpBody = z.object({ callId, channel: otpChannel });
 export type SendOtpBody = z.output<typeof sendOtpBody>;
 
 export const sendOtpResponse = z.object({
@@ -157,7 +171,13 @@ export const sendOtpResponse = z.object({
 });
 export type SendOtpResponse = z.infer<typeof sendOtpResponse>;
 
-export const checkOtpBody = z.object({ callId, code: z.string().trim().regex(new RegExp(`^\\d{${otpDigits}}$`), `code must be ${otpDigits} digits`) });
+// A code read aloud often arrives as "123 456" or "123-456".
+const otpCode = z
+  .string()
+  .transform((value) => value.replace(/[\s-]/g, ""))
+  .pipe(z.string().regex(new RegExp(`^\\d{${otpDigits}}$`), `code must be ${otpDigits} digits`));
+
+export const checkOtpBody = z.object({ callId, code: otpCode });
 export type CheckOtpBody = z.output<typeof checkOtpBody>;
 
 export const checkOtpResponse = z.object({
@@ -219,3 +239,19 @@ export const confirmHoldResponse = z.object({
 export type ConfirmHoldResponse = z.infer<typeof confirmHoldResponse>;
 
 export const idempotencyConflictResponse = z.object({ status: z.literal("conflict"), message: z.string() });
+
+// The body is optional (Fastify passes a missing one as null); without a reason the default is stored.
+export const releaseHoldBody = z.preprocess(
+  (value) => value ?? {},
+  z.object({ reason: z.string().trim().min(1).max(200).default("released_by_operator") }),
+);
+
+export const releaseHoldResponse = z.object({
+  status: z.enum(["released", "not_releasable", "not_found", "service_unavailable", "invalid_request"]),
+  message: z.string(),
+  holdId: z.string().nullable(),
+  holdStatus: z.enum(holdStatuses).nullable(),
+  bookingRef: z.string().nullable(),
+  reason: z.string().nullable(),
+});
+export type ReleaseHoldResponse = z.infer<typeof releaseHoldResponse>;

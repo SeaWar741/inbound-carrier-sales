@@ -8,32 +8,22 @@ import {
   createHoldBody,
   createHoldResponse,
   idempotencyConflictResponse,
+  releaseHoldBody,
+  releaseHoldResponse,
   type ConfirmHoldResponse,
   type CreateHoldResponse,
+  type ReleaseHoldResponse,
 } from "../contract.ts";
 import { resolveBooking, type BookingAttempt } from "../domain/holds.ts";
 import type { BookingRequest } from "../infra/tms/codec.ts";
 import { TmsBusinessError, TmsUnavailableError } from "../infra/tms/errors.ts";
 import type { TmsClient } from "../infra/tms/tms-client.ts";
 import { sql, TwinError, type TwinClient } from "../infra/twin-client.ts";
-import { holdStatuses } from "../infra/twin-schemas.ts";
+import { holdRowSchema, type HoldRow } from "../infra/twin-schemas.ts";
 
 export type HoldRouteDeps = { tms: Pick<TmsClient, "getLoad">; twin: Pick<TwinClient, "query"> };
 export type ConfirmHoldRouteDeps = { tms: Pick<TmsClient, "bookLoad">; twin: Pick<TwinClient, "query"> };
-
-// release_reason comes from a migration, so it is not part of holdRowSchema.
-const holdRow = z.object({
-  hold_id: z.string(),
-  call_id: z.string(),
-  load_id: z.string(),
-  mc_number: z.string().nullable(),
-  agreed_rate: z.coerce.number().int(),
-  status: z.enum(holdStatuses),
-  booking_ref: z.string().nullable(),
-  idempotency_key: z.string().nullable(),
-  release_reason: z.string().nullable(),
-});
-type Hold = z.output<typeof holdRow>;
+export type ReleaseHoldRouteDeps = { twin: Pick<TwinClient, "query"> };
 
 const dollars = (usd: number) => `$${usd.toLocaleString("en-US")}`;
 
@@ -58,18 +48,18 @@ const noHold = (status: Exclude<CreateHoldResponse["status"], "ok">, message: st
 });
 
 // Never promises the booking: only the operator's confirm books the load.
-const holdPlaced = (hold: Hold): CreateHoldResponse => ({
+const holdPlaced = (hold: HoldRow): CreateHoldResponse => ({
   status: "ok",
-  message: `That load is on hold for you at ${dollars(hold.agreed_rate)}. A senior rep will review it and get back to you shortly to confirm.`,
-  holdId: hold.hold_id,
+  message: `That load is on hold for you at ${dollars(hold.agreedRate)}. A senior rep will review it and get back to you shortly to confirm.`,
+  holdId: hold.holdId,
   holdStatus: hold.status,
 });
 
 const agreementRow = z.object({ verified: z.boolean(), mc_number: z.string().nullable(), agreed: z.boolean() });
 
 export function holdRoutes(deps: HoldRouteDeps): FastifyPluginAsync {
-  const activeHold = async (loadId: string): Promise<Hold | undefined> => {
-    const [hold] = await deps.twin.query(sql`SELECT * FROM holds WHERE load_id = ${loadId} AND status <> 'released'`, holdRow);
+  const activeHold = async (loadId: string): Promise<HoldRow | undefined> => {
+    const [hold] = await deps.twin.query(sql`SELECT * FROM holds WHERE load_id = ${loadId} AND status <> 'released'`, holdRowSchema);
     return hold;
   };
 
@@ -86,8 +76,8 @@ export function holdRoutes(deps: HoldRouteDeps): FastifyPluginAsync {
     app.post("/holds", { schema: { body: createHoldBody, response: { 200: createHoldResponse } } }, async (request) => {
       const { callId, loadId, agreedRate } = request.body;
       // The same call asking again gets its hold back; any other call is refused.
-      const existingOutcome = (hold: Hold) =>
-        hold.call_id === callId ? holdPlaced(hold) : noHold("load_on_hold", createMessages.loadOnHold);
+      const existingOutcome = (hold: HoldRow) =>
+        hold.callId === callId ? holdPlaced(hold) : noHold("load_on_hold", createMessages.loadOnHold);
       try {
         // Only a rate the negotiation itself accepted can be held; the agent cannot invent one.
         const [call] = await deps.twin.query(
@@ -112,7 +102,7 @@ export function holdRoutes(deps: HoldRouteDeps): FastifyPluginAsync {
           const [hold] = await deps.twin.query(
             sql`INSERT INTO holds (call_id, load_id, mc_number, agreed_rate)
                 VALUES (${callId}, ${loadId}, ${call.mc_number}, ${agreedRate}) RETURNING *`,
-            holdRow,
+            holdRowSchema,
           );
           if (!hold) throw new Error("hold insert returned no row");
           return holdPlaced(hold);
@@ -151,15 +141,15 @@ const noResult = (
 ): ConfirmHoldResponse => ({ status, message, holdId, holdStatus: null, bookingRef: null, reason: null });
 
 // Built from the stored row alone, so a replay returns exactly what the first confirm returned.
-function resultFor(hold: Hold): ConfirmHoldResponse {
-  const base = { holdId: hold.hold_id, holdStatus: hold.status, bookingRef: hold.booking_ref, reason: hold.release_reason };
+function resultFor(hold: HoldRow): ConfirmHoldResponse {
+  const base = { holdId: hold.holdId, holdStatus: hold.status, bookingRef: hold.bookingRef, reason: hold.releaseReason };
   switch (hold.status) {
     case "booked":
-      return { ...base, status: "booked", message: `Booked in the TMS. Reference ${hold.booking_ref ?? "unknown"}.` };
+      return { ...base, status: "booked", message: `Booked in the TMS. Reference ${hold.bookingRef ?? "unknown"}.` };
     case "booked_unconfirmed":
       return { ...base, status: "booked_unconfirmed", message: confirmMessages.unconfirmed };
     case "released":
-      return { ...base, status: "released", message: `Not booked (${hold.release_reason ?? "unknown"}). The hold is released.` };
+      return { ...base, status: "released", message: `Not booked (${hold.releaseReason ?? "unknown"}). The hold is released.` };
     case "confirming":
       return { ...base, status: "in_progress", message: confirmMessages.inProgress };
     case "held":
@@ -167,7 +157,7 @@ function resultFor(hold: Hold): ConfirmHoldResponse {
   }
 }
 
-const alreadyProcessed = (hold: Hold): ConfirmHoldResponse => {
+const alreadyProcessed = (hold: HoldRow): ConfirmHoldResponse => {
   const stored = resultFor(hold);
   return { ...stored, status: "already_processed", message: `Already processed. ${stored.message}` };
 };
@@ -220,35 +210,35 @@ export function confirmHoldRoutes(deps: ConfirmHoldRouteDeps): FastifyPluginAsyn
         try {
           const rows = await deps.twin.query(
             sql`SELECT * FROM holds WHERE hold_id = ${holdId} OR idempotency_key = ${key}`,
-            holdRow,
+            holdRowSchema,
           );
-          if (rows.some((row) => row.idempotency_key === key && row.hold_id !== holdId)) return conflict();
-          const hold = rows.find((row) => row.hold_id === holdId);
+          if (rows.some((row) => row.idempotencyKey === key && row.holdId !== holdId)) return conflict();
+          const hold = rows.find((row) => row.holdId === holdId);
           if (!hold) return noResult("not_found", confirmMessages.notFound, holdId);
-          if (hold.status !== "held") return hold.idempotency_key === key ? resultFor(hold) : alreadyProcessed(hold);
-          if (hold.mc_number === null) return noResult("invalid_request", confirmMessages.noMcNumber, holdId);
+          if (hold.status !== "held") return hold.idempotencyKey === key ? resultFor(hold) : alreadyProcessed(hold);
+          if (hold.mcNumber === null) return noResult("invalid_request", confirmMessages.noMcNumber, holdId);
 
           // Only the request whose UPDATE flips 'held' to 'confirming' may call LOAD_BOOK.
-          let claimed: Hold | undefined;
+          let claimed: HoldRow | undefined;
           try {
             [claimed] = await deps.twin.query(
               sql`UPDATE holds SET status = 'confirming', idempotency_key = ${key}, updated_at = now()
                   WHERE hold_id = ${holdId} AND status = 'held' RETURNING *`,
-              holdRow,
+              holdRowSchema,
             );
           } catch (error) {
             if (isUniqueViolation(error)) return conflict();
             throw error;
           }
           if (!claimed) {
-            const [current] = await deps.twin.query(sql`SELECT * FROM holds WHERE hold_id = ${holdId}`, holdRow);
+            const [current] = await deps.twin.query(sql`SELECT * FROM holds WHERE hold_id = ${holdId}`, holdRowSchema);
             if (!current) return noResult("not_found", confirmMessages.notFound, holdId);
-            return current.idempotency_key === key ? resultFor(current) : alreadyProcessed(current);
+            return current.idempotencyKey === key ? resultFor(current) : alreadyProcessed(current);
           }
 
           const attempt = await attemptBooking(
             deps.tms,
-            { loadId: claimed.load_id, mcNumber: hold.mc_number, agreedRate: claimed.agreed_rate },
+            { loadId: claimed.loadId, mcNumber: hold.mcNumber, agreedRate: claimed.agreedRate },
             request.log,
           );
           const resolution = resolveBooking(attempt);
@@ -258,7 +248,7 @@ export function confirmHoldRoutes(deps: ConfirmHoldRouteDeps): FastifyPluginAsyn
                   release_reason = ${resolution.reason}, idempotency_key = ${resolution.status === "held" ? null : key},
                   updated_at = now()
                 WHERE hold_id = ${holdId} AND status = 'confirming' RETURNING *`,
-            holdRow,
+            holdRowSchema,
           );
           if (!resolved) throw new Error("hold left 'confirming' before the booking outcome was stored");
           return resultFor(resolved);
@@ -266,6 +256,71 @@ export function confirmHoldRoutes(deps: ConfirmHoldRouteDeps): FastifyPluginAsyn
           // A hold left in 'confirming' is never booked twice; an operator checks it by hand.
           request.log.warn({ err: error, holdId }, "hold confirm unavailable");
           return noResult("service_unavailable", confirmMessages.serviceUnavailable, holdId);
+        }
+      },
+    );
+  };
+}
+
+const releaseMessages = {
+  invalid: "Send a hold id and, optionally, a reason of 1 to 200 characters.",
+  notFound: "No hold with that id.",
+  serviceUnavailable: "The hold service is unavailable right now. Retry the release.",
+} as const;
+
+const notReleased = (
+  status: Exclude<ReleaseHoldResponse["status"], "released" | "not_releasable">,
+  message: string,
+  holdId: string | null = null,
+): ReleaseHoldResponse => ({ status, message, holdId, holdStatus: null, bookingRef: null, reason: null });
+
+// Only a hold still in 'held' is released; one being booked or already booked is left alone.
+export function releaseHoldRoutes(deps: ReleaseHoldRouteDeps): FastifyPluginAsync {
+  return async (plugin) => {
+    const app = plugin.withTypeProvider<ZodTypeProvider>();
+
+    app.setErrorHandler((error, _request, reply) => {
+      if (hasZodFastifySchemaValidationErrors(error)) {
+        return reply.code(200).send(notReleased("invalid_request", releaseMessages.invalid));
+      }
+      throw error;
+    });
+
+    app.post(
+      "/holds/:holdId/release",
+      { schema: { params: confirmHoldParams, body: releaseHoldBody, response: { 200: releaseHoldResponse } } },
+      async (request) => {
+        const { holdId } = request.params;
+        const { reason } = request.body;
+        try {
+          const [released] = await deps.twin.query(
+            sql`UPDATE holds SET status = 'released', release_reason = ${reason}, updated_at = now()
+                WHERE hold_id = ${holdId} AND status = 'held' RETURNING *`,
+            holdRowSchema,
+          );
+          if (released) {
+            return {
+              status: "released" as const,
+              message: `Hold released (${reason}). The load is free for other calls.`,
+              holdId: released.holdId,
+              holdStatus: released.status,
+              bookingRef: released.bookingRef,
+              reason: released.releaseReason,
+            };
+          }
+          const [current] = await deps.twin.query(sql`SELECT * FROM holds WHERE hold_id = ${holdId}`, holdRowSchema);
+          if (!current) return notReleased("not_found", releaseMessages.notFound, holdId);
+          return {
+            status: "not_releasable" as const,
+            message: `This hold is ${current.status} and cannot be released.`,
+            holdId: current.holdId,
+            holdStatus: current.status,
+            bookingRef: current.bookingRef,
+            reason: current.releaseReason,
+          };
+        } catch (error) {
+          request.log.warn({ err: error, holdId }, "hold release unavailable");
+          return notReleased("service_unavailable", releaseMessages.serviceUnavailable, holdId);
         }
       },
     );

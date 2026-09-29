@@ -5,7 +5,7 @@ import type { z } from "zod";
 import { resolveBooking } from "../src/domain/holds.ts";
 import { TmsClient } from "../src/infra/tms/tms-client.ts";
 import { TwinError, type SqlStatement } from "../src/infra/twin-client.ts";
-import { confirmHoldRoutes, holdRoutes } from "../src/routes/holds.ts";
+import { confirmHoldRoutes, holdRoutes, releaseHoldRoutes } from "../src/routes/holds.ts";
 import { buildServer } from "../src/server.ts";
 import { startFakeTms, type FakeBehavior, type FakeTms } from "./fake-tms-server.ts";
 import { testConfig } from "./test-config.ts";
@@ -52,11 +52,27 @@ type Hold = {
   booking_ref: string | null;
   idempotency_key: string | null;
   release_reason: string | null;
+  created_at: string;
+  updated_at: string;
 };
 
 const unique = (name: string) => new TwinError(400, `duplicate key value violates unique constraint "${name}"`);
 const text = (pattern: RegExp, sql: string) => pattern.exec(sql)?.[1] ?? "";
-const nullable = (literal: string | undefined) => (literal === undefined || literal === "NULL" ? null : literal.slice(1, -1));
+const nullable = (literal: string | undefined) => (literal === undefined || literal === "NULL" ? null : literal.slice(2, -1));
+const stamp = "2026-09-29T12:00:00.000Z";
+const seeded = (fields: Partial<Hold> & Pick<Hold, "hold_id">): Hold => ({
+  call_id: "call-a",
+  load_id: "LD00881",
+  mc_number: "123456",
+  agreed_rate: "2300",
+  status: "held",
+  booking_ref: null,
+  idempotency_key: null,
+  release_reason: null,
+  created_at: stamp,
+  updated_at: stamp,
+  ...fields,
+});
 
 // In-memory stand-in for the statements the hold routes run, enforcing the same unique constraints.
 function fakeTwin() {
@@ -69,8 +85,8 @@ function fakeTwin() {
     const sql = statement.text;
     const rows: object[] = [];
     if (sql.startsWith("SELECT c.verified, c.mc_number")) {
-      const callId = text(/c\.call_id = '([^']*)'\s*$/, sql);
-      const loadId = text(/o\.load_id = '([^']*)'/, sql);
+      const callId = text(/c\.call_id = E'([^']*)'\s*$/, sql);
+      const loadId = text(/o\.load_id = E'([^']*)'/, sql);
       const rate = Number(text(/o\.rate_to_say = (\d+)/, sql));
       const call = calls.get(callId);
       if (call) {
@@ -78,41 +94,39 @@ function fakeTwin() {
         rows.push({ verified: call.verified, mc_number: call.mcNumber, agreed });
       }
     } else if (sql.startsWith("SELECT * FROM holds WHERE load_id")) {
-      const loadId = text(/load_id = '([^']*)'/, sql);
+      const loadId = text(/load_id = E'([^']*)'/, sql);
       rows.push(...holds.filter((h) => h.load_id === loadId && h.status !== "released"));
     } else if (sql.startsWith("INSERT INTO holds")) {
-      const [, callId = "", loadId = "", mc, rate = ""] = /VALUES \('([^']*)', '([^']*)', (NULL|'[^']*'), (\d+)\)/.exec(sql) ?? [];
+      const [, callId = "", loadId = "", mc, rate = ""] = /VALUES \(E'([^']*)', E'([^']*)', (NULL|E'[^']*'), (\d+)\)/.exec(sql) ?? [];
       if (holds.some((h) => h.load_id === loadId && h.status !== "released")) throw unique("holds_one_active_per_load");
-      const hold: Hold = {
-        hold_id: randomUUID(),
-        call_id: callId,
-        load_id: loadId,
-        mc_number: nullable(mc),
-        agreed_rate: rate,
-        status: "held",
-        booking_ref: null,
-        idempotency_key: null,
-        release_reason: null,
-      };
+      const hold = seeded({ hold_id: randomUUID(), call_id: callId, load_id: loadId, mc_number: nullable(mc), agreed_rate: rate });
       holds.push(hold);
       rows.push(hold);
     } else if (sql.startsWith("SELECT * FROM holds WHERE hold_id")) {
-      const holdId = text(/hold_id = '([^']*)'/, sql);
-      const key = /idempotency_key = '([^']*)'/.exec(sql)?.[1];
+      const holdId = text(/hold_id = E'([^']*)'/, sql);
+      const key = /idempotency_key = E'([^']*)'/.exec(sql)?.[1];
       rows.push(...holds.filter((h) => h.hold_id === holdId || (key !== undefined && h.idempotency_key === key)));
     } else if (sql.startsWith("UPDATE holds SET status = 'confirming'")) {
-      const holdId = text(/hold_id = '([^']*)'/, sql);
-      const key = text(/idempotency_key = '([^']*)'/, sql);
+      const holdId = text(/hold_id = E'([^']*)'/, sql);
+      const key = text(/idempotency_key = E'([^']*)'/, sql);
       const hold = holds.find((h) => h.hold_id === holdId && h.status === "held");
       if (hold) {
         if (holds.some((h) => h !== hold && h.idempotency_key === key)) throw unique("holds_idempotency_key_key");
         Object.assign(hold, { status: "confirming", idempotency_key: key });
         rows.push(hold);
       }
+    } else if (sql.startsWith("UPDATE holds SET status = 'released'")) {
+      const holdId = text(/hold_id = E'([^']*)'/, sql);
+      const reason = text(/release_reason = E'([^']*)'/, sql);
+      const hold = holds.find((h) => h.hold_id === holdId && h.status === "held");
+      if (hold) {
+        Object.assign(hold, { status: "released", release_reason: reason });
+        rows.push(hold);
+      }
     } else if (sql.startsWith("UPDATE holds SET status =")) {
       const [, status = "", ref, reason, key] =
-        /status = '(\w+)', booking_ref = (NULL|'[^']*'),\s+release_reason = (NULL|'[^']*'), idempotency_key = (NULL|'[^']*')/.exec(sql) ?? [];
-      const holdId = text(/hold_id = '([^']*)'/, sql);
+        /status = E'(\w+)', booking_ref = (NULL|E'[^']*'),\s+release_reason = (NULL|E'[^']*'), idempotency_key = (NULL|E'[^']*')/.exec(sql) ?? [];
+      const holdId = text(/hold_id = E'([^']*)'/, sql);
       const hold = holds.find((h) => h.hold_id === holdId && h.status === "confirming");
       if (hold) {
         Object.assign(hold, { status, booking_ref: nullable(ref), release_reason: nullable(reason), idempotency_key: nullable(key) });
@@ -145,7 +159,7 @@ describe("hold routes", () => {
     });
     app = buildServer(testConfig, {
       agentRoutes: [holdRoutes({ tms, twin: state.twin })],
-      operatorRoutes: [confirmHoldRoutes({ tms, twin: state.twin })],
+      operatorRoutes: [confirmHoldRoutes({ tms, twin: state.twin }), releaseHoldRoutes({ twin: state.twin })],
     });
   }
 
@@ -172,6 +186,14 @@ describe("hold routes", () => {
       method: "POST",
       url: `/v1/holds/${holdId}/confirm`,
       headers: { "x-api-key": key, ...(idempotencyKey === undefined ? {} : { "idempotency-key": idempotencyKey }) },
+    });
+
+  const release = (holdId: string, payload?: object, key = operatorKey) =>
+    app.inject({
+      method: "POST",
+      url: `/v1/holds/${holdId}/release`,
+      headers: { "x-api-key": key },
+      ...(payload === undefined ? {} : { payload }),
     });
 
   const bookRequests = () => fake.requests.filter((line) => line.includes("CMD:LOAD_BOOK"));
@@ -359,7 +381,7 @@ describe("hold routes", () => {
       await start(["silence", { errorCode: "ALREADY_BOOKED", message: "Load already booked" }]);
       // Seeded directly so the scripted faults hit LOAD_BOOK, not the hold's LOAD_GET.
       const holdId = randomUUID();
-      state.holds.push({ hold_id: holdId, call_id: "call-a", load_id: "LD00881", mc_number: "123456", agreed_rate: "2300", status: "held", booking_ref: null, idempotency_key: null, release_reason: null });
+      state.holds.push(seeded({ hold_id: holdId }));
       const res = (await confirm(holdId, "key-1")).json();
       expect(res).toMatchObject({ status: "booked_unconfirmed", holdStatus: "booked_unconfirmed", bookingRef: null, reason: "already_booked_after_retry" });
       expect(bookRequests()).toHaveLength(2);
@@ -371,7 +393,7 @@ describe("hold routes", () => {
     it("releases on a clean ALREADY_BOOKED", async () => {
       await start([{ errorCode: "ALREADY_BOOKED" }]);
       const holdId = randomUUID();
-      state.holds.push({ hold_id: holdId, call_id: "call-a", load_id: "LD00881", mc_number: "123456", agreed_rate: "2300", status: "held", booking_ref: null, idempotency_key: null, release_reason: null });
+      state.holds.push(seeded({ hold_id: holdId }));
       const first = await confirm(holdId, "key-1");
       expect(first.json()).toMatchObject({ status: "released", holdStatus: "released", reason: "load_taken" });
       expect((await confirm(holdId, "key-1")).body).toBe(first.body);
@@ -380,7 +402,7 @@ describe("hold routes", () => {
     it("returns to held on a clean outage and a later confirm books", async () => {
       await start(["rate-limited", "rate-limited", "rate-limited"]);
       const holdId = randomUUID();
-      state.holds.push({ hold_id: holdId, call_id: "call-a", load_id: "LD00881", mc_number: "123456", agreed_rate: "2300", status: "held", booking_ref: null, idempotency_key: null, release_reason: null });
+      state.holds.push(seeded({ hold_id: holdId }));
       const failed = (await confirm(holdId, "key-1")).json();
       expect(failed).toMatchObject({ status: "tms_unavailable", holdStatus: "held", bookingRef: null });
       expect(state.holds[0]).toMatchObject({ status: "held", idempotency_key: null });
@@ -388,6 +410,64 @@ describe("hold routes", () => {
       const retried = (await confirm(holdId, "key-1")).json();
       expect(retried).toMatchObject({ status: "booked", bookingRef: "BR00000000091277" });
       expect(bookRequests()).toHaveLength(4);
+    });
+  });
+
+  describe("POST /v1/holds/:holdId/release", () => {
+    beforeEach(() => start());
+
+    it("releases a held hold and frees the load for another call", async () => {
+      const holdId = await heldLoad("call-a");
+      const res = await release(holdId);
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({
+        status: "released",
+        message: "Hold released (released_by_operator). The load is free for other calls.",
+        holdId,
+        holdStatus: "released",
+        bookingRef: null,
+        reason: "released_by_operator",
+      });
+
+      accept("call-b", "LD00881", 2250);
+      const other = (await createHold({ callId: "call-b", loadId: "LD00881", agreedRate: 2250 })).json();
+      expect(other).toMatchObject({ status: "ok", holdStatus: "held" });
+      expect(bookRequests()).toEqual([]);
+    });
+
+    it("stores the operator's reason", async () => {
+      const holdId = await heldLoad();
+      const res = (await release(holdId, { reason: "  carrier backed out  " })).json();
+      expect(res).toMatchObject({ status: "released", reason: "carrier backed out" });
+      expect(state.holds[0]).toMatchObject({ status: "released", release_reason: "carrier backed out" });
+    });
+
+    it("never releases a hold that is being booked or already booked", async () => {
+      for (const status of ["confirming", "booked", "booked_unconfirmed"]) {
+        const holdId = randomUUID();
+        state.holds.push(seeded({ hold_id: holdId, load_id: `LD-${status}`, status, booking_ref: status === "booked" ? "BR1" : null }));
+        const res = (await release(holdId)).json();
+        expect(res).toMatchObject({ status: "not_releasable", holdId, holdStatus: status });
+        expect(state.holds.find((h) => h.hold_id === holdId)).toMatchObject({ status });
+      }
+    });
+
+    it("answers not_found for an unknown hold and invalid_request for a bad reason", async () => {
+      expect((await release(randomUUID())).json()).toMatchObject({ status: "not_found", holdStatus: null });
+      const holdId = await heldLoad();
+      for (const payload of [{ reason: "" }, { reason: "x".repeat(201) }]) {
+        const res = await release(holdId, payload);
+        expect(res.statusCode).toBe(200);
+        expect(res.json()).toMatchObject({ status: "invalid_request" });
+      }
+      expect(state.holds[0]).toMatchObject({ status: "held" });
+    });
+
+    it("stays behind the operator key", async () => {
+      const holdId = await heldLoad();
+      const res = await release(holdId, undefined, agentKey);
+      expect(res.statusCode).toBe(401);
+      expect(state.holds[0]).toMatchObject({ status: "held" });
     });
   });
 });

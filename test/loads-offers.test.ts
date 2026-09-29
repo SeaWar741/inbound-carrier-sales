@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import type { Config } from "../src/config.ts";
 import { testConfig } from "./test-config.ts";
 import type { LoadDetail, LoadSummary } from "../src/infra/tms/codec.ts";
-import { TmsBusinessError } from "../src/infra/tms/errors.ts";
+import { TmsBusinessError, TmsUnavailableError } from "../src/infra/tms/errors.ts";
 import { TmsClient } from "../src/infra/tms/tms-client.ts";
 import { TwinClient } from "../src/infra/twin-client.ts";
 import { loadRoutes, type LoadRouteDeps } from "../src/routes/loads.ts";
@@ -24,6 +24,8 @@ const jsonResponse = (body: unknown, status = 200) =>
 
 // In-memory stand-in for the Twin tables, answering the statements the routes send.
 const verifiedCalls = new Map<string, boolean>();
+// Active holds: load id -> the call holding it.
+const activeHolds = new Map<string, string>();
 let offers: { callId: string; loadId: string; round: number; carrierAsk: number; decision: string; rateToSay: number | null }[] = [];
 const sqlLog: string[] = [];
 
@@ -33,7 +35,7 @@ const twinFetch = vi.fn<typeof fetch>(async (_input, init) => {
   sqlLog.push(text);
   const rows = (list: object[]) => jsonResponse({ command: "SELECT", rowCount: list.length, rows: list, truncated: false });
 
-  const insert = /INSERT INTO offers[\s\S]*VALUES \('([^']*)', '([^']*)', (\d+), (\d+), '(\w+)', (NULL|\d+)\)/.exec(text);
+  const insert = /INSERT INTO offers[\s\S]*VALUES \(E'([^']*)', E'([^']*)', (\d+), (\d+), E'(\w+)', (NULL|\d+)\)/.exec(text);
   if (insert) {
     const [, callId = "", loadId = "", round, carrierAsk, decision = "", rate] = insert;
     const row = { callId, loadId, round: Number(round), carrierAsk: Number(carrierAsk), decision, rateToSay: rate === "NULL" ? null : Number(rate) };
@@ -43,18 +45,29 @@ const twinFetch = vi.fn<typeof fetch>(async (_input, init) => {
     offers.push(row);
     return jsonResponse({ command: "INSERT", rowCount: 1, rows: [], truncated: false });
   }
-  const callState = /FROM offers o WHERE o\.call_id = c\.call_id AND o\.load_id = '([^']*)'[\s\S]*WHERE c\.call_id = '([^']*)'/.exec(text);
+  const callState = /FROM offers o WHERE o\.call_id = c\.call_id AND o\.load_id = E'([^']*)'[\s\S]*WHERE c\.call_id = E'([^']*)'/.exec(text);
   if (callState) {
     const [, loadId, callId = ""] = callState;
     const verified = verifiedCalls.get(callId);
     if (verified === undefined) return rows([]);
     const prior = offers.filter((o) => o.callId === callId && o.loadId === loadId).length;
-    return rows([{ verified, prior_rounds: String(prior) }]);
+    const holder = activeHolds.get(loadId ?? "");
+    return rows([{ verified, prior_rounds: String(prior), held_elsewhere: holder !== undefined && holder !== callId }]);
   }
-  const verifiedQuery = /SELECT verified FROM calls WHERE call_id = '([^']*)'/.exec(text);
+  const verifiedQuery = /SELECT verified FROM calls WHERE call_id = E'([^']*)'/.exec(text);
   if (verifiedQuery) {
     const verified = verifiedCalls.get(verifiedQuery[1] ?? "");
     return rows(verified === undefined ? [] : [{ verified }]);
+  }
+  const holdsQuery = /SELECT load_id FROM holds WHERE load_id IN \(([^)]*)\) AND status <> 'released' AND call_id <> E'([^']*)'$/.exec(text);
+  if (holdsQuery) {
+    const [, list = "", callId] = holdsQuery;
+    const ids = [...list.matchAll(/E'([^']*)'/g)].map((m) => m[1] ?? "");
+    const heldElsewhere = ids.filter((id) => {
+      const holder = activeHolds.get(id);
+      return holder !== undefined && holder !== callId;
+    });
+    return rows(heldElsewhere.map((id) => ({ load_id: id })));
   }
   return jsonResponse({ message: `unexpected SQL: ${text}` }, 400);
 });
@@ -83,6 +96,7 @@ beforeEach(() => {
   verifiedCalls.clear();
   verifiedCalls.set("call-ok", true);
   verifiedCalls.set("call-unverified", false);
+  activeHolds.clear();
   offers = [];
   sqlLog.length = 0;
   twinFetch.mockClear();
@@ -207,6 +221,54 @@ describe("POST /v1/loads/search", () => {
     expect(res.json()).toEqual({ status: "no_loads", message: "I don't have any open loads on that lane right now.", loads: [] });
   });
 
+  it("skips loads another call is holding, in one Twin query, before capping the pitch", async () => {
+    activeHolds.set("LD1", "call-other");
+    activeHolds.set("LD2", "call-ok");
+    const tms = {
+      queryLoads: vi.fn(async () => ["LD1", "LD2", "LD3", "LD4", "LD5"].map((id) => summary(id, "OPEN"))),
+      getLoad: vi.fn(async (loadId: string) => detail(loadId, "OPEN")),
+    };
+    const target = serverWith(tms);
+    const res = await search({ callId: "call-ok", originState: "GA", equipmentType: "DRY_VAN" }, target);
+    await target.close();
+    // The caller's own hold stays visible; only another call's hold hides a load.
+    expect(res.json().loads.map((l: { loadId: string }) => l.loadId)).toEqual(["LD2", "LD3", "LD4"]);
+    expect(tms.getLoad.mock.calls.map(([id]) => id)).toEqual(["LD2", "LD3", "LD4"]);
+    const holdQueries = sqlLog.filter((text) => text.includes("FROM holds"));
+    expect(holdQueries).toEqual([
+      "SELECT load_id FROM holds WHERE load_id IN (E'LD1', E'LD2', E'LD3', E'LD4', E'LD5') AND status <> 'released' AND call_id <> E'call-ok'",
+    ]);
+  });
+
+  it("drops a load whose detail is unavailable and pitches the rest", async () => {
+    const tms = {
+      queryLoads: vi.fn(async () => [summary("LD1", "OPEN"), summary("LD2", "OPEN")]),
+      getLoad: vi.fn(async (loadId: string) => {
+        if (loadId === "LD1") throw new TmsUnavailableError("LOAD_GET", 3, false, "timeout");
+        return detail(loadId, "OPEN");
+      }),
+    };
+    const target = serverWith(tms);
+    const res = await search({ callId: "call-ok", originState: "GA", equipmentType: "DRY_VAN" }, target);
+    await target.close();
+    expect(res.json()).toMatchObject({ status: "ok", message: "I found one open load that fits." });
+    expect(res.json().loads.map((l: { loadId: string }) => l.loadId)).toEqual(["LD2"]);
+  });
+
+  it("answers tms_unavailable when no load detail could be read", async () => {
+    const tms = {
+      queryLoads: vi.fn(async () => [summary("LD1", "OPEN"), summary("LD2", "OPEN")]),
+      getLoad: vi.fn(async (loadId: string) => {
+        if (loadId === "LD1") throw new TmsUnavailableError("LOAD_GET", 3, false, "timeout");
+        throw new TmsBusinessError("LOAD_GET", 1, false, "NOT_FOUND", "Load not found");
+      }),
+    };
+    const target = serverWith(tms);
+    const res = await search({ callId: "call-ok", originState: "GA", equipmentType: "DRY_VAN" }, target);
+    await target.close();
+    expect(res.json()).toMatchObject({ status: "tms_unavailable", loads: [] });
+  });
+
   it("answers tms_unavailable when the board does not respond", async () => {
     const res = await withFake(["empty-close"], (target) =>
       search({ callId: "call-ok", originState: "GA", equipmentType: "DRY_VAN" }, target),
@@ -306,6 +368,18 @@ describe("POST /v1/offers/evaluate", () => {
     expect(offers).toEqual([]);
   });
 
+  it("answers load_unavailable when another call holds the load, without touching the TMS", async () => {
+    activeHolds.set("LD00881", "call-other");
+    const before = fake.requests.length;
+    const res = (await evaluate({ callId: "call-ok", loadId: "LD00881", carrierAsk: 2000 })).json();
+    expect(res).toMatchObject({ status: "load_unavailable", decision: null });
+    expect(fake.requests.length).toBe(before);
+    expect(offers).toEqual([]);
+
+    activeHolds.set("LD00881", "call-ok");
+    expect((await evaluate({ callId: "call-ok", loadId: "LD00881", carrierAsk: 2000 })).json()).toMatchObject({ status: "ok" });
+  });
+
   it("answers tms_unavailable when the board does not respond", async () => {
     const res = await withFake(["silence"], (target) => evaluate({ callId: "call-ok", loadId: "LD00881", carrierAsk: 2000 }, target));
     expect(res.json()).toMatchObject({ status: "tms_unavailable", decision: null });
@@ -314,7 +388,7 @@ describe("POST /v1/offers/evaluate", () => {
 
   it("answers retry when a concurrent request already took the round", async () => {
     twinFetch.mockImplementationOnce(async () =>
-      jsonResponse({ command: "SELECT", rowCount: 1, rows: [{ verified: true, prior_rounds: "0" }], truncated: false }),
+      jsonResponse({ command: "SELECT", rowCount: 1, rows: [{ verified: true, prior_rounds: "0", held_elsewhere: false }], truncated: false }),
     );
     offers.push({ callId: "call-ok", loadId: "LD00881", round: 1, carrierAsk: 2600, decision: "counter", rateToSay: 2225 });
     const res = (await evaluate({ callId: "call-ok", loadId: "LD00881", carrierAsk: 2600 })).json();

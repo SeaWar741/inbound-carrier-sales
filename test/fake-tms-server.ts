@@ -1,7 +1,6 @@
 import net from "node:net";
 
-// Real lines from the live board (docs/raw/tms-board-snapshot-2026-09-28.json, LD00881 is the
-// docs/README.md §3 example), byte-exact: 246 bytes for LOAD_QUERY, 524 for LOAD_GET.
+// Real lines captured from the live board on 2026-09-28, byte-exact: 246 bytes for LOAD_QUERY, 524 for LOAD_GET.
 export const sampleQueryLines = [
   "LOAD_ID:LD00881     |ORIG_CITY:Savannah                      |ORIG_STATE:GA|ORIG_ZIP:31401|DEST_CITY:Wichita                       |DEST_STATE:KS|DEST_ZIP:67202|PICKUP_DT:20261003141300|EQTYPE:DRY_VAN   |RATE:2093    |MILES:997   |STATUS:OPEN    ",
   "LOAD_ID:LD00848     |ORIG_CITY:Anchorage                     |ORIG_STATE:AK|ORIG_ZIP:99501|DEST_CITY:Springfield                   |DEST_STATE:IL|DEST_ZIP:62701|PICKUP_DT:20260930110000|EQTYPE:REEFER    |RATE:6886    |MILES:2894  |STATUS:OPEN    ",
@@ -14,7 +13,7 @@ export const sampleDetailLines: Record<string, string> = {
     "LOAD_ID:LD00848     |ORIG_CITY:Anchorage                     |ORIG_STATE:AK|ORIG_ZIP:99501|DEST_CITY:Springfield                   |DEST_STATE:IL|DEST_ZIP:62701|PICKUP_DT:20260930110000|DELIVERY_DT:20261002060000|EQTYPE:REEFER    |RATE:6886    |WEIGHT:20977   |COMMODITY:Auto Parts                    |PIECES:24    |MILES:2894  |DIMS:45ft x 8ft x 9ft              |NOTES:Live unload. 2H detention free, then $75/h.                                                                             |STATUS:OPEN    |MAX_BUY:7684    ",
 };
 
-// The malformed fault injects 3 bytes, e.g. `|C|XXOMMODITY:` or `|XX        ` (docs/README.md §5).
+// The malformed fault injects 3 bytes, e.g. `|C|XXOMMODITY:` or `|XX        `, as seen on the live TMS.
 export function injectMalformedBytes(line: string): string {
   return line.includes("|COMMODITY:")
     ? line.replace("|COMMODITY:", "|C|XXOMMODITY:")

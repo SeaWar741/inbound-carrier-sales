@@ -20,7 +20,10 @@ export const tmsAttemptDeadlineMs = 2_000;
 // ~15% of calls fault independently: 0.15^3 leaves ~0.34% residual failure.
 export const tmsMaxAttempts = 3;
 export const tmsBackoffBaseMs = 150;
-// Keeps a tool call well under a voice agent's patience.
+// Budget for one TMS command including its retries, not for a whole tool call. Worst cases per call:
+// search = Twin 2 s + hold check 2 s + LOAD_QUERY 5 s + LOAD_GET 5 s (details in parallel) = 14 s;
+// offers = Twin 2 s + LOAD_GET 5 s + Twin 2 s = 9 s; holds = Twin 2 s x 2 + LOAD_GET 5 s + Twin 2 s x 2 = 13 s;
+// confirm = Twin 2 s x 2 + LOAD_BOOK 5 s + Twin 2 s = 11 s.
 export const tmsTotalBudgetMs = 5_000;
 
 // Twin SQL: measured p95 371 ms for an insert plus a read (~185 ms per statement) from a laptop.

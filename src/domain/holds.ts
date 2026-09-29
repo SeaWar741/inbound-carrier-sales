@@ -11,7 +11,7 @@ export type HoldResolution = {
   reason: string | null;
 };
 
-// LOAD_BOOK is per token and monotonic (docs/README.md §7), so ALREADY_BOOKED after an attempt
+// Per the TMS spec, a booking is per token and permanent, so ALREADY_BOOKED after an attempt
 // that may have committed is almost surely our own booking, just without a reference.
 export function resolveBooking(attempt: BookingAttempt): HoldResolution {
   switch (attempt.outcome) {

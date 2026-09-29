@@ -41,6 +41,7 @@ export const tableDdl = {
       CHECK (status IN ('held', 'confirming', 'booked', 'booked_unconfirmed', 'released')),
     booking_ref text,
     idempotency_key text UNIQUE,
+    release_reason text,
     created_at timestamp NOT NULL DEFAULT now(),
     updated_at timestamp NOT NULL DEFAULT now()
   )`,
@@ -51,7 +52,7 @@ export type TableName = keyof typeof tableDdl;
 // Changes to tables that already exist; each statement is idempotent and runs on every bootstrap.
 export const migrations = [
   "ALTER TABLE calls ADD COLUMN IF NOT EXISTS eligible boolean NOT NULL DEFAULT FALSE",
-  // A replayed confirm must return the same reason, so it is stored with the hold.
+  // Tables created before release_reason was part of the DDL.
   "ALTER TABLE holds ADD COLUMN IF NOT EXISTS release_reason text",
   // Two calls racing to hold one load: the index, not a read-then-insert, picks the winner.
   "CREATE UNIQUE INDEX IF NOT EXISTS holds_one_active_per_load ON holds (load_id) WHERE status <> 'released'",
@@ -84,30 +85,6 @@ export const callRowSchema = z
     otpLastSentAt: r.otp_last_sent_at,
     createdAt: r.created_at,
   }));
-export type CallRow = z.output<typeof callRowSchema>;
-
-export const offerRowSchema = z
-  .object({
-    id: z.string(),
-    call_id: z.string(),
-    load_id: z.string(),
-    round: int8,
-    carrier_ask: int8,
-    decision: z.enum(["accept", "counter", "reject"]),
-    rate_to_say: int8.nullable(),
-    created_at: timestamp,
-  })
-  .transform((r) => ({
-    id: r.id,
-    callId: r.call_id,
-    loadId: r.load_id,
-    round: r.round,
-    carrierAsk: r.carrier_ask,
-    decision: r.decision,
-    rateToSay: r.rate_to_say,
-    createdAt: r.created_at,
-  }));
-export type OfferRow = z.output<typeof offerRowSchema>;
 
 export const holdStatuses = ["held", "confirming", "booked", "booked_unconfirmed", "released"] as const;
 
@@ -121,6 +98,8 @@ export const holdRowSchema = z
     status: z.enum(holdStatuses),
     booking_ref: z.string().nullable(),
     idempotency_key: z.string().nullable(),
+    // A replayed confirm must return the same reason, so it is stored with the hold.
+    release_reason: z.string().nullable(),
     created_at: timestamp,
     updated_at: timestamp,
   })
@@ -133,6 +112,7 @@ export const holdRowSchema = z
     status: r.status,
     bookingRef: r.booking_ref,
     idempotencyKey: r.idempotency_key,
+    releaseReason: r.release_reason,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   }));

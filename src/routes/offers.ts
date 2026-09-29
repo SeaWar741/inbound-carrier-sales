@@ -38,7 +38,7 @@ const noDecision = (status: Exclude<EvaluateOfferResponse["status"], "ok">, mess
   isFinalRound: false,
 });
 
-const callStateRow = z.object({ verified: z.boolean(), prior_rounds: z.coerce.number().int() });
+const callStateRow = z.object({ verified: z.boolean(), prior_rounds: z.coerce.number().int(), held_elsewhere: z.boolean() });
 
 export function offerRoutes(deps: OfferRouteDeps): FastifyPluginAsync {
   return async (plugin) => {
@@ -60,11 +60,15 @@ export function offerRoutes(deps: OfferRouteDeps): FastifyPluginAsync {
           // The round is counted server-side so a client can never reset the schedule.
           const [call] = await deps.twin.query(
             sql`SELECT c.verified,
-                  (SELECT count(*) FROM offers o WHERE o.call_id = c.call_id AND o.load_id = ${loadId}) AS prior_rounds
+                  (SELECT count(*) FROM offers o WHERE o.call_id = c.call_id AND o.load_id = ${loadId}) AS prior_rounds,
+                  EXISTS (SELECT 1 FROM holds h WHERE h.load_id = ${loadId} AND h.status <> 'released'
+                    AND h.call_id <> c.call_id) AS held_elsewhere
                 FROM calls c WHERE c.call_id = ${callId}`,
             callStateRow,
           );
           if (call?.verified !== true) return noDecision("not_verified", messages.notVerified);
+          // Another call's hold means the load cannot be sold here, so no rate is quoted for it.
+          if (call.held_elsewhere) return noDecision("load_unavailable", messages.loadUnavailable);
           const round = call.prior_rounds + 1;
 
           const load = await deps.tms.getLoad(loadId);

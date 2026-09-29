@@ -95,7 +95,7 @@ export function otpRoutes(deps: OtpRouteDeps): FastifyPluginAsync {
     app.post("/otp/send", { schema: { body: sendOtpBody, response: { 200: sendOtpResponse } } }, async (request) => {
       const { callId, channel } = request.body;
       try {
-        // ponytail: counts every send on any call whose last send was within the hour, which
+        // Counts every send on any call whose last send was within the hour, which
         // over-counts a little and so errs toward refusing; a send log table makes it exact.
         const [call] = await deps.twin.query(
           sql`SELECT c.dot_number, c.eligible,
@@ -152,9 +152,10 @@ export function otpRoutes(deps: OtpRouteDeps): FastifyPluginAsync {
         );
         if (!challenge) return notVerified("no_active_code", messages.noActiveCode);
 
+        const submittedHash = hashCode(deps.config.OTP_HASH_SECRET, callId, code);
         const outcome = checkCode(
           { otpHash: challenge.otp_hash, expiresAt: challenge.otp_expires_at, attempts: challenge.otp_attempts },
-          hashCode(deps.config.OTP_HASH_SECRET, callId, code),
+          submittedHash,
           challenge.db_now,
         );
         if (outcome.result === "expired") return notVerified("expired", messages.expired);
@@ -163,10 +164,13 @@ export function otpRoutes(deps: OtpRouteDeps): FastifyPluginAsync {
           return notVerified("wrong_code", `That code doesn't match. You have ${outcome.attemptsLeft} ${outcome.attemptsLeft === 1 ? "try" : "tries"} left.`, outcome.attemptsLeft);
         }
 
-        await deps.twin.query(
-          sql`UPDATE calls SET verified = TRUE, otp_hash = NULL WHERE call_id = ${callId} RETURNING call_id`,
+        // Only the challenge just compared is spent; one replaced or cleared meanwhile verifies nothing.
+        const spent = await deps.twin.query(
+          sql`UPDATE calls SET verified = TRUE, otp_hash = NULL
+              WHERE call_id = ${callId} AND otp_hash = ${submittedHash} RETURNING call_id`,
           z.unknown(),
         );
+        if (spent.length === 0) return notVerified("no_active_code", messages.noActiveCode);
         return { status: "ok" as const, message: messages.verified, verified: true, attemptsLeft: null };
       } catch (error) {
         request.log.warn({ err: error }, "otp check unavailable");

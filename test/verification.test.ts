@@ -128,6 +128,10 @@ describe("riskFlagsFor", () => {
     expect(riskFlagsFor(null, now)).toEqual(["no_contact_on_file"]);
     expect(riskFlagsFor({ ...contact, email: null, phone: null, cellPhone: "5555550100" }, now)).toEqual([]);
   });
+
+  it("raises no flag when the census could not be read", () => {
+    expect(riskFlagsFor(undefined, now)).toEqual([]);
+  });
 });
 
 describe("masking", () => {

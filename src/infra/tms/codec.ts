@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { TmsMalformedError, type TmsCommand } from "./errors.ts";
 
-// Wire rules observed on the live TMS (docs/README.md §3-§4): every field is a fixed-width,
+// Wire rules observed on the live TMS: every field is a fixed-width,
 // right-space-padded `KEY:VALUE`, so a valid record line always has the same byte length.
 // Length is checked before splitting because the malformed fault injects extra `|` bytes.
 export const loadQueryLineLength = 246;
@@ -146,7 +146,7 @@ export function parseLoadDetailLine(line: string): LoadDetail {
   return parseRecordLine(line, loadGetLineLength, loadDetailSchema, "LOAD_GET record");
 }
 
-// Success-line widths for LOAD_BOOK are unobserved (docs/README.md §9), so no length check.
+// LOAD_BOOK success lines were never observed on the live TMS, so their width is unknown and not checked.
 const bookingSchema = z
   .object({ LOAD_ID: z.string().min(1), BOOKING_REF: z.string().min(1), STATUS: z.string().min(1), TIMESTAMP: wireDateTime })
   .transform((w) => ({ loadId: w.LOAD_ID, bookingRef: w.BOOKING_REF, status: w.STATUS, timestampUtc: w.TIMESTAMP }));

@@ -20,7 +20,7 @@ Every `/v1` route requires an `x-api-key` header. Two keys, two principals:
 | Key | Caller | Routes |
 |---|---|---|
 | `AGENT_API_KEY` | HappyRobot agent workflow | verify, OTP, search, offers, create hold |
-| `OPERATOR_API_KEY` | Control tower | confirm hold (the only route that books in the TMS) |
+| `OPERATOR_API_KEY` | Control tower | confirm hold (the only route that books in the TMS), release hold |
 
 `GET /healthz` is public and never touches the TMS.
 
