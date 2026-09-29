@@ -19,3 +19,7 @@ export const tmsMaxAttempts = 3;
 export const tmsBackoffBaseMs = 150;
 // Keeps a tool call well under a voice agent's patience.
 export const tmsTotalBudgetMs = 5_000;
+
+// Twin SQL: measured p95 371 ms for an insert plus a read (~185 ms per statement) from a laptop.
+// 2 s is ~10x a statement and still leaves the tool call inside the agent's patience.
+export const twinRequestTimeoutMs = 2_000;

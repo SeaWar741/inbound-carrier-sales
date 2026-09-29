@@ -6,7 +6,8 @@
     "test": "vitest run",
     "start": "node src/server.ts",
     "dev": "node --watch --env-file-if-exists=.env src/server.ts",
-    "typecheck": "tsc"
+    "typecheck": "tsc",
+    "bootstrap:twin": "node --env-file-if-exists=.env scripts/bootstrap-twin.ts"
   },
   "type": "module",
   "dependencies": {
