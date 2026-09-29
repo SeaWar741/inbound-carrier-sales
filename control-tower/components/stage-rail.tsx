@@ -1,7 +1,7 @@
 "use client";
 
 import { Check } from "@phosphor-icons/react";
-import { finalRound, type TowerCall } from "@/lib/contracts";
+import { finalRound, type CallStage, type TowerCall } from "@/lib/contracts";
 
 const steps = ["Verify", "Code", "Search", "Negotiate", "Hold", "Booked"] as const;
 type Step = (typeof steps)[number];
@@ -17,24 +17,19 @@ function reachedStep(call: TowerCall): number {
   return 0;
 }
 
+// Stages that pin the rail to one step; released and ended fall back to what the call's data proves.
+const stageStep: Partial<Record<CallStage, number>> = {
+  connecting: 0,
+  verifying: 0,
+  otp: 1,
+  searching: 2,
+  negotiating: 3,
+  holding: 4,
+  booked: 5,
+};
+
 function stepIndex(call: TowerCall): number {
-  switch (call.stage) {
-    case "connecting":
-    case "verifying":
-      return 0;
-    case "otp":
-      return 1;
-    case "searching":
-      return 2;
-    case "negotiating":
-      return 3;
-    case "holding":
-      return 4;
-    case "booked":
-      return 5;
-    default:
-      return reachedStep(call);
-  }
+  return stageStep[call.stage] ?? reachedStep(call);
 }
 
 // Where a red or amber call went wrong, so the reason sits under the step it belongs to.

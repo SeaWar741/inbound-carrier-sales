@@ -6,6 +6,7 @@
 // Personas that search get a free load picked at run time: an OPEN load of the board snapshot
 // that no Twin hold has taken (booked holds are never released, so those loads stay taken).
 import { existsSync, readFileSync } from "node:fs";
+import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { HappyRobotClient } from "@happyrobot-ai/sdk";
 import { z } from "zod";
@@ -130,8 +131,8 @@ ${eligibleCarrier}
 Keep every reply short.`,
 } as const;
 
-const personaNames = ["closer", "haggler", "walker", "suspicious", "ineligible", "locked", "human"] as const;
-type PersonaName = (typeof personaNames)[number];
+type PersonaName = SearchingPersona | keyof typeof fixedPersonas;
+const personaNames = [...Object.keys(searchingPersonas), ...Object.keys(fixedPersonas)] as PersonaName[];
 const isSearching = (persona: PersonaName): persona is SearchingPersona => persona in searchingPersonas;
 
 const scenarioName = (persona: PersonaName) => `simulate-${persona}`;
@@ -141,7 +142,7 @@ const wait = args.includes("--wait");
 const requested = args.filter((a) => a !== "--wait");
 const unknown = requested.filter((a) => !(personaNames as readonly string[]).includes(a));
 if (unknown.length > 0) throw new Error(`Unknown persona ${unknown.join(", ")}. Known: ${personaNames.join(", ")}`);
-const selected = (requested.length > 0 ? requested : personaNames) as PersonaName[];
+const selected = requested.length > 0 ? (requested as PersonaName[]) : personaNames;
 
 // Same snapshot the fake TMS serves (see test/fake-tms-server.ts).
 const defaultSnapshotPath = fileURLToPath(new URL("../../docs/raw/tms-board-snapshot-2026-09-28.json", import.meta.url));
@@ -276,7 +277,7 @@ if ((await enabledNorthstars(promptNode.id)) === 0) {
   if (!res.ok) throw new Error(`Generating northstars failed: ${res.status}`);
   for (let i = 0; (await enabledNorthstars(promptNode.id)) === 0; i++) {
     if (i >= 30) throw new Error("Northstars were not generated within 5 minutes");
-    await new Promise((resolve) => setTimeout(resolve, 10_000));
+    await sleep(10_000);
   }
 }
 
@@ -340,7 +341,7 @@ if (wait) {
   const deadline = Date.now() + waitCapMs;
   const pending = new Set(started);
   while (pending.size > 0 && Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+    await sleep(pollIntervalMs);
     for (const s of [...pending]) {
       const run = await runState(s);
       if (run && finished.has(run.status)) {
@@ -352,6 +353,6 @@ if (wait) {
   for (const s of pending) console.log(`${describe(s, await runState(s))}  (still running after 5 minutes)`);
 } else {
   // Give the platform a moment to create the target run so its id can be printed.
-  await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+  await sleep(pollIntervalMs);
   for (const s of started) console.log(describe(s, await runState(s)));
 }

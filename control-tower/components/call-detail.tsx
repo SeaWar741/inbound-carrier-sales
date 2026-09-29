@@ -1,35 +1,16 @@
 "use client";
 
 import { ChatText, Phone } from "@phosphor-icons/react";
-import { motion, useReducedMotion } from "motion/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityChips } from "@/components/activity-chips";
 import { InterventionBar, type SentIntervention } from "@/components/intervention-bar";
+import { PulseDot } from "@/components/pulse-dot";
 import { StageRail } from "@/components/stage-rail";
 import { Transcript } from "@/components/transcript";
 import type { ErrorResponse, InterventionBody, InterventionResponse, TowerCall } from "@/lib/contracts";
 import { carrierId, carrierState, formatClock, formatElapsed } from "@/lib/format";
 import { useCallStream } from "@/lib/use-call-stream";
 import { useVoice } from "@/lib/use-voice";
-
-function LivePulse() {
-  const reduce = useReducedMotion();
-  return (
-    <span className="flex items-center gap-1.5 text-xs font-medium text-accent">
-      <span className="relative inline-flex size-2" aria-hidden>
-        {!reduce && (
-          <motion.span
-            className="absolute inset-0 rounded-full bg-accent"
-            animate={{ scale: [1, 2.2], opacity: [0.6, 0] }}
-            transition={{ duration: 1.4, repeat: Infinity, ease: "easeOut" }}
-          />
-        )}
-        <span className="relative inline-flex size-2 rounded-full bg-accent" />
-      </span>
-      Live
-    </span>
-  );
-}
 
 // Whispers and authorizations this browser sent, with delivery tracked from the stream's signal events.
 function useSentInterventions(callId: string, hasSession: boolean, signalCount: number) {
@@ -100,7 +81,7 @@ function useSentInterventions(callId: string, hasSession: boolean, signalCount: 
     (loadId: string, amountUsd: number) => {
       if (!hasSession) return;
       void send(
-        { kind: "authorization", loadId, amountUsd, message: "" },
+        { kind: "authorization", loadId, amountUsd },
         { kind: "authorization", message: null, loadId, amountUsd },
       );
     },
@@ -145,7 +126,12 @@ export function CallDetail({
               {call.channel === "text" ? "Text" : "Voice"}
             </span>
           )}
-          {call.live ? <LivePulse /> : <span className="text-xs text-fg-faint">Not live</span>}
+          {call.live ? (
+            <span className="flex items-center gap-1.5 text-xs font-medium text-accent">
+              <PulseDot tone="accent" />
+              Live
+            </span>
+          ) : <span className="text-xs text-fg-faint">Not live</span>}
           <span className="tabular text-xs text-fg-muted" title={`Started ${formatClock(call.createdAt, true)}`}>
             {call.live ? formatElapsed(now - Date.parse(call.createdAt)) : formatClock(call.createdAt)}
           </span>

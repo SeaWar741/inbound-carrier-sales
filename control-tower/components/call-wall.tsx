@@ -3,6 +3,7 @@
 import { ChatText, Phone } from "@phosphor-icons/react";
 import { motion, useReducedMotion } from "motion/react";
 import { useRef } from "react";
+import { PulseDot } from "@/components/pulse-dot";
 import type { CallStage, TowerCall } from "@/lib/contracts";
 import { carrierId, carrierState, formatClock, formatElapsed, formatUsd } from "@/lib/format";
 
@@ -43,18 +44,9 @@ function stageLabel(call: TowerCall): string {
   }
 }
 
-function latest<T extends { createdAt: string }>(items: T[]): T | undefined {
-  return items.reduce<T | undefined>((best, item) => (best === undefined || item.createdAt > best.createdAt ? item : best), undefined);
-}
-
-function lastSummary(call: TowerCall): string | null {
-  const withSummary = call.events.filter((event) => event.summary);
-  return latest(withSummary)?.summary ?? null;
-}
-
 function currentNumber(call: TowerCall): { ask: number; say: number | null } | null {
   if (call.stage !== "negotiating" && call.stage !== "holding") return null;
-  const offer = latest(call.offers);
+  const offer = call.offers.at(-1);
   return offer === undefined ? null : { ask: offer.carrierAsk, say: offer.rateToSay };
 }
 
@@ -64,22 +56,6 @@ function elapsedLabel(call: TowerCall, now: number): string {
     return formatClock(call.createdAt);
   }
   return formatElapsed(now - Date.parse(call.createdAt));
-}
-
-function LivePulse() {
-  const reduce = useReducedMotion();
-  return (
-    <span className="relative inline-flex size-2" role="img" aria-label="Live">
-      {!reduce && (
-        <motion.span
-          className="absolute inset-0 rounded-full bg-accent"
-          animate={{ scale: [1, 2.2], opacity: [0.6, 0] }}
-          transition={{ duration: 1.4, repeat: Infinity, ease: "easeOut" }}
-        />
-      )}
-      <span className="relative inline-flex size-2 rounded-full bg-accent" />
-    </span>
-  );
 }
 
 function CallRow({
@@ -98,7 +74,7 @@ function CallRow({
   buttonRef: (node: HTMLButtonElement | null) => void;
 }) {
   const reduce = useReducedMotion();
-  const summary = lastSummary(call);
+  const summary = call.events.findLast((event) => event.summary)?.summary ?? null;
   const number = currentNumber(call);
   const state = carrierState(call);
   const dimmed = call.stage === "ended" && !call.live;
@@ -128,7 +104,7 @@ function CallRow({
           <span className="tabular truncate font-medium text-fg">{carrierId(call)}</span>
           {state && <span className="truncate text-xs text-fg-faint">{state.text}</span>}
           <span className="ml-auto flex shrink-0 items-center gap-2">
-            {call.live && <LivePulse />}
+            {call.live && <PulseDot tone="accent" label="Live" />}
             {call.channel && (
               <ChannelIcon
                 size={14}

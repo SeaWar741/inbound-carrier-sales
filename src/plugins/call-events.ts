@@ -10,19 +10,18 @@ import { sql, type TwinClient } from "../infra/twin-client.ts";
 export type CallEventDeps = { twin: Pick<TwinClient, "query"> };
 
 const toolNames: Record<string, string> = {
-  "/carriers/verify": "verify_carrier",
-  "/otp/send": "send_otp",
-  "/otp/check": "check_otp",
-  "/loads/search": "search_loads",
-  "/offers/evaluate": "evaluate_offer",
-  "/holds": "create_hold",
+  "/v1/carriers/verify": "verify_carrier",
+  "/v1/otp/send": "send_otp",
+  "/v1/otp/check": "check_otp",
+  "/v1/loads/search": "search_loads",
+  "/v1/offers/evaluate": "evaluate_offer",
+  "/v1/holds": "create_hold",
 };
 
 // Only the routes named above are recorded. request_human is absent on purpose: its route
 // awaits its own row, because the agent may promise a rep only once the operator can see it.
 export function toolName(routeUrl: string): string | null {
-  const path = routeUrl.replace(/^\/v1(?=\/)/, "");
-  return toolNames[path] ?? null;
+  return toolNames[routeUrl] ?? null;
 }
 
 // Before validation the body is whatever the agent sent, so every field is read defensively.

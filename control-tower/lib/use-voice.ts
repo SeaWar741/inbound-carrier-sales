@@ -72,62 +72,47 @@ export function useVoice(callId: string, hasSession: boolean): Voice {
     }
   }, []);
 
-  const listen = useCallback(async () => {
-    if (!hasSession || connection.current !== null) return;
-    const current = generation.current;
-    setPending("listen");
-    setError(null);
-    try {
-      const token = await fetchToken(callId, { mode: "listen" });
-      const { HappyRobotVoiceClient } = await import("@happyrobot-ai/sdk/voice");
-      let self: Connection | null = null;
-      const listener = await new HappyRobotVoiceClient({ url: token.url, token: token.token }).listen({
-        onDisconnected: () => onDropped(() => self),
-      });
-      self = listener;
-      if (generation.current !== current) {
-        await listener.disconnect();
-        return;
+  // Listening joins silently; taking over joins with the mic. A second listen while connected is ignored.
+  const join = useCallback(
+    async (kind: "listen" | "takeover") => {
+      if (!hasSession || (kind === "listen" && connection.current !== null)) return;
+      const current = generation.current;
+      setPending(kind);
+      setError(null);
+      try {
+        const token = await fetchToken(callId, { mode: kind });
+        const { HappyRobotVoiceClient } = await import("@happyrobot-ai/sdk/voice");
+        const client = new HappyRobotVoiceClient({ url: token.url, token: token.token });
+        let self: Connection | null = null;
+        const options = { onDisconnected: () => onDropped(() => self) };
+        const joined = kind === "listen" ? await client.listen(options) : await client.connect(options);
+        self = joined;
+        if (generation.current !== current) {
+          await joined.disconnect();
+          return;
+        }
+        if (kind === "listen") {
+          // Browsers only start audio from a user gesture; this still runs inside the click that asked to listen.
+          if ("startAudio" in joined) await joined.startAudio().catch(() => undefined);
+          connection.current = joined;
+          setMode("listening");
+        } else {
+          // The speaking connection hears the call too, so the silent listener is closed to avoid double audio.
+          const listener = connection.current;
+          connection.current = joined;
+          await listener?.disconnect().catch(() => undefined);
+          setMode("takeover");
+        }
+      } catch (err) {
+        if (generation.current === current) setError(describe(err));
+      } finally {
+        if (generation.current === current) setPending(null);
       }
-      // Browsers only start audio from a user gesture; this still runs inside the click that asked to listen.
-      await listener.startAudio().catch(() => undefined);
-      connection.current = listener;
-      setMode("listening");
-    } catch (err) {
-      if (generation.current === current) setError(describe(err));
-    } finally {
-      if (generation.current === current) setPending(null);
-    }
-  }, [callId, hasSession, onDropped]);
-
-  const takeOver = useCallback(async () => {
-    if (!hasSession) return;
-    const current = generation.current;
-    setPending("takeover");
-    setError(null);
-    try {
-      const token = await fetchToken(callId, { mode: "takeover" });
-      const { HappyRobotVoiceClient } = await import("@happyrobot-ai/sdk/voice");
-      let self: Connection | null = null;
-      const speaker = await new HappyRobotVoiceClient({ url: token.url, token: token.token }).connect({
-        onDisconnected: () => onDropped(() => self),
-      });
-      self = speaker;
-      if (generation.current !== current) {
-        await speaker.disconnect();
-        return;
-      }
-      // The speaking connection hears the call too, so the silent listener is closed to avoid double audio.
-      const listener = connection.current;
-      connection.current = speaker;
-      await listener?.disconnect().catch(() => undefined);
-      setMode("takeover");
-    } catch (err) {
-      if (generation.current === current) setError(describe(err));
-    } finally {
-      if (generation.current === current) setPending(null);
-    }
-  }, [callId, hasSession, onDropped]);
+    },
+    [callId, hasSession, onDropped],
+  );
+  const listen = useCallback(() => join("listen"), [join]);
+  const takeOver = useCallback(() => join("takeover"), [join]);
 
   const stop = useCallback(async () => {
     const open = connection.current;

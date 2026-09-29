@@ -3,6 +3,7 @@
 import { ArrowDown, ChatCircleDots, Check, CurrencyDollar, Ear, Microphone, Waveform } from "@phosphor-icons/react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useLayoutEffect, useRef, useState } from "react";
+import { EmptyState } from "@/components/empty-state";
 import type { SentIntervention } from "@/components/intervention-bar";
 import type { StreamLine, TowerCall } from "@/lib/contracts";
 import { formatClock, formatUsd } from "@/lib/format";
@@ -155,15 +156,7 @@ function EntryRow({ entry }: { entry: Entry }) {
 }
 
 function Quiet({ title, hint }: { title: string; hint?: string }) {
-  return (
-    <div className="grid h-full place-items-center px-6 text-center">
-      <div className="flex flex-col items-center gap-2">
-        <Waveform size={20} className="text-fg-faint" aria-hidden />
-        <p className="text-sm text-fg-muted">{title}</p>
-        {hint && <p className="text-xs text-fg-faint">{hint}</p>}
-      </div>
-    </div>
-  );
+  return <EmptyState className="h-full" icon={<Waveform size={20} />} title={title} hint={hint} />;
 }
 
 const stickThresholdPx = 32;

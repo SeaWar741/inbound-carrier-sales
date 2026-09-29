@@ -71,20 +71,15 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     return NextResponse.json({ status: "not_found", message: "This call has no session yet." }, { status: 404 });
   }
 
-  const upstreamAbort = new AbortController();
-  const abortUpstream = () => upstreamAbort.abort();
-  request.signal.addEventListener("abort", abortUpstream, { once: true });
-
+  // The browser leaving aborts the request signal, which closes the upstream fetch with it.
   let upstream: Response;
   try {
-    upstream = await openSessionStream(sessionId, upstreamAbort.signal);
+    upstream = await openSessionStream(sessionId, request.signal);
   } catch {
-    request.signal.removeEventListener("abort", abortUpstream);
     return NextResponse.json({ status: "live_unavailable", message: "The live transcript is unavailable right now." }, { status: 502 });
   }
   if (!upstream.ok || !upstream.body) {
-    request.signal.removeEventListener("abort", abortUpstream);
-    upstreamAbort.abort();
+    void upstream.body?.cancel().catch(() => undefined);
     if (upstream.status === 404) {
       return NextResponse.json({ status: "not_found", message: "No session with that id." }, { status: 404 });
     }
@@ -128,18 +123,16 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
         controller.close();
       } catch {
         // The client left or the upstream dropped; either way the stream is over.
+        void reader.cancel().catch(() => undefined);
         try {
           controller.close();
         } catch {
           // Already closed by a cancel.
         }
-      } finally {
-        request.signal.removeEventListener("abort", abortUpstream);
-        upstreamAbort.abort();
       }
     },
     cancel() {
-      upstreamAbort.abort();
+      void reader.cancel().catch(() => undefined);
     },
   });
 

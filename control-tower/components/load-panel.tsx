@@ -1,7 +1,8 @@
 "use client";
 
-import { ArrowRight, CursorClick, Truck } from "@phosphor-icons/react";
-import { equipmentLabel, HoldCard } from "@/components/hold-card";
+import { CursorClick, Truck } from "@phosphor-icons/react";
+import { EmptyState } from "@/components/empty-state";
+import { equipmentLabel, HoldCard, LaneText } from "@/components/hold-card";
 import { MarginMeter } from "@/components/margin-meter";
 import { UsMap, type MapArc } from "@/components/us-map";
 import type { TowerCall, WallOffer } from "@/lib/contracts";
@@ -13,20 +14,7 @@ function currentOffer(call: TowerCall): WallOffer | null {
     const held = call.offers.find((offer) => offer.loadId === hold.loadId);
     if (held) return held;
   }
-  return call.offers.reduce<WallOffer | null>(
-    (latest, offer) => (latest === null || offer.createdAt >= latest.createdAt ? offer : latest),
-    null,
-  );
-}
-
-function Empty({ icon, title, hint }: { icon: React.ReactNode; title: string; hint: string }) {
-  return (
-    <div className="flex flex-col items-center gap-2 px-6 py-10 text-center">
-      <span className="text-fg-faint">{icon}</span>
-      <p className="text-sm text-fg-muted">{title}</p>
-      <p className="text-xs text-fg-faint">{hint}</p>
-    </div>
-  );
+  return call.offers.at(-1) ?? null;
 }
 
 export function LoadPanel({ calls, selectedCall }: { calls: TowerCall[]; selectedCall: TowerCall | null }) {
@@ -71,11 +59,7 @@ export function LoadPanel({ calls, selectedCall }: { calls: TowerCall[]; selecte
           <div className="flex items-center gap-2 px-3 pb-2 text-xs">
             {lane ? (
               <>
-                <span className="flex min-w-0 items-center gap-1 truncate text-fg">
-                  {lane.origin.city}, {lane.origin.state}
-                  <ArrowRight size={11} className="shrink-0 text-fg-faint" aria-label="to" />
-                  {lane.destination.city}, {lane.destination.state}
-                </span>
+                <LaneText lane={lane} className="min-w-0 truncate text-fg" />
                 <span className="ml-auto shrink-0 text-fg-muted">
                   {equipmentLabel(lane.equipment)} <span className="tabular">{lane.miles.toLocaleString("en-US")} mi</span>
                 </span>
@@ -90,9 +74,9 @@ export function LoadPanel({ calls, selectedCall }: { calls: TowerCall[]; selecte
       </div>
 
       {selectedCall === null ? (
-        <Empty icon={<CursorClick size={20} />} title="Select a call to see its load" hint="Map, margin and hold follow the selection" />
+        <EmptyState className="py-10" icon={<CursorClick size={20} />} title="Select a call to see its load" hint="Map, margin and hold follow the selection" />
       ) : offer === null ? (
-        <Empty icon={<Truck size={20} />} title="No load on the table yet" hint="The lane and margin appear with the first offer" />
+        <EmptyState className="py-10" icon={<Truck size={20} />} title="No load on the table yet" hint="The lane and margin appear with the first offer" />
       ) : (
         <div className="border-b border-line">
           <MarginMeter key={offer.loadId} offer={offer} authorizedUsd={authorizedUsd} agreedRate={agreedRate} />

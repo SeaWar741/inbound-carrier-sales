@@ -37,27 +37,23 @@ export function useCallStream(callId: string | null): CallStream {
 
     source.onopen = () => setState((prev) => (prev.status === "ended" ? prev : { ...prev, status: "open" }));
 
-    source.addEventListener("line", (event) => {
-      const line = parse<StreamLine>(event);
-      if (line === null) return;
-      setState((prev) => (prev.lines.some((held) => held.id === line.id) ? prev : { ...prev, lines: [...prev.lines, line] }));
-    });
-
-    source.addEventListener("tool", (event) => {
-      const tool = parse<StreamTool>(event);
-      if (tool === null) return;
-      setState((prev) =>
-        prev.tools.some((held) => held.name === tool.name && held.at === tool.at) ? prev : { ...prev, tools: [...prev.tools, tool] },
-      );
-    });
-
-    source.addEventListener("signal", (event) => {
-      const signal = parse<StreamSignal>(event);
-      if (signal === null) return;
-      setState((prev) =>
-        prev.signals.some((held) => held.at === signal.at) ? prev : { ...prev, signals: [...prev.signals, signal] },
-      );
-    });
+    // Appends a parsed event to its list unless an equal one is already held.
+    const follow = <K extends "lines" | "tools" | "signals">(
+      name: string,
+      key: K,
+      same: (a: CallStream[K][number], b: CallStream[K][number]) => boolean,
+    ) =>
+      source.addEventListener(name, (event) => {
+        const item = parse<CallStream[K][number]>(event);
+        if (item === null) return;
+        setState((prev) => {
+          const list = prev[key] as CallStream[K][number][];
+          return list.some((held) => same(held, item)) ? prev : { ...prev, [key]: [...list, item] };
+        });
+      });
+    follow("line", "lines", (a, b) => a.id === b.id);
+    follow("tool", "tools", (a, b) => a.name === b.name && a.at === b.at);
+    follow("signal", "signals", (a, b) => a.at === b.at);
 
     // The session is over; closing stops the browser from reconnecting and replaying it again.
     source.addEventListener("ended", () => {

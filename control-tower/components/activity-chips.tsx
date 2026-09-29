@@ -37,8 +37,7 @@ const noGlow = "0 0 0 0px rgb(79 140 255 / 0)";
 export function ActivityChips({ events }: { events: TowerCall["events"] }) {
   const reduce = useReducedMotion();
   const strip = useRef<HTMLOListElement>(null);
-  const ordered = [...events].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-  const newest = ordered.at(-1);
+  const newest = events.at(-1);
 
   // Keep the newest tool call in view as the strip grows past the column width.
   useEffect(() => {
@@ -46,7 +45,7 @@ export function ActivityChips({ events }: { events: TowerCall["events"] }) {
     if (node) node.scrollLeft = node.scrollWidth;
   }, [newest?.createdAt]);
 
-  if (ordered.length === 0) {
+  if (events.length === 0) {
     return <p className="text-xs text-fg-faint">No tool calls yet</p>;
   }
 
@@ -54,7 +53,7 @@ export function ActivityChips({ events }: { events: TowerCall["events"] }) {
     <ol ref={strip} aria-label="Agent activity" className="flex gap-1.5 overflow-x-auto pb-1 [scrollbar-width:thin]">
       {/* Chips present on first render are history; only ones that arrive afterwards flash the accent. */}
       <AnimatePresence initial={false}>
-        {ordered.map((event) => {
+        {events.map((event) => {
           const tone = toneOf(event);
           return (
             <motion.li

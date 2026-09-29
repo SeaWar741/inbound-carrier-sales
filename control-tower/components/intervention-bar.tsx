@@ -26,14 +26,6 @@ const quickWhispers = [
   { label: "Close it kindly", message: "Wrap up politely and end the call." },
 ] as const;
 
-function latestLoadId(call: TowerCall): string | null {
-  const latest = call.offers.reduce<TowerCall["offers"][number] | undefined>(
-    (best, offer) => (best === undefined || offer.createdAt > best.createdAt ? offer : best),
-    undefined,
-  );
-  return latest?.loadId ?? null;
-}
-
 const pill =
   "flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-40";
 const pillQuiet = `${pill} border-line-strong bg-panel-raised text-fg hover:border-fg-faint disabled:hover:border-line-strong`;
@@ -50,7 +42,7 @@ export function InterventionBar({
   onAuthorize: (loadId: string, amountUsd: number) => void;
 }) {
   const [draft, setDraft] = useState("");
-  const loadId = latestLoadId(call);
+  const loadId = call.offers.at(-1)?.loadId ?? null;
   const onCall = voice.mode === "takeover";
 
   // Why nothing can be sent right now, or null when the call accepts interventions.

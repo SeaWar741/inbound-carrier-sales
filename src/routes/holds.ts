@@ -73,9 +73,10 @@ const bookedNow = (hold: HoldRow): CreateHoldResponse => ({
 // short of a clean booking leaves the hold for a rep, so the carrier is never told more than is true.
 async function autoBook(deps: HoldRouteDeps, hold: HoldRow, log: Log): Promise<CreateHoldResponse> {
   const result = await confirmBooking(deps, hold.holdId, `autonomous-${hold.holdId}`, log);
-  if (result !== "conflict" && result.status === "booked") return bookedNow({ ...hold, status: "booked" });
-  if (result !== "conflict" && result.status === "released") return noHold("load_unavailable", createMessages.loadUnavailable);
-  return holdPlaced({ ...hold, status: result !== "conflict" && result.holdStatus ? result.holdStatus : hold.status });
+  if (result === "conflict") return holdPlaced(hold);
+  if (result.status === "booked") return bookedNow({ ...hold, status: "booked" });
+  if (result.status === "released") return noHold("load_unavailable", createMessages.loadUnavailable);
+  return holdPlaced({ ...hold, status: result.holdStatus ?? hold.status });
 }
 
 export function holdRoutes(deps: HoldRouteDeps): FastifyPluginAsync {

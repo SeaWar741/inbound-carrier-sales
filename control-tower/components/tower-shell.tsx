@@ -1,14 +1,15 @@
 "use client";
 
 import { Broadcast, CursorClick, Warning } from "@phosphor-icons/react";
-import { motion, useReducedMotion } from "motion/react";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { AutonomySwitch } from "@/components/autonomy-switch";
 import { CallDetail } from "@/components/call-detail";
 import { CallWall } from "@/components/call-wall";
 import { DayCounters } from "@/components/day-counters";
+import { EmptyState } from "@/components/empty-state";
 import { LoadPanel } from "@/components/load-panel";
+import { PulseDot } from "@/components/pulse-dot";
 import { TmsHealth } from "@/components/tms-health";
 import { formatClock, formatDay } from "@/lib/format";
 import { useWall } from "@/lib/use-wall";
@@ -24,19 +25,9 @@ function useNow(): number {
 }
 
 function LiveIndicator({ stale }: { stale: boolean }) {
-  const reduce = useReducedMotion();
   return (
     <span className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide">
-      <span className="relative inline-flex size-2">
-        {!stale && !reduce && (
-          <motion.span
-            className="absolute inset-0 rounded-full bg-ok"
-            animate={{ scale: [1, 2.2], opacity: [0.6, 0] }}
-            transition={{ duration: 1.6, repeat: Infinity, ease: "easeOut" }}
-          />
-        )}
-        <span className={`relative inline-flex size-2 rounded-full ${stale ? "bg-warn" : "bg-ok"}`} />
-      </span>
+      {stale ? <span className="inline-flex size-2 rounded-full bg-warn" aria-hidden /> : <PulseDot tone="ok" />}
       <span className={stale ? "text-warn" : "text-ok"}>{stale ? "Stale" : "Live"}</span>
     </span>
   );
@@ -45,18 +36,6 @@ function LiveIndicator({ stale }: { stale: boolean }) {
 function PanelHeading({ children }: { children: React.ReactNode }) {
   return (
     <h2 className="border-b border-line px-3 py-2 text-xs font-medium uppercase tracking-wide text-fg-faint">{children}</h2>
-  );
-}
-
-function QuietPanel({ icon, title, hint }: { icon: React.ReactNode; title: string; hint: string }) {
-  return (
-    <div className="grid flex-1 place-items-center px-6 py-16 text-center">
-      <div className="flex flex-col items-center gap-2">
-        <span className="text-fg-faint">{icon}</span>
-        <p className="text-sm text-fg-muted">{title}</p>
-        <p className="text-xs text-fg-faint">{hint}</p>
-      </div>
-    </div>
   );
 }
 
@@ -143,7 +122,8 @@ export function TowerShell() {
           ) : (
             <>
               <PanelHeading>Call</PanelHeading>
-              <QuietPanel
+              <EmptyState
+                className="flex-1 py-16"
                 icon={<CursorClick size={20} weight="regular" />}
                 title="Select a call to follow it"
                 hint="Pick a row on the wall or use the arrow keys"

@@ -13,7 +13,7 @@ const envSchema = z.object({
   HAPPYROBOT_ENVIRONMENT: z.enum(["development", "staging", "production"]).default("development"),
 });
 
-export type TowerEnv = z.infer<typeof envSchema>;
+type TowerEnv = z.infer<typeof envSchema>;
 
 let cached: TowerEnv | undefined;
 export function env(): TowerEnv {

@@ -51,11 +51,12 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   );
 }
 
-function LaneText({ lane }: { lane: WallLane }) {
+// className adds the call site's own sizing, such as truncation in a narrow row.
+export function LaneText({ lane, className = "" }: { lane: WallLane; className?: string }) {
   return (
-    <span className="inline-flex items-center gap-1">
+    <span className={`inline-flex items-center gap-1 ${className}`}>
       {lane.origin.city}, {lane.origin.state}
-      <ArrowRight size={11} className="text-fg-faint" aria-label="to" />
+      <ArrowRight size={11} className="shrink-0 text-fg-faint" aria-label="to" />
       {lane.destination.city}, {lane.destination.state}
     </span>
   );

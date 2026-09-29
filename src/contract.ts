@@ -329,6 +329,7 @@ export const wallCall = z.object({
   round: z.number().int().nullable(),
   risk: z.enum(callRisks),
   riskReason: z.string().nullable(),
+  // Oldest first, the latest round of each load.
   offers: z.array(wallOffer),
   hold: wallHold.nullable(),
   // Oldest first, the last ones of the call only.

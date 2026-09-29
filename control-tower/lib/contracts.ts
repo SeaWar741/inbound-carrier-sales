@@ -10,8 +10,7 @@ export const callStages = [...adapterCallStages, "connecting"] as const;
 export type CallStage = (typeof callStages)[number];
 export const callRisks = ["red", "amber", "green"] as const;
 export const interventionKinds = ["whisper", "authorization", "listen", "takeover"] as const;
-export const channels = ["voice", "text"] as const;
-export type Channel = (typeof channels)[number];
+export type Channel = "voice" | "text";
 
 // Same bounds the adapter enforces, so the tower rejects what the adapter would refuse.
 export const maxAuthorizationUsd = 1_000;
@@ -153,7 +152,6 @@ export const interventionBody = z.discriminatedUnion("kind", [
     kind: z.literal("authorization"),
     loadId: loadIdInput,
     amountUsd: z.number().int().positive().max(maxAuthorizationUsd),
-    message: messageInput.default(""),
   }),
 ]);
 export type InterventionBody = z.input<typeof interventionBody>;
@@ -190,7 +188,6 @@ export const releaseHoldResponse = z.object({
 });
 export type ReleaseHoldResponse = z.infer<typeof releaseHoldResponse>;
 
-export const releaseHoldBody = z.strictObject({ reason: z.string().trim().min(1).max(200).optional() });
 export const idempotencyKeyInput = z.string().trim().min(1).max(128);
 
 // Events on /api/calls/[sessionId]/stream.

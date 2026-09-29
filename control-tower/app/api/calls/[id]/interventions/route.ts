@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { recordIntervention, type InterventionRecord } from "@/lib/adapter";
+import { recordIntervention } from "@/lib/adapter";
 import { callIdInput, interventionBody, type InterventionResponse } from "@/lib/contracts";
 import { publishSignal, sessionForRun } from "@/lib/happyrobot";
 
@@ -38,20 +38,11 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     return NextResponse.json({ status: "not_found", message: "No session for this call." }, { status: 404 });
   }
 
-  const record: InterventionRecord =
-    intervention.kind === "authorization"
-      ? {
-          kind: "authorization",
-          loadId: intervention.loadId,
-          amountUsd: intervention.amountUsd,
-          ...(intervention.message ? { message: intervention.message } : {}),
-        }
-      : { kind: "whisper", message: intervention.message };
-  const recorded = await recordIntervention(callId, record);
+  const recorded = await recordIntervention(callId, intervention);
   if (!recorded.ok) return NextResponse.json(recorded.body, { status: recorded.httpStatus });
 
   const instruction =
-    intervention.kind === "authorization" && !intervention.message
+    intervention.kind === "authorization"
       ? authorizationInstruction(intervention.amountUsd, intervention.loadId)
       : intervention.message;
   const sent = await publishSignal(sessionId, instruction);
