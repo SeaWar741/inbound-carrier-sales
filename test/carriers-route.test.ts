@@ -192,3 +192,11 @@ describe("FmcsaClient", () => {
     await expect(client.carrierByDot("1")).rejects.toThrow(FmcsaError);
   });
 });
+
+describe("verifyCarrierBody", () => {
+  it("treats the agent's blank parameters as absent", async () => {
+    const { verifyCarrierBody } = await import("../src/contract.ts");
+    expect(verifyCarrierBody.parse({ callId: "c", mcNumber: "", dotNumber: "80806" })).toEqual({ callId: "c", dotNumber: "80806" });
+    expect(verifyCarrierBody.safeParse({ callId: "c", mcNumber: "", dotNumber: "" }).success).toBe(false);
+  });
+});

@@ -32,11 +32,14 @@ const tools: ToolSpec[] = [
   {
     name: "verify_carrier",
     exposedFields: ["status", "message", "eligible", "carrierName"],
-    description: "Verify the caller's carrier with FMCSA using their MC number. Call it as soon as you have the MC number.",
+    description: "Verify the caller's carrier with FMCSA. Pass the MC number, or the DOT number if they have no MC number; never both.",
     path: "/v1/carriers/verify",
     waitMessage: "Give me one second while I pull up your authority.",
-    parameters: [{ name: "mc_number", description: "The carrier's MC number, digits only", required: true }],
-    body: { mcNumber: "mc_number" },
+    parameters: [
+      { name: "mc_number", description: "The carrier's MC number, digits only", required: false },
+      { name: "dot_number", description: "The carrier's USDOT number, digits only, only if they have no MC number", required: false },
+    ],
+    body: { mcNumber: "mc_number", dotNumber: "dot_number" },
   },
   {
     name: "send_otp",

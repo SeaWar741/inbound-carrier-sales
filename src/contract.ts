@@ -14,11 +14,21 @@ const carrierIdentifier = (prefix: "MC" | "DOT") =>
     .pipe(z.string().regex(/^\d{1,8}$/, `${prefix} number must be 1 to 8 digits`))
     .transform((digits) => digits.replace(/^0+(?=\d)/, ""));
 
+// The agent's webhooks send every tool parameter as a string, and "" when the caller gave none.
+const blankToUndefined = (value: unknown) => (typeof value === "string" && value.trim() === "" ? undefined : value);
+const optionalField = <T extends z.ZodType>(schema: T) => z.preprocess(blankToUndefined, schema.optional());
+
+// Whole US dollars, sent as a number by tests and as a digit string by the agent.
+const wholeDollars = z.preprocess(
+  (value) => (typeof value === "string" && /^\s*\d+\s*$/.test(value) ? Number(value) : value),
+  z.number().int().positive().max(1_000_000),
+);
+
 export const verifyCarrierBody = z
   .object({
     callId: z.string().trim().min(1).max(128),
-    mcNumber: carrierIdentifier("MC").optional(),
-    dotNumber: carrierIdentifier("DOT").optional(),
+    mcNumber: optionalField(carrierIdentifier("MC")),
+    dotNumber: optionalField(carrierIdentifier("DOT")),
   })
   .refine((body) => (body.mcNumber === undefined) !== (body.dotNumber === undefined), {
     message: "Provide exactly one of mcNumber or dotNumber",
@@ -39,16 +49,6 @@ export const verifyCarrierResponse = z.object({
 export type VerifyCarrierResponse = z.infer<typeof verifyCarrierResponse>;
 
 const callId = z.string().trim().min(1).max(128);
-
-// The agent's webhooks send every tool parameter as a string, and "" when the caller gave none.
-const blankToUndefined = (value: unknown) => (typeof value === "string" && value.trim() === "" ? undefined : value);
-const optionalField = <T extends z.ZodType>(schema: T) => z.preprocess(blankToUndefined, schema.optional());
-
-// Whole US dollars, sent as a number by tests and as a digit string by the agent.
-const wholeDollars = z.preprocess(
-  (value) => (typeof value === "string" && /^\s*\d+\s*$/.test(value) ? Number(value) : value),
-  z.number().int().positive().max(1_000_000),
-);
 
 // Mirrors the TMS codec's normalization so a bad filter is a 200 invalid_request, not a thrown error.
 const city = z.string().trim().min(1).max(30).regex(/^[^|\r\n]+$/);
