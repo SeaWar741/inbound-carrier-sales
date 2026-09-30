@@ -254,6 +254,8 @@ export type TowerCarrierCalls = Omit<AdapterCarrierCallsResponse, "calls" | "car
 
 export const networkViews = ["all", "new", "at_risk", "top", "growth"] as const;
 export type NetworkView = (typeof networkViews)[number];
+export const networkSorts = ["mc", "carrier", "lastCall", "calls", "bookings"] as const;
+export const pageSizes = [10, 25, 50] as const;
 export const carrierRelationships = ["new", "at_risk", "active"] as const;
 export type CarrierRelationship = (typeof carrierRelationships)[number];
 
@@ -266,7 +268,8 @@ const networkCarrier = z.object({
   eligible: z.boolean(),
   // new, else at_risk, else active; lifetime facts decide it, not the window.
   relationship: z.enum(carrierRelationships),
-  // Tags independent of the relationship and of each other.
+  // Tags independent of the relationship and of each other. Growth: one of the carrier's lanes has an
+  // open load on the board now.
   top: z.boolean(),
   growth: z.boolean(),
   facts: z.object({
@@ -283,7 +286,7 @@ const networkCarrier = z.object({
     searches: z.number().int(),
     loadsNegotiated: z.number().int(),
   }),
-  // The carrier's most observed lanes in the window; null means any.
+  // The carrier's lanes in the window; null means any. Open lanes come first.
   lanes: z.array(
     z.object({ originState: z.string().nullable(), destinationState: z.string().nullable(), equipment: z.string().nullable(), count: z.number().int(), open: z.boolean() }),
   ),
@@ -298,6 +301,12 @@ export const adapterNetworkResponse = z.object({
   page: z.number().int(),
   pageSize: z.number().int(),
   counts: z.object({ all: z.number().int(), new: z.number().int(), atRisk: z.number().int(), top: z.number().int(), growth: z.number().int() }),
+  // Over the filtered carriers, not the view: carriers with a call in the window, their bookings and negotiated loads.
+  kpis: z.object({ called: z.number().int(), booked: z.number().int(), negotiated: z.number().int() }),
+  // Distinct listed carriers per open lane and per origin state with one, without the filters or the
+  // view, so the side panel keeps its shape while the list narrows.
+  openLanes: z.array(z.object({ originState: z.string(), equipment: z.string(), carriers: z.number().int() })),
+  openOrigins: z.array(z.object({ originState: z.string(), carriers: z.number().int() })),
   // False when the TMS board could not be read; growth is then false for every carrier.
   boardAvailable: z.boolean(),
 });

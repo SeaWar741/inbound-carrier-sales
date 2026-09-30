@@ -1,58 +1,52 @@
+"use client";
+
+import { Tooltip } from "antd";
 import type { IconType } from "react-icons";
-import { LuActivity, LuArrowDownRight, LuArrowRight, LuArrowUpRight, LuClockAlert, LuSparkles, LuTrendingUp, LuTrophy } from "react-icons/lu";
-import { Badge } from "@/components/inbox/stage-pill";
-import type { CarrierRelationship, NetworkCarrier } from "@/lib/contracts";
-import type { CallsTrend, NetworkReason } from "@/lib/network";
+import { LuActivity, LuClockAlert, LuSparkles, LuTrendingUp, LuTrophy } from "react-icons/lu";
+import type { NetworkCarrier } from "@/lib/contracts";
 
-export type ChipStyle = { label: string; icon: IconType; iconTone: string; pill: string };
+export type ChipStyle = { label: string; tip: string; icon: IconType; iconTone: string };
 
-// One look per relationship and tag, shared by the view picker, the rows and the carrier page. Red is a
-// carrier going quiet, blue a new one, green an active one; amber and emerald are the tags.
-export const relationshipStyle: Record<CarrierRelationship, ChipStyle> = {
-  new: { label: "New", icon: LuSparkles, iconTone: "text-tone-blue", pill: "bg-tone-blue-soft text-tone-blue" },
-  at_risk: { label: "At risk", icon: LuClockAlert, iconTone: "text-tone-red", pill: "bg-tone-red-soft text-tone-red" },
-  active: { label: "Active", icon: LuActivity, iconTone: "text-tone-green", pill: "bg-tone-green-soft text-tone-green" },
-};
-export const topStyle: ChipStyle = { label: "Top", icon: LuTrophy, iconTone: "text-tone-amber", pill: "bg-tone-amber-soft text-tone-amber" };
-export const growthStyle: ChipStyle = { label: "Growth", icon: LuTrendingUp, iconTone: "text-tone-emerald", pill: "bg-tone-emerald-soft text-tone-emerald" };
+// The statuses the page filters by, in the order a call is most worth making. Red is a carrier going
+// quiet, emerald an open lane, amber a top carrier, blue a new one. Top and Lane open are tags, so a
+// carrier can wear several.
+export const statusStyle = {
+  at_risk: { label: "At risk", tip: "At risk: booked before, now quiet or calling less", icon: LuClockAlert, iconTone: "text-tone-red" },
+  growth: { label: "Lane open", tip: "Lane open: one of their lanes has a load now", icon: LuTrendingUp, iconTone: "text-tone-emerald" },
+  top: { label: "Top", tip: "Top: books most of their offers", icon: LuTrophy, iconTone: "text-tone-amber" },
+  new: { label: "New", tip: "New: fewer than 3 calls", icon: LuSparkles, iconTone: "text-tone-blue" },
+} satisfies Record<string, ChipStyle>;
+export type NetworkStatus = keyof typeof statusStyle;
 
-// Each reason line and the decision card wear the icon of the relationship or tag it explains.
-export const reasonStyle: Record<NetworkReason["kind"], ChipStyle> = { ...relationshipStyle, top: topStyle, growth: growthStyle };
+const activeStyle: ChipStyle = { label: "Active", tip: "Active, nothing to flag", icon: LuActivity, iconTone: "text-tone-gray" };
 
-// A bare icon in its tone, named for screen readers and on hover: the row's status and tag marks.
-export function StyleIcon({ style, size = 14 }: { style: ChipStyle; size?: number }) {
+function carrierStatuses(carrier: NetworkCarrier): NetworkStatus[] {
+  const statuses: NetworkStatus[] = [];
+  if (carrier.relationship === "at_risk") statuses.push("at_risk");
+  if (carrier.growth) statuses.push("growth");
+  if (carrier.top) statuses.push("top");
+  if (carrier.relationship === "new") statuses.push("new");
+  return statuses;
+}
+
+// A bare icon in its tone, named for screen readers and explained on hover and focus.
+export function StyleIcon({ style, size = 15 }: { style: ChipStyle; size?: number }) {
   const Icon = style.icon;
   return (
-    <span role="img" aria-label={style.label} title={style.label} className={`flex shrink-0 ${style.iconTone}`}>
-      <Icon size={size} aria-hidden />
+    <Tooltip title={style.tip}>
+      <span role="img" aria-label={style.tip} tabIndex={0} className={`flex shrink-0 rounded outline-none focus-visible:ring-2 focus-visible:ring-accent/40 ${style.iconTone}`}>
+        <Icon size={size} aria-hidden />
+      </span>
+    </Tooltip>
+  );
+}
+
+// Every status the carrier carries, or the neutral mark when there is nothing to flag.
+export function StatusIcons({ carrier }: { carrier: NetworkCarrier }) {
+  const statuses = carrierStatuses(carrier);
+  return (
+    <span className="flex items-center gap-1.5">
+      {statuses.length === 0 ? <StyleIcon style={activeStyle} /> : statuses.map((status) => <StyleIcon key={status} style={statusStyle[status]} />)}
     </span>
   );
 }
-
-export function Chip({ style, size = "sm" }: { style: ChipStyle; size?: "sm" | "md" }) {
-  const Icon = style.icon;
-  return (
-    <Badge tone={style.pill} size={size}>
-      <Icon size={size === "sm" ? 11 : 13} aria-hidden />
-      {style.label}
-    </Badge>
-  );
-}
-
-// The relationship chip, then a chip per tag the carrier carries.
-export function NetworkChips({ carrier, size = "sm" }: { carrier: NetworkCarrier; size?: "sm" | "md" }) {
-  return (
-    <span className="flex min-w-0 flex-wrap items-center gap-1">
-      <Chip style={relationshipStyle[carrier.relationship]} size={size} />
-      {carrier.top && <Chip style={topStyle} size={size} />}
-      {carrier.growth && <Chip style={growthStyle} size={size} />}
-    </span>
-  );
-}
-
-// The last 14 days of calls against the 14 before, as the carrier page's trend fact.
-export const trendStyle: Record<CallsTrend, { icon: IconType; tone: string; word: string }> = {
-  up: { icon: LuArrowUpRight, tone: "text-tone-green", word: "Calling more" },
-  down: { icon: LuArrowDownRight, tone: "text-tone-red", word: "Calling less" },
-  flat: { icon: LuArrowRight, tone: "text-fg-faint", word: "Calling the same" },
-};

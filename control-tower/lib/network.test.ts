@@ -1,29 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { NetworkCarrier } from "./contracts.ts";
-import {
-  callOutcome,
-  callsTrend,
-  carrierDecision,
-  carrierLanes,
-  demandHref,
-  fromInboxWindow,
-  inboxHref,
-  networkReasons,
-  shortReason,
-  toInboxWindow,
-  windowPhrase,
-  type NetworkWindow,
-} from "./network.ts";
+import { callOutcome, callsWindow, inboxHref, networkPaging, networkQuery, shortReason, sortChange, topOpenLanes } from "./network.ts";
 
 const now = Date.parse("2026-09-30T17:00:00Z");
 const daysAgo = (days: number) => new Date(now - days * 86_400_000).toISOString();
-const thirtyDays = { since: "", from: "", to: "" };
-// The panel's lines joined, so each case reads as one string.
-const networkReason = (c: NetworkCarrier, at: number, dateWindow: NetworkWindow) =>
-  networkReasons(c, at, dateWindow)
-    .map((reason) => reason.text)
-    .join(". ");
 
 function carrier(overrides: Partial<Omit<NetworkCarrier, "facts">> & { facts?: Partial<NetworkCarrier["facts"]> } = {}): NetworkCarrier {
   const { facts, ...rest } = overrides;
@@ -53,91 +34,6 @@ function carrier(overrides: Partial<Omit<NetworkCarrier, "facts">> & { facts?: P
     },
   };
 }
-
-describe("networkReasons", () => {
-  it("counts a new carrier's calls, singular and plural", () => {
-    assert.equal(networkReason(carrier({ relationship: "new", facts: { lifetimeCalls: 2 } }), now, thirtyDays), "2 calls so far");
-    assert.equal(networkReason(carrier({ relationship: "new", facts: { lifetimeCalls: 1 } }), now, thirtyDays), "1 call so far");
-  });
-
-  it("says a silent at-risk carrier's last call and past bookings", () => {
-    const quiet = carrier({ relationship: "at_risk", facts: { lastCallAt: daysAgo(19.5), callsRecent: 0, lifetimeBookings: 3 } });
-    assert.equal(networkReason(quiet, now, thirtyDays), "Last call 19 d ago; 3 bookings before");
-    const once = carrier({ relationship: "at_risk", facts: { lastCallAt: daysAgo(20), callsRecent: 0, lifetimeBookings: 1 } });
-    assert.equal(networkReason(once, now, thirtyDays), "Last call 20 d ago; 1 booking before");
-  });
-
-  it("says an at-risk carrier that still calls is calling less", () => {
-    const fading = carrier({ relationship: "at_risk", facts: { lastCallAt: daysAgo(3), callsRecent: 1, callsPrior: 4 } });
-    assert.equal(networkReason(fading, now, thirtyDays), "Calls down: 1 in 14 d vs 4 before");
-  });
-
-  it("reads which rule fired from the recent calls, not from the last call's date", () => {
-    // The database clock and the browser's differ, so the browser's day count can land on either side of 14.
-    const edge = carrier({ relationship: "at_risk", facts: { lastCallAt: daysAgo(13.9), callsRecent: 0, lifetimeBookings: 2 } });
-    assert.equal(networkReason(edge, now, thirtyDays), "Last call 13 d ago; 2 bookings before");
-    const counted = carrier({ relationship: "at_risk", facts: { lastCallAt: daysAgo(14.1), callsRecent: 1, callsPrior: 5 } });
-    assert.equal(networkReason(counted, now, thirtyDays), "Calls down: 1 in 14 d vs 5 before");
-  });
-
-  it("words a top carrier's booking rate with the window", () => {
-    const top = carrier({ top: true, facts: { bookings: 4, negotiableCalls: 5 } });
-    assert.equal(networkReason(top, now, thirtyDays), "4 of 5 negotiated calls booked in 30 d");
-    assert.equal(networkReason(top, now, { since: "7d", from: "", to: "" }), "4 of 5 negotiated calls booked in 7 d");
-    assert.equal(networkReason(top, now, { since: "today", from: "", to: "" }), "4 of 5 negotiated calls booked today");
-    assert.equal(
-      networkReason(top, now, { since: "", from: "2026-09-01", to: "2026-09-20" }),
-      "4 of 5 negotiated calls booked from Sep 1 to Sep 20",
-    );
-  });
-
-  it("does not claim more booked calls than negotiated ones", () => {
-    const top = carrier({ top: true, facts: { bookings: 2, negotiableCalls: 1 } });
-    assert.equal(networkReason(top, now, thirtyDays), "2 bookings on 1 negotiated call in 30 d");
-  });
-
-  it("names the lane the board matched for growth, never the most run one", () => {
-    const growth = carrier({
-      growth: true,
-      lanes: [
-        { originState: "CA", destinationState: "AZ", equipment: "DRY_VAN", count: 4, open: false },
-        { originState: "TX", destinationState: "IL", equipment: "REEFER", count: 3, open: true },
-      ],
-    });
-    assert.equal(networkReason(growth, now, thirtyDays), "Has run TX · Reefer, open on the board now");
-    const anyEquipment = carrier({ growth: true, lanes: [{ originState: "GA", destinationState: null, equipment: null, count: 1, open: true }] });
-    assert.equal(networkReason(anyEquipment, now, thirtyDays), "Asked for GA · any equipment, open on the board now");
-    assert.equal(networkReason(carrier({ growth: true }), now, thirtyDays), "A lane it runs is open on the board now");
-  });
-
-  it("joins the relationship sentence and every tag sentence", () => {
-    const all = carrier({
-      relationship: "at_risk",
-      top: true,
-      growth: true,
-      lanes: [{ originState: "TX", destinationState: "IL", equipment: "DRY_VAN", count: 2, open: true }],
-      facts: { lastCallAt: daysAgo(19), callsRecent: 0, lifetimeBookings: 3, bookings: 4, negotiableCalls: 5 },
-    });
-    assert.equal(
-      networkReason(all, now, thirtyDays),
-      "Last call 19 d ago; 3 bookings before. 4 of 5 negotiated calls booked in 30 d. Has run TX · Dry van, open on the board now",
-    );
-  });
-
-  it("gives one line per reason, each with its kind", () => {
-    const both = carrier({ relationship: "new", growth: true, facts: { lifetimeCalls: 2 } });
-    assert.deepEqual(
-      networkReasons(both, now, thirtyDays).map((reason) => reason.kind),
-      ["new", "growth"],
-    );
-  });
-
-  it("calls an untagged active carrier active with nothing to flag, and leaves it out when tagged", () => {
-    assert.deepEqual(networkReasons(carrier(), now, thirtyDays), [{ kind: "active", text: "Active, nothing to flag" }]);
-    assert.equal(networkReason(carrier({ top: true, facts: { bookings: 3, negotiableCalls: 3 } }), now, thirtyDays), "3 of 3 negotiated calls booked in 30 d");
-    assert.equal(networkReason(carrier({ top: true, facts: { bookings: 1, negotiableCalls: 1 } }), now, thirtyDays), "1 of 1 negotiated call booked in 30 d");
-  });
-});
 
 describe("shortReason", () => {
   it("says how long a silent at-risk carrier has been quiet and what it booked before", () => {
@@ -193,32 +89,6 @@ describe("shortReason", () => {
   });
 });
 
-describe("callsTrend", () => {
-  it("compares the last 14 days with the 14 before", () => {
-    assert.equal(callsTrend(carrier({ facts: { callsRecent: 4, callsPrior: 1 } })), "up");
-    assert.equal(callsTrend(carrier({ facts: { callsRecent: 1, callsPrior: 4 } })), "down");
-    assert.equal(callsTrend(carrier({ facts: { callsRecent: 2, callsPrior: 2 } })), "flat");
-  });
-});
-
-describe("windows", () => {
-  it("words each window", () => {
-    assert.equal(windowPhrase(thirtyDays), "in 30 d");
-    assert.equal(windowPhrase({ since: "30d", from: "", to: "" }), "in 30 d");
-  });
-
-  it("translates to and from the inbox picker, whose default is 7 days", () => {
-    assert.deepEqual(toInboxWindow(thirtyDays), { since: "30d", from: "", to: "" });
-    assert.deepEqual(toInboxWindow({ since: "7d", from: "", to: "" }), { since: "", from: "", to: "" });
-    assert.deepEqual(fromInboxWindow({ since: "30d", from: "", to: "" }), thirtyDays);
-    assert.deepEqual(fromInboxWindow({ since: "", from: "", to: "" }), { since: "7d", from: "", to: "" });
-    assert.deepEqual(fromInboxWindow({ since: "today", from: "", to: "" }), { since: "today", from: "", to: "" });
-    const range = { since: "", from: "2026-09-01", to: "2026-09-20" };
-    assert.deepEqual(toInboxWindow(range), range);
-    assert.deepEqual(fromInboxWindow(range), range);
-  });
-});
-
 describe("inboxHref", () => {
   it("selects the carrier, searches its MC and keeps a recent last call inside 30 days", () => {
     assert.equal(inboxHref(carrier({ facts: { lastCallAt: daysAgo(19) } }), now), "/inbox?carrier=mc%3A123456&q=123456&since=30d");
@@ -240,71 +110,65 @@ describe("inboxHref", () => {
   });
 });
 
-describe("carrierDecision", () => {
-  const decision = (c: NetworkCarrier) => {
-    const { title, sentence } = carrierDecision(c, now);
-    return `${title}: ${sentence}`;
-  };
-
-  it("asks to call back a silent at-risk carrier, with its past bookings when it had any", () => {
-    assert.equal(decision(carrier({ relationship: "at_risk", facts: { lastCallAt: daysAgo(37.2), callsRecent: 0, lifetimeBookings: 2 } })), "Call back: No call in 37 d after 2 bookings");
-    assert.equal(decision(carrier({ relationship: "at_risk", facts: { lastCallAt: daysAgo(20), callsRecent: 0, lifetimeBookings: 1 } })), "Call back: No call in 20 d after 1 booking");
-    assert.equal(decision(carrier({ relationship: "at_risk", facts: { lastCallAt: daysAgo(20), callsRecent: 0, lifetimeBookings: 0 } })), "Call back: No call in 20 d");
+describe("callsWindow", () => {
+  it("keeps a recent last call inside the rolling 30 days", () => {
+    assert.deepEqual(callsWindow(carrier({ facts: { lastCallAt: daysAgo(28) } }), now), { since: "30d" });
   });
 
-  it("asks to call back an at-risk carrier calling less, before any tag", () => {
-    const fading = carrier({ relationship: "at_risk", growth: true, top: true, facts: { callsRecent: 1, callsPrior: 6 } });
-    assert.deepEqual(carrierDecision(fading, now), { kind: "at_risk", title: "Call back", sentence: "Calling less than usual" });
+  it("reaches back to an older last call with a day range", () => {
+    assert.deepEqual(callsWindow(carrier({ facts: { lastCallAt: "2026-08-15T15:00:00Z" } }), now), { from: "2026-08-15", to: "2026-09-30" });
+  });
+});
+
+describe("networkQuery", () => {
+  const query = (search: string) => networkQuery(new URLSearchParams(search));
+
+  it("sends nothing for the defaults", () => {
+    assert.equal(query(""), "");
+    assert.equal(query("view=all&sort=lastCall&dir=desc&page=1&pageSize=25"), "");
   });
 
-  it("offers the open lane to a growth carrier, even a new one", () => {
-    const lanes = [{ originState: "PA", destinationState: "PA", equipment: "REEFER", count: 7, open: true }];
-    assert.equal(decision(carrier({ relationship: "new", growth: true, lanes })), "Offer the open lane: PA Reefer is open on the board now");
+  it("forwards the status, filters, sort and paging", () => {
     assert.equal(
-      decision(carrier({ growth: true, lanes: [{ originState: "GA", destinationState: null, equipment: null, count: 1, open: true }] })),
-      "Offer the open lane: GA is open on the board now",
+      query("view=growth&q=+123+&equipment=REEFER&origin=TX&sort=mc&dir=asc&page=3&pageSize=50"),
+      "view=growth&q=123&equipment=REEFER&origin=TX&sort=mc&dir=asc&page=3&pageSize=50",
     );
-    assert.equal(decision(carrier({ growth: true })), "Offer the open lane: A lane it runs is open on the board now");
   });
 
-  it("words new, top and plain active carriers", () => {
-    assert.equal(decision(carrier({ relationship: "new", top: true, facts: { lifetimeCalls: 2 } })), "Get to know them: 2 calls so far");
-    assert.equal(decision(carrier({ top: true })), "Keep them close: Books most of its offers");
-    assert.deepEqual(carrierDecision(carrier(), now), { kind: "active", title: "Nothing to act on", sentence: "Active, nothing to flag" });
+  it("drops values the adapter would refuse", () => {
+    assert.equal(query("view=bogus&sort=name&dir=up&page=-2&pageSize=30&key=mc%3A1"), "");
+    assert.equal(query("page=1.5"), "");
   });
 });
 
-describe("demandHref", () => {
-  it("joins the lane with | and leaves Any empty, as one encoded segment", () => {
-    assert.equal(demandHref({ originState: "TX", destinationState: "GA", equipment: "REEFER" }), "/demand/TX%7CGA%7CREEFER");
-    assert.equal(demandHref({ originState: "CO", destinationState: null, equipment: "FLATBED" }), "/demand/CO%7C%7CFLATBED");
-    assert.equal(demandHref({ originState: "CO", destinationState: null, equipment: null }), "/demand/CO%7C%7C");
+describe("networkPaging", () => {
+  it("fills in the defaults", () => {
+    assert.deepEqual(networkPaging(new URLSearchParams()), { sort: "lastCall", dir: "desc", page: 1, pageSize: 25 });
+    assert.deepEqual(networkPaging(new URLSearchParams("sort=bookings&dir=asc&page=2&pageSize=10")), { sort: "bookings", dir: "asc", page: 2, pageSize: 10 });
   });
 });
 
-describe("carrierLanes", () => {
-  const ask = (originState: string, destinationState: string | null, equipment: string | null, noMatch: number, offeredNoBooking: number) => ({
-    originState,
-    destinationState,
-    equipment,
-    noMatch,
-    offeredNoBooking,
+describe("sortChange", () => {
+  it("drops the defaults and goes back to page 1", () => {
+    assert.deepEqual(sortChange("lastCall", "desc"), { sort: null, dir: null, page: null });
+    assert.deepEqual(sortChange("calls", "asc"), { sort: "calls", dir: "asc", page: null });
+    assert.deepEqual(sortChange("mc", "desc"), { sort: "mc", dir: null, page: null });
   });
+});
 
-  it("keeps the observed lanes first with their unmet asks, then the asked-only lanes by unmet asks", () => {
-    const observed = [
-      { originState: "PA", destinationState: "PA", equipment: "REEFER", count: 7, open: true },
-      { originState: "GA", destinationState: null, equipment: null, count: 1, open: false },
+describe("topOpenLanes", () => {
+  it("keeps the five lanes with the most carriers, most first", () => {
+    const lanes = [
+      { originState: "TX", equipment: "REEFER", carriers: 2 },
+      { originState: "CA", equipment: "REEFER", carriers: 5 },
+      { originState: "GA", equipment: "DRY_VAN", carriers: 1 },
+      { originState: "AZ", equipment: "FLATBED", carriers: 2 },
+      { originState: "IL", equipment: "DRY_VAN", carriers: 3 },
+      { originState: "OH", equipment: "DRY_VAN", carriers: 4 },
     ];
-    const demand = [ask("TX", "GA", "REEFER", 1, 1), ask("PA", "PA", "REEFER", 0, 3), ask("CO", null, "FLATBED", 3, 0), ask("IL", "IN", "DRY_VAN", 0, 0)];
     assert.deepEqual(
-      carrierLanes(observed, demand).map((lane) => [lane.key, lane.calls, lane.open, lane.unmet]),
-      [
-        ["PA|PA|REEFER", 7, true, 3],
-        ["GA||", 1, false, 0],
-        ["CO||FLATBED", null, false, 3],
-        ["TX|GA|REEFER", null, false, 2],
-      ],
+      topOpenLanes(lanes).map((lane) => lane.originState),
+      ["CA", "OH", "IL", "AZ", "TX"],
     );
   });
 });
@@ -320,7 +184,8 @@ describe("callOutcome", () => {
     assert.equal(callOutcome({ live: false, hold: hold("booked_unconfirmed"), offers: [] }).kind, "booked");
     assert.deepEqual(callOutcome({ live: false, hold: hold("confirming"), offers: [] }), { kind: "holding", text: "Holding at $1,850" });
     assert.deepEqual(callOutcome({ live: false, hold: hold("released"), offers: [offer] }), { kind: "lost", text: "Hold released" });
-    assert.deepEqual(callOutcome({ live: false, hold: null, offers: [offer] }), { kind: "lost", text: "No deal, last ask $2,100" });
+    assert.deepEqual(callOutcome({ live: false, hold: null, offers: [offer] }), { kind: "lost", text: "No deal: asked $2,100, our best $1,900" });
+    assert.deepEqual(callOutcome({ live: false, hold: null, offers: [{ ...offer, rateToSay: null }] }), { kind: "lost", text: "No deal, last ask $2,100" });
     assert.deepEqual(callOutcome({ live: false, hold: null, offers: [] }), { kind: "no_offer", text: "No load offered" });
   });
 });

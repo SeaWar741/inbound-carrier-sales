@@ -26,7 +26,7 @@ function Rolling({ value, className }: { value: string; className?: string }) {
   );
 }
 
-function Tile({ label, value, hint }: { label: string; value: string; hint: string }) {
+export function Tile({ label, value, hint }: { label: string; value: string; hint: string }) {
   return (
     <div className="flex min-w-0 flex-col gap-1 rounded-[var(--radius-panel)] border border-line bg-panel px-4 py-3">
       <dt className="truncate text-xs text-fg-muted">{label}</dt>
