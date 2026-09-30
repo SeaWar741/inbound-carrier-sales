@@ -3,20 +3,23 @@ import { describe, it } from "node:test";
 import type { DemandLane } from "./contracts.ts";
 import {
   asksLabel,
-  carrierHref,
+  carrierListHref,
   demandCarriersQuery,
+  demandEquipmentLabel,
+  demandInboxHref,
   demandKey,
-  demandLaneHref,
-  demandNextStep,
-  demandSignal,
-  demandTotalsLabels,
+  demandPaging,
+  demandQuery,
+  demandSaid,
+  demandSortChange,
   demandTrend,
   demandUnmet,
   laneLabel,
-  laneTitle,
-  parseDemandKey,
-  parseDemandLaneParam,
+  nextOf,
+  nextStepHref,
+  topOrigins,
   unmetBarPercent,
+  weekChange,
 } from "./demand.ts";
 
 function lane(overrides: Partial<DemandLane> = {}): DemandLane {
@@ -34,41 +37,56 @@ function lane(overrides: Partial<DemandLane> = {}): DemandLane {
   };
 }
 
-describe("demandSignal", () => {
-  it("counts searches and matches, then offers without a booking, then the carriers", () => {
-    assert.equal(demandSignal(lane({ offeredNoBooking: 0 })), "7 searches, none matched · 4 carriers");
-    assert.equal(demandSignal(lane({ searches: 3, noMatch: 2, offeredNoBooking: 2, carriers: 3 })), "3 searches, 1 matched · 2 offered, no booking · 3 carriers");
+describe("demandQuery and demandPaging", () => {
+  it("sends nothing for the defaults", () => {
+    assert.equal(demandQuery(new URLSearchParams("")), "");
+    assert.deepEqual(demandPaging(new URLSearchParams("")), { sort: "unmet", dir: "desc", page: 1, pageSize: 25 });
   });
 
-  it("words a lane with offers but no searches", () => {
-    assert.equal(demandSignal(lane({ searches: 0, noMatch: 0, offeredNoBooking: 7, carriers: 5 })), "7 offered, no booking · 5 carriers");
+  it("sends the filters, a next step, the sort and the paging", () => {
+    const search = new URLSearchParams("q=+acme+&next=rate&equipment=REEFER&origin=TX&sort=lane&dir=asc&page=3&pageSize=50");
+    assert.equal(demandQuery(search), "q=acme&equipment=REEFER&origin=TX&next=rate&sort=lane&dir=asc&page=3&pageSize=50");
   });
 
-  it("uses the singular for one search and one carrier", () => {
-    assert.equal(demandSignal(lane({ searches: 1, noMatch: 1, carriers: 1, offeredNoBooking: 1 })), "1 search, none matched · 1 offered, no booking · 1 carrier");
-  });
-
-  it("says who asked when the panel asks for it", () => {
-    assert.equal(demandSignal(lane({ searches: 9, noMatch: 9, offeredNoBooking: 0 }), { asked: true }), "9 searches, none matched · 4 carriers asked");
-  });
-
-  it("still reads when there is nothing unmet", () => {
-    assert.equal(demandSignal(lane({ searches: 0, noMatch: 0, offeredNoBooking: 0, carriers: 1 })), "No unmet asks · 1 carrier");
-  });
-
-  it("never says rejected", () => {
-    for (const row of [lane(), lane({ offeredNoBooking: 0 }), lane({ searches: 0, noMatch: 0 })]) {
-      assert.doesNotMatch(demandSignal(row), /reject/i);
-      assert.doesNotMatch(demandSignal(row, { asked: true }), /reject/i);
-    }
+  it("drops values the adapter would refuse", () => {
+    const search = new URLSearchParams("next=both&sort=mc&dir=up&page=0&pageSize=30&lane=TX||&carrier=mc:1");
+    assert.equal(demandQuery(search), "");
+    assert.deepEqual(demandPaging(search), { sort: "unmet", dir: "desc", page: 1, pageSize: 25 });
   });
 });
 
-describe("demandTrend", () => {
-  it("compares this desk week with the previous one", () => {
-    assert.deepEqual(demandTrend(lane()), { trend: "up", text: "3 vs 1" });
-    assert.deepEqual(demandTrend(lane({ thisWeek: 2, previousWeek: 5 })), { trend: "down", text: "2 vs 5" });
-    assert.deepEqual(demandTrend(lane({ thisWeek: 1, previousWeek: 1 })), { trend: "flat", text: "1 vs 1" });
+describe("demandSortChange", () => {
+  it("leaves the default sort and direction out of the URL and goes back to page 1", () => {
+    assert.deepEqual(demandSortChange("unmet", "desc"), { sort: null, dir: null, page: null });
+    assert.deepEqual(demandSortChange("lane", "asc"), { sort: "lane", dir: "asc", page: null });
+    assert.deepEqual(demandSortChange("thisWeek", "desc"), { sort: "thisWeek", dir: null, page: null });
+  });
+});
+
+describe("demandSaid", () => {
+  it("says what the board missed, both parts when both happened", () => {
+    assert.equal(demandSaid(lane()), "7 searches found nothing · 2 offers not booked");
+    assert.equal(demandSaid(lane({ offeredNoBooking: 0 })), "7 searches found nothing");
+    assert.equal(demandSaid(lane({ noMatch: 1, offeredNoBooking: 1 })), "1 search found nothing · 1 offer not booked");
+  });
+
+  it("still reads when nothing went unmet, and never says rejected", () => {
+    assert.equal(demandSaid(lane({ noMatch: 0, offeredNoBooking: 0 })), "No unmet asks");
+    for (const row of [lane(), lane({ noMatch: 0 }), lane({ offeredNoBooking: 0 })]) assert.doesNotMatch(demandSaid(row), /reject/i);
+  });
+});
+
+describe("demandTrend and weekChange", () => {
+  it("reads last week then this week", () => {
+    assert.deepEqual(demandTrend(lane()), { trend: "up", text: "1 → 3", tip: "Unmet: 1 last week, 3 this week" });
+    assert.equal(demandTrend(lane({ thisWeek: 2, previousWeek: 5 })).trend, "down");
+    assert.equal(demandTrend(lane({ thisWeek: 1, previousWeek: 1 })).trend, "flat");
+  });
+
+  it("words the week against the one before", () => {
+    assert.equal(weekChange({ thisWeek: 9, previousWeek: 4 }), "Up from 4 last week");
+    assert.equal(weekChange({ thisWeek: 2, previousWeek: 4 }), "Down from 4 last week");
+    assert.equal(weekChange({ thisWeek: 4, previousWeek: 4 }), "Same as last week");
   });
 });
 
@@ -86,32 +104,35 @@ describe("demandUnmet and unmetBarPercent", () => {
   });
 });
 
-describe("demandTotalsLabels", () => {
-  it("words the header totals, singular and plural", () => {
-    assert.deepEqual(demandTotalsLabels({ noMatch: 42, offeredNoBooking: 27, carriers: 19 }), {
-      noMatch: "42 searches found nothing",
-      offeredNoBooking: "27 offers not booked",
-      carriers: "19 carriers asked",
-    });
-    assert.deepEqual(demandTotalsLabels({ noMatch: 1, offeredNoBooking: 1, carriers: 1 }), {
-      noMatch: "1 search found nothing",
-      offeredNoBooking: "1 offer not booked",
-      carriers: "1 carrier asked",
-    });
+describe("nextOf and nextStepHref", () => {
+  it("finds a load when only searches went unmet, checks the rate when only offers did", () => {
+    assert.equal(nextOf({ noMatch: 9, offeredNoBooking: 0 }), "source");
+    assert.equal(nextOf({ noMatch: 0, offeredNoBooking: 7 }), "rate");
+    assert.equal(nextOf({ noMatch: 2, offeredNoBooking: 1 }), "both");
+  });
+
+  it("opens the dashboard on the lane's pickup state, and its equipment when it has one", () => {
+    assert.equal(nextStepHref(lane({ equipment: "REEFER" })), "/?origin=TX&equipment=REEFER");
+    assert.equal(nextStepHref(lane({ equipment: null })), "/?origin=TX");
   });
 });
 
-describe("parseDemandKey", () => {
-  it("reads back what demandKey writes, Any parts included", () => {
-    for (const row of [lane(), lane({ destinationState: null }), lane({ equipment: null }), lane({ destinationState: null, equipment: null })]) {
-      assert.deepEqual(parseDemandKey(demandKey(row)), { originState: row.originState, destinationState: row.destinationState, equipment: row.equipment });
-    }
-  });
-
-  it("refuses a value that is not a lane", () => {
-    for (const key of ["", "TX", "TX|GA", "tx|GA|REEFER", "TX|Georgia|", "|GA|REEFER", "TX|GA|reefer", "TX|GA|REEFER|x"]) {
-      assert.equal(parseDemandKey(key), null, key);
-    }
+describe("topOrigins", () => {
+  it("keeps the five origins with the most unmet, skipping states with none", () => {
+    const origins = [
+      { originState: "GA", unmet: 3 },
+      { originState: "TX", unmet: 9 },
+      { originState: "CA", unmet: 0 },
+      { originState: "AL", unmet: 3 },
+      { originState: "IL", unmet: 5 },
+      { originState: "OH", unmet: 1 },
+      { originState: "NY", unmet: 2 },
+    ];
+    assert.deepEqual(
+      topOrigins(origins).map((row) => row.originState),
+      ["TX", "IL", "AL", "GA", "NY"],
+    );
+    assert.deepEqual(topOrigins([{ originState: "CA", unmet: 0 }]), []);
   });
 });
 
@@ -127,6 +148,13 @@ describe("laneLabel and demandKey", () => {
   });
 });
 
+describe("demandEquipmentLabel", () => {
+  it("names the equipment, Any when the carriers did not say", () => {
+    assert.equal(demandEquipmentLabel("REEFER"), "Reefer");
+    assert.equal(demandEquipmentLabel(null), "Any equipment");
+  });
+});
+
 describe("demandCarriersQuery", () => {
   it("sends destination and equipment only when the row has them", () => {
     assert.equal(demandCarriersQuery(lane(), 1), "origin=TX&destination=GA&equipment=DRY_VAN");
@@ -135,52 +163,18 @@ describe("demandCarriersQuery", () => {
   });
 });
 
-describe("carrierHref", () => {
-  it("opens the carrier's page by its key", () => {
-    assert.equal(carrierHref("mc:9000002"), "/carriers/mc%3A9000002");
-  });
-});
+describe("carrierListHref and demandInboxHref", () => {
+  const carrier = { key: "mc:9000002", mcNumber: "9000002", carrierName: "Acme Freight" };
 
-describe("demandLaneHref and parseDemandLaneParam", () => {
-  it("round-trips a lane through its page path, Any parts included", () => {
-    for (const row of [lane(), lane({ destinationState: null }), lane({ equipment: null }), lane({ destinationState: null, equipment: null })]) {
-      const segment = demandLaneHref(row).slice("/demand/".length);
-      assert.deepEqual(parseDemandLaneParam(segment), { originState: row.originState, destinationState: row.destinationState, equipment: row.equipment });
-    }
-    assert.equal(demandLaneHref(lane({ destinationState: null, equipment: "FLATBED" })), "/demand/TX%7C%7CFLATBED");
+  it("searches the Carriers page by MC, else by name", () => {
+    assert.equal(carrierListHref(carrier), "/carriers?q=9000002");
+    assert.equal(carrierListHref({ mcNumber: null, carrierName: "Acme Freight" }), "/carriers?q=Acme+Freight");
+    assert.equal(carrierListHref({ mcNumber: null, carrierName: null }), null);
   });
 
-  it("reads a segment that arrives already decoded", () => {
-    assert.deepEqual(parseDemandLaneParam("CO||FLATBED"), { originState: "CO", destinationState: null, equipment: "FLATBED" });
-  });
-
-  it("refuses a segment that is not a lane", () => {
-    for (const segment of ["TX", "%E0%A4%A", "tx%7CGA%7C", "TX%7CGA"]) assert.equal(parseDemandLaneParam(segment), null, segment);
-  });
-});
-
-describe("laneTitle", () => {
-  it("names the lane and its equipment, Any when the carriers did not say", () => {
-    assert.equal(laneTitle(lane({ equipment: "REEFER" })), "TX → GA · Reefer");
-    assert.equal(laneTitle(lane({ destinationState: null, equipment: null })), "TX → Any · Any equipment");
-  });
-});
-
-describe("demandNextStep", () => {
-  it("asks for a load when only searches went unmet", () => {
-    assert.deepEqual(demandNextStep({ noMatch: 9, offeredNoBooking: 0 }), { kind: "source", title: "Source a load", body: "The board had nothing for these carriers." });
-  });
-
-  it("asks for the rate when only offers went unbooked", () => {
-    assert.deepEqual(demandNextStep({ noMatch: 0, offeredNoBooking: 7 }), { kind: "rate", title: "Check the rate", body: "Loads were offered and none booked." });
-  });
-
-  it("asks for both when both went unmet", () => {
-    assert.equal(demandNextStep({ noMatch: 2, offeredNoBooking: 1 })?.kind, "both");
-  });
-
-  it("has nothing to ask when nothing went unmet", () => {
-    assert.equal(demandNextStep({ noMatch: 0, offeredNoBooking: 0 }), null);
+  it("selects the carrier in the inbox's last 30 days", () => {
+    assert.equal(demandInboxHref(carrier), "/inbox?carrier=mc%3A9000002&q=9000002&since=30d");
+    assert.equal(demandInboxHref({ key: "name:x", mcNumber: null, carrierName: null }), "/inbox?carrier=name%3Ax&since=30d");
   });
 });
 

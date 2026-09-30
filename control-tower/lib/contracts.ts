@@ -255,6 +255,7 @@ export type TowerCarrierCalls = Omit<AdapterCarrierCallsResponse, "calls" | "car
 export const networkViews = ["all", "new", "at_risk", "top", "growth"] as const;
 export type NetworkView = (typeof networkViews)[number];
 export const networkSorts = ["mc", "carrier", "lastCall", "calls", "bookings"] as const;
+export const demandSorts = ["lane", "equipment", "unmet", "thisWeek", "carriers"] as const;
 export const pageSizes = [10, 25, 50] as const;
 export const carrierRelationships = ["new", "at_risk", "active"] as const;
 export type CarrierRelationship = (typeof carrierRelationships)[number];
@@ -336,7 +337,15 @@ export const adapterDemandResponse = z.object({
   rows: z.array(demandLane),
   total: z.number().int(),
   // Across every lane the filters keep, not only this page.
-  totals: z.object({ noMatch: z.number().int(), offeredNoBooking: z.number().int(), carriers: z.number().int() }),
+  totals: z.object({
+    noMatch: z.number().int(),
+    offeredNoBooking: z.number().int(),
+    carriers: z.number().int(),
+    thisWeek: z.number().int(),
+    previousWeek: z.number().int(),
+  }),
+  // Unmet asks per origin state over every lane, without the filters, so the map keeps its shape.
+  origins: z.array(z.object({ originState: z.string(), unmet: z.number().int() })),
   page: z.number().int(),
   pageSize: z.number().int(),
 });

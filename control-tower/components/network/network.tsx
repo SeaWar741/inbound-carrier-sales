@@ -416,10 +416,22 @@ export function Network() {
 
         <section aria-label="Key numbers" aria-live="polite">
           <dl className="grid grid-cols-4 gap-3">
-            <Tile label="Carriers" value={data ? String(data.counts.all) : "-"} hint={kpis ? `${kpis.called} called in the last 30 days` : ""} />
-            <Tile label="Loads booked" value={kpis ? String(kpis.booked) : "-"} hint={kpis ? bookedShare : ""} />
-            <Tile label="At risk" value={data ? String(data.counts.atRisk) : "-"} hint="Booked before, now quiet" />
-            <Tile label="Lane open" value={data ? String(data.counts.growth) : "-"} hint="Carriers with a load waiting" />
+            <Tile label="Carriers" icon={LuUsers} value={data ? String(data.counts.all) : "-"} hint={kpis ? `${kpis.called} called in the last 30 days` : ""} />
+            <Tile label="Loads booked" icon={LuCircleCheck} iconTone="text-tone-emerald" value={kpis ? String(kpis.booked) : "-"} hint={kpis ? bookedShare : ""} />
+            <Tile
+              label="At risk"
+              icon={statusStyle.at_risk.icon}
+              iconTone={statusStyle.at_risk.iconTone}
+              value={data ? String(data.counts.atRisk) : "-"}
+              hint="Booked before, now quiet"
+            />
+            <Tile
+              label="Lane open"
+              icon={statusStyle.growth.icon}
+              iconTone={statusStyle.growth.iconTone}
+              value={data ? String(data.counts.growth) : "-"}
+              hint="Carriers with a load waiting"
+            />
           </dl>
         </section>
 
