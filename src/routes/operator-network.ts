@@ -300,8 +300,16 @@ export function demandQuery(params: OperatorDemandQuery): SqlStatement {
     const list: string[] = [];
     if (params.equipment.length > 0) list.push(`${alias}.` + sql`equipment IN (${params.equipment})`.text);
     if (params.origin) list.push(`${alias}.` + sql`origin_state = ${params.origin}`.text);
+    if (params.lane) {
+      const [origin, destination, equipment] = params.lane.split("|");
+      list.push(`${alias}.` + sql`origin_state = ${origin ?? ""}`.text);
+      list.push(destination ? `${alias}.` + sql`destination_state = ${destination}`.text : `${alias}.destination_state IS NULL`);
+      list.push(equipment ? `${alias}.` + sql`equipment = ${equipment}`.text : `${alias}.equipment IS NULL`);
+    }
     return list.length > 0 ? list.join("\n        AND ") : "TRUE";
   };
+  // A carrier narrows the asks before they are grouped, so every count on a row is its own.
+  const byCarrier = params.carrier ? sql`a.carrier_key = ${params.carrier}`.text : "TRUE";
   const offset = (params.page - 1) * inboxPageSize;
 
   const text =
@@ -314,6 +322,9 @@ export function demandQuery(params: OperatorDemandQuery): SqlStatement {
         COALESCE(sum(a.unmet) FILTER (WHERE a.created_at >= w.previous_start AND a.created_at < w.this_start), 0) AS previous_week,
         count(DISTINCT a.carrier_key) AS carriers
       FROM asks a, weeks w
+      WHERE ` +
+    byCarrier +
+    `
       GROUP BY a.origin_state, a.destination_state, a.equipment
     ), ordered AS (
       SELECT g.*, row_number() OVER (
@@ -329,6 +340,8 @@ export function demandQuery(params: OperatorDemandQuery): SqlStatement {
       (SELECT COALESCE(sum(offered_no_booking), 0) FROM ordered) AS offered_no_booking_total,
       (SELECT count(DISTINCT a.carrier_key) FROM asks a WHERE ` +
     filtersOn("a") +
+    ` AND ` +
+    byCarrier +
     `) AS carriers_total,
       COALESCE((SELECT json_agg(r ORDER BY r.ord) FROM (
         SELECT p.ord, p.origin_state, p.destination_state, p.equipment, p.searches, p.no_match, p.offered_no_booking,

@@ -363,6 +363,15 @@ describe("GET /v1/operator/demand", () => {
     expect(text).toContain("count(DISTINCT a.carrier_key) AS carriers");
   });
 
+  it("narrows to one exact lane, Any as IS NULL, and to one carrier's asks before grouping", () => {
+    const text = demandQuery(operatorDemandQuery.parse({ lane: "TX||REEFER", carrier: "mc:9'1" })).text;
+    expect(text).toContain("g.origin_state = E'TX'");
+    expect(text).toContain("g.destination_state IS NULL");
+    expect(text).toContain("g.equipment = E'REEFER'");
+    expect(text).toContain("WHERE a.carrier_key = E'mc:9''1'\n      GROUP BY");
+    expect(operatorDemandQuery.safeParse({ lane: "TX|GA" }).success).toBe(false);
+  });
+
   it("orders by unmet then searches then lane, and pages", () => {
     const text = demandQuery(operatorDemandQuery.parse({ page: "3" })).text;
     expect(text).toContain(

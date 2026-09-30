@@ -622,7 +622,12 @@ export const operatorNetworkResponse = z.object({
 export type OperatorNetworkResponse = z.infer<typeof operatorNetworkResponse>;
 
 // The unmet demand radar reads the last 4 desk (Chicago) weeks, this one included; the bar filters narrow the rows.
-export const operatorDemandQuery = operatorCarriersFields.pick({ equipment: true, origin: true, page: true });
+export const operatorDemandQuery = operatorCarriersFields.pick({ equipment: true, origin: true, page: true }).extend({
+  // One lane exactly, as ORIGIN|DESTINATION|EQUIPMENT with an empty part for Any (TX||REEFER).
+  lane: optionalField(z.string().trim().regex(/^[A-Z]{2}\|([A-Z]{2})?\|([A-Z_]+)?$/)),
+  // Only the asks of one carrier, by carrier key.
+  carrier: optionalField(z.string().trim().min(1).max(128)),
+});
 export type OperatorDemandQuery = z.output<typeof operatorDemandQuery>;
 
 // One lane carriers asked for; a null destination or equipment is the "Any" the carrier asked for.
