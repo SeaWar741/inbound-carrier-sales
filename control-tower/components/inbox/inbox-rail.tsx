@@ -110,7 +110,7 @@ export type InboxWindow = { since: string; from: string; to: string };
 
 // The date window as an antd range picker. A preset (or a range equal to one) keeps the rolling
 // `since` window, so it follows the clock; any other range is sent as whole desk days.
-function DateRange({ dateWindow: current, today, onWindow }: { dateWindow: InboxWindow; today: string; onWindow: (next: InboxWindow) => void }) {
+export function DateRange({ dateWindow: current, today, onWindow }: { dateWindow: InboxWindow; today: string; onWindow: (next: InboxWindow) => void }) {
   const end = dayjs(today);
   const presetRange = (days: number): [Dayjs, Dayjs] => [end.subtract(days, "day"), end];
   const preset = current.from && current.to ? null : (sincePresets.find((p) => p.since === current.since) ?? sincePresets[1]!);

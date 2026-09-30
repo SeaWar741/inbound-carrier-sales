@@ -179,7 +179,7 @@ export function FilterSelect({
 
 // An antd select in the list header: a colored leading icon, search by label, and a clear button.
 // An empty value shows the placeholder.
-function HeaderSelect({
+export function HeaderSelect({
   label,
   placeholder = label,
   grow = 1,
@@ -218,8 +218,8 @@ function HeaderSelect({
   );
 }
 
-const equipmentOptions = equipmentCodes.map((c) => ({ value: c, label: equipmentLabel(c) }));
-const stateOptions = states.map((state) => ({ value: state, label: state }));
+export const equipmentOptions = equipmentCodes.map((c) => ({ value: c, label: equipmentLabel(c) }));
+export const stateOptions = states.map((state) => ({ value: state, label: state }));
 // Priority is the default, so picking it clears the sort back to the placeholder.
 const sortOptions = inboxSorts.map((s) => ({ value: s, label: sortLabels[s] }));
 

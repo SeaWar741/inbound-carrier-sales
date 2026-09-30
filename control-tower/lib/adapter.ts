@@ -4,6 +4,7 @@ import {
   adapterCarrierCallsResponse,
   adapterCarriersResponse,
   adapterLoadsResponse,
+  adapterNetworkResponse,
   adapterWallResponse,
   autonomyModes,
   confirmHoldResponse,
@@ -15,6 +16,7 @@ import {
   type ErrorResponse,
   type ReleaseHoldResponse,
   type TowerLoads,
+  type TowerNetwork,
   type TowerWall,
 } from "./contracts";
 import { env } from "./env";
@@ -89,6 +91,11 @@ export async function getCarrierCalls(key: string, query: URLSearchParams): Prom
     adapterCarrierCallsResponse,
     "The call data is unavailable right now. Retry shortly.",
   );
+}
+
+// query carries the carriers page's view and filters as the adapter reads them (view, since, ..., page).
+export async function getNetwork(query: URLSearchParams): Promise<AdapterResult<TowerNetwork>> {
+  return read(`/v1/operator/network?${query.toString()}`, adapterNetworkResponse, "The carrier network is unavailable right now. Retry shortly.");
 }
 
 export type InterventionRecord =

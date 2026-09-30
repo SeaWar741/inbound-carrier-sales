@@ -14,6 +14,8 @@ import { WallContext } from "@/lib/use-wall";
 const nav = [
   { href: "/", label: "Dashboard" },
   { href: "/inbox", label: "Inbox" },
+  { href: "/carriers", label: "Carriers" },
+  { href: "/demand", label: "Demand" },
 ];
 
 // The frame of every tower page: one top bar and the wall poll the pages share. The page body

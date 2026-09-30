@@ -252,6 +252,57 @@ export type TowerCarrierCalls = Omit<AdapterCarrierCallsResponse, "calls" | "car
   liveUnavailable: boolean;
 };
 
+export const networkViews = ["all", "new", "at_risk", "top", "growth"] as const;
+export type NetworkView = (typeof networkViews)[number];
+export const carrierRelationships = ["new", "at_risk", "active"] as const;
+export type CarrierRelationship = (typeof carrierRelationships)[number];
+
+const networkCarrier = z.object({
+  key: z.string(),
+  mcNumber: z.string().nullable(),
+  dotNumber: z.string().nullable(),
+  carrierName: z.string().nullable(),
+  // From the carrier's latest call.
+  eligible: z.boolean(),
+  // new, else at_risk, else active; lifetime facts decide it, not the window.
+  relationship: z.enum(carrierRelationships),
+  // Tags independent of the relationship and of each other.
+  top: z.boolean(),
+  growth: z.boolean(),
+  facts: z.object({
+    lifetimeCalls: z.number().int(),
+    lifetimeBookings: z.number().int(),
+    lastCallAt: z.iso.datetime(),
+    // Calls in the last 14 days and in the 14 days before those.
+    callsRecent: z.number().int(),
+    callsPrior: z.number().int(),
+    // The rest are inside the window; negotiable calls have at least one offer.
+    calls: z.number().int(),
+    negotiableCalls: z.number().int(),
+    bookings: z.number().int(),
+    searches: z.number().int(),
+    loadsNegotiated: z.number().int(),
+  }),
+  // The carrier's most observed lanes in the window; null means any.
+  lanes: z.array(
+    z.object({ originState: z.string().nullable(), destinationState: z.string().nullable(), equipment: z.string().nullable(), count: z.number().int(), open: z.boolean() }),
+  ),
+});
+export type NetworkCarrier = z.infer<typeof networkCarrier>;
+
+export const adapterNetworkResponse = z.object({
+  status: z.literal("ok"),
+  rows: z.array(networkCarrier),
+  // Carriers in the view after the filters; the counts apply the filters but not the view.
+  total: z.number().int(),
+  page: z.number().int(),
+  pageSize: z.number().int(),
+  counts: z.object({ all: z.number().int(), new: z.number().int(), atRisk: z.number().int(), top: z.number().int(), growth: z.number().int() }),
+  // False when the TMS board could not be read; growth is then false for every carrier.
+  boardAvailable: z.boolean(),
+});
+export type TowerNetwork = z.infer<typeof adapterNetworkResponse>;
+
 export type ErrorResponse = { status: string; message: string };
 
 // Request bodies the browser sends to the tower.
