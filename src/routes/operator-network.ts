@@ -37,6 +37,8 @@ export type OperatorNetworkDeps = { twin: Pick<TwinClient, "query">; tms: Pick<T
 // A lane the board has open only by origin and equipment is growth when the carrier booked that exact
 // lane this many times: a repeat lane, not a one-off.
 const growthMinLaneBookings = 2;
+// The side panel ranks this many open lanes; ranked-map-panel.tsx shows the same number of rows.
+const openLanesShown = 5;
 
 // The board's open lanes as `ORIGIN|DESTINATION|EQUIPMENT`, one LOAD_QUERY per equipment type. Null when any
 // query fails: a partial board would tag growth on some lanes and silently not on others.
@@ -111,6 +113,9 @@ export function networkQuery(params: OperatorNetworkQuery, lanes: ReadonlySet<st
   const laneMatch = `SELECT 1 FROM lanes l WHERE l.carrier_key = c.carrier_key AND ${laneFilters.join(" AND ")}`;
   if (laneFilters.length > 0) filters.push(`EXISTS (${laneMatch})`);
   const growthHere = laneFilters.length > 0 ? `EXISTS (${laneMatch} AND l.open)` : "c.growth";
+  // Under a lane filter the open lane that matches it leads the row's lanes, so the growth reason
+  // names the lane behind growth_here rather than another open lane.
+  const openHere = laneFilters.length > 0 ? `bool_or(l.open AND ${laneFilters.join(" AND ")})` : "bool_or(l.open)";
   if (params.q) {
     const pattern = containsPattern(params.q);
     filters.push(sql`(c.mc_number ILIKE ${pattern} OR c.dot_number ILIKE ${pattern} OR c.carrier_name ILIKE ${pattern})`.text);
@@ -203,7 +208,7 @@ export function networkQuery(params: OperatorNetworkQuery, lanes: ReadonlySet<st
         FROM lanes l JOIN listed c ON c.carrier_key = l.carrier_key
         WHERE l.open AND l.equipment IS NOT NULL GROUP BY l.origin_state, l.equipment
         ORDER BY carriers DESC, l.origin_state, l.equipment
-        LIMIT 5
+        LIMIT ` + sql`${openLanesShown}`.text + `
       ) o), '[]'::json) AS open_lanes,
       COALESCE((SELECT json_agg(o ORDER BY o.carriers DESC, o.origin_state) FROM (
         SELECT l.origin_state, count(DISTINCT l.carrier_key) AS carriers
@@ -216,14 +221,15 @@ export function networkQuery(params: OperatorNetworkQuery, lanes: ReadonlySet<st
           p.calls, p.negotiable_calls, p.bookings, pl.lanes
         FROM ordered p
         LEFT JOIN LATERAL (
-          SELECT COALESCE(json_agg(t ORDER BY t.open DESC, t.n DESC, t.origin_state, t.destination_state, t.equipment), '[]'::json) AS lanes
+          SELECT COALESCE(json_agg(t ORDER BY t.open_here DESC, t.open DESC, t.n DESC, t.origin_state, t.destination_state, t.equipment), '[]'::json) AS lanes
           FROM (
             -- Calls, not rows: a call that searched a lane and negotiated a load on it ran it once.
             -- Open lanes first, so the one behind the growth tag is always among the five.
-            SELECT l.origin_state, l.destination_state, l.equipment, count(DISTINCT l.call_id) AS n, bool_or(l.open) AS open
+            SELECT l.origin_state, l.destination_state, l.equipment, count(DISTINCT l.call_id) AS n, bool_or(l.open) AS open,
+              ` + openHere + ` AS open_here
             FROM lanes l WHERE l.carrier_key = p.carrier_key
             GROUP BY l.origin_state, l.destination_state, l.equipment
-            ORDER BY open DESC, n DESC, l.origin_state, l.destination_state, l.equipment
+            ORDER BY open_here DESC, open DESC, n DESC, l.origin_state, l.destination_state, l.equipment
             LIMIT 5
           ) t
         ) pl ON TRUE

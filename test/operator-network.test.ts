@@ -267,6 +267,9 @@ describe("GET /v1/operator/network", () => {
     expect(text).toContain("FROM filtered f WHERE f.growth_here");
     expect(text).toContain("(SELECT count(*) FROM filtered WHERE growth_here) AS growth_count");
     expect(text).toContain("p.growth_here AS growth");
+    // The row's lanes lead with the open lane that matches the filter, so the reason names it.
+    expect(text).toContain("bool_or(l.open AND l.equipment IN (E'REEFER') AND l.origin_state = E'GA') AS open_here");
+    expect(text).toContain("ORDER BY open_here DESC, open DESC, n DESC");
     // Without a lane filter it is the carrier's own growth tag.
     expect(networkQuery(operatorNetworkQuery.parse({ view: "growth" }), new Set()).text).toContain("SELECT c.*, c.growth AS growth_here FROM listed c");
   });
