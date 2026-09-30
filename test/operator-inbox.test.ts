@@ -82,6 +82,8 @@ const carriersRow = {
   live: "0",
   active: "1",
   closed: "3",
+  // json_object_agg over the stage groups: absent stages have no carrier.
+  stage_counts: { needs_approval: 1, in_transit: 1, lost: 3 },
   rows: [
     {
       ord: 1,
@@ -223,6 +225,10 @@ describe("GET /v1/operator/carriers", () => {
     ["an unknown sort", "?sort=name"],
     ["a malformed state", "?origin=Georgia"],
     ["an unknown since", "?since=1y"],
+    ["a malformed from", "?from=2026-9-1&to=2026-09-03"],
+    ["from without to", "?from=2026-09-01"],
+    ["to without from", "?to=2026-09-01"],
+    ["from after to", "?from=2026-09-03&to=2026-09-01"],
     ["201 live ids", `?${Array.from({ length: 201 }, (_, i) => `live=run-${i}`).join("&")}`],
   ])("rejects %s", async (_, query) => {
     statements.length = 0;
@@ -243,13 +249,14 @@ describe("GET /v1/operator/carriers", () => {
     expect(operatorCarriersQuery.parse({ live }).live).toHaveLength(200);
   });
 
-  it("returns the page, total and tab counts parsed from one Twin row", async () => {
+  it("returns the page, total, tab counts and stage counts parsed from one Twin row", async () => {
     statements.length = 0;
     const res = await getCarriers("?tab=all&page=2");
     expect(res.statusCode).toBe(200);
     expect(statements).toHaveLength(1);
     const body = operatorCarriersResponse.parse(res.json());
     expect(body).toMatchObject({ total: 2, page: 2, pageSize: 25, counts: { needsYou: 1, live: 0, active: 1, closed: 3 } });
+    expect(body.stageCounts).toEqual({ live: 0, negotiating: 0, needs_approval: 1, booked: 0, in_transit: 1, arrived: 0, lost: 3 });
     expect(body.rows[0]).toMatchObject({
       key: "mc:123456",
       carrierName: "ACME TRUCKING LLC",
@@ -285,7 +292,7 @@ describe("GET /v1/operator/carriers", () => {
   it("omits every absent or empty filter instead of rendering IN ()", () => {
     const text = carriersQuery(operatorCarriersQuery.parse({ stage: "", equipment: [], live: "" })).text;
     expect(text).not.toMatch(/IN \(\s*(NULL)?\s*\)/);
-    expect(text).not.toContain("st.carrier_stage IN (E'");
+    expect(text).not.toContain("carrier_stage IN (E'");
     expect(text).not.toContain("o.equipment IN");
     expect(text).not.toContain("ILIKE");
     expect(text).toContain("FALSE AS latest_live");
@@ -312,16 +319,34 @@ describe("GET /v1/operator/carriers", () => {
       }),
     ).text;
     expect(text).toContain("k.latest_call_id IN (E'run-1', E'run-2') AS latest_live");
-    expect(text).toContain("st.carrier_stage IN (E'needs_approval', E'live')");
+    expect(text).toContain("FROM filtered f WHERE f.tab = E'needs_you' AND f.carrier_stage IN (E'needs_approval', E'live')");
     expect(text).toContain("o.equipment IN (E'REEFER') AND o.origin_state = E'GA' AND o.destination_state = E'KS'");
     expect(text).toContain("s.carrier_name ILIKE E'%50\\\\%\\\\_o''k%'");
-    expect(text).toContain("FROM filtered f WHERE f.tab = E'needs_you'");
     expect(text).toContain("date_trunc('day', now() AT TIME ZONE E'America/Chicago') AT TIME ZONE E'America/Chicago'");
     expect(text).toContain("ORDER BY CASE f.trip_status WHEN 'upcoming' THEN f.pickup_ts WHEN 'in_transit' THEN f.eta_ts END ASC NULLS LAST, f.carrier_key");
     expect(text).toContain("p.ord > 50 AND p.ord <= 75");
-    // Counts group the bar-filtered set by tab; only total and page add the tab.
+    // Counts group the bar-filtered set by tab and by stage; only total and page add the tab and stage.
     expect(text).toContain("(SELECT count(*) FROM filtered WHERE tab = 'needs_you') AS needs_you");
+    expect(text).toContain("SELECT carrier_stage, count(*) AS n FROM filtered GROUP BY carrier_stage");
+    const filtered = text.slice(text.indexOf("filtered AS ("), text.indexOf("ordered AS ("));
+    expect(filtered).not.toContain("carrier_stage IN");
+    expect(filtered).not.toContain("f.tab =");
     expect(text).toContain("(SELECT count(*) FROM ordered) AS total");
+  });
+
+  it("reads a day range as whole Chicago days, from the start of from to the start of the day after to, over since", () => {
+    const text = carriersQuery(operatorCarriersQuery.parse({ since: "today", from: "2026-09-01", to: "2026-09-03" })).text;
+    expect(text).toContain(
+      "c.created_at >= ((E'2026-09-01'::date + 0)::timestamp AT TIME ZONE E'America/Chicago')::timestamp" +
+        " AND c.created_at < ((E'2026-09-03'::date + 1)::timestamp AT TIME ZONE E'America/Chicago')::timestamp",
+    );
+    expect(text).not.toContain("date_trunc('day', now()");
+  });
+
+  it("keeps the since preset when the range is blank", () => {
+    const text = carriersQuery(operatorCarriersQuery.parse({ since: "30d", from: "", to: "" })).text;
+    expect(text).toContain("c.created_at >= (now() - interval '30 days')::timestamp");
+    expect(text).not.toContain("::date");
   });
 
   it("answers 503 when Twin fails", async () => {
@@ -374,8 +399,20 @@ describe("GET /v1/operator/carriers/:key/calls", () => {
     expect(text).not.toContain("tabbed AS");
   });
 
-  it("rejects an unknown since", async () => {
+  it("rejects an unknown since and a half range", async () => {
     expect((await getCalls("mc:123456", "?since=1y")).statusCode).toBe(400);
+    expect((await getCalls("mc:123456", "?from=2026-09-01")).statusCode).toBe(400);
+  });
+
+  it("reads the carrier's row over the list's day range", async () => {
+    statements.length = 0;
+    const res = await getCalls("mc:123456", "?from=2026-09-01&to=2026-09-01");
+    expect(res.statusCode).toBe(200);
+    const text = statements.find((t) => t.startsWith("WITH scoped")) ?? "";
+    expect(text).toContain(
+      "c.created_at >= ((E'2026-09-01'::date + 0)::timestamp AT TIME ZONE E'America/Chicago')::timestamp" +
+        " AND c.created_at < ((E'2026-09-01'::date + 1)::timestamp AT TIME ZONE E'America/Chicago')::timestamp AND COALESCE(",
+    );
   });
 
   it("answers an empty list and no carrier for an unknown key", async () => {

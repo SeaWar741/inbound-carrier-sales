@@ -1,26 +1,28 @@
 "use client";
 
-import { useRef } from "react";
-import { LuArrowUpRight, LuChevronLeft, LuInbox, LuChevronRight, LuHand, LuPackage, LuPhone, LuTriangleAlert } from "react-icons/lu";
-import { TabStrip } from "@/components/inbox/filter-bar";
-import { Badge, CarrierStageDot, CarrierStagePill } from "@/components/inbox/stage-pill";
-import { PulseDot } from "@/components/pulse-dot";
-import type { inboxTabs, TowerCarrier, TowerCarriers } from "@/lib/contracts";
+import { useEffect, useRef } from "react";
+import { LuArrowUpRight, LuHand, LuLoaderCircle, LuPackage, LuPhone, LuTriangleAlert } from "react-icons/lu";
+import { CarrierStageIcon } from "@/components/inbox/stage-pill";
+import type { TowerCarrier, TowerCarriers } from "@/lib/contracts";
 import { callSummary, carrierName, formatTimeAgo } from "@/lib/format";
 
-export type InboxTab = (typeof inboxTabs)[number];
+// The list's loaded pages merged into one answer, with the query and page count they were read for.
+export type CarrierPages = TowerCarriers & { query: string; pages: number };
 
-type Counts = TowerCarriers["counts"];
-const tabs: { tab: InboxTab; label: string; title: string; count: (counts: Counts) => number; urgent?: boolean }[] = [
-  // The four tabs split every carrier, so their sum is the whole list.
-  { tab: "all", label: "", title: "All carriers", count: (c) => c.needsYou + c.live + c.active + c.closed },
-  { tab: "needs_you", label: "Needs you", title: "Needs you", count: (c) => c.needsYou, urgent: true },
-  { tab: "live", label: "Live", title: "Live", count: (c) => c.live },
-  { tab: "active", label: "Active", title: "Active", count: (c) => c.active },
-  { tab: "closed", label: "Closed", title: "Closed", count: (c) => c.closed },
-];
+// The right edge of row 1: the stage icon in its tone. A carrier that asked for a human shows the
+// red hand whatever its stage.
+function StatusIcon({ carrier }: { carrier: TowerCarrier }) {
+  if (carrier.needsHuman && carrier.carrierStage !== "needs_approval") {
+    return (
+      <span role="img" aria-label="Asked for a human" title="Asked for a human" className="flex shrink-0 text-tone-red">
+        <LuHand size={18} aria-hidden />
+      </span>
+    );
+  }
+  return <CarrierStageIcon stage={carrier.carrierStage} />;
+}
 
-// The cortex lead row: dot and name, numbers, last message, badges, time and counts.
+// The cortex lead row: dot, name and status icon; numbers; last event; stage badge; time and counts.
 function CarrierRow({
   carrier,
   now,
@@ -50,14 +52,12 @@ function CarrierRow({
         }`}
       >
         <div className="flex min-w-0 items-center gap-2">
-          <CarrierStageDot stage={carrier.carrierStage} />
           <span className="min-w-0 truncate font-medium text-fg">{carrierName(carrier)}</span>
           <span className="min-w-0 flex-1" />
-          {carrier.latestCall.live && <PulseDot tone="accent" label="Live call" />}
-          <CarrierStagePill stage={carrier.carrierStage} />
+          <StatusIcon carrier={carrier} />
         </div>
 
-        {carrier.carrierName && numbers && <p className="tabular mt-0.5 truncate pl-[18px] text-sm text-fg-muted">{numbers}</p>}
+        {carrier.carrierName && numbers && <p className="tabular mt-0.5 truncate text-sm text-fg-muted">{numbers}</p>}
 
         {summary && (
           <p className="mt-1 flex min-w-0 items-center gap-1 text-sm text-fg-faint">
@@ -66,7 +66,7 @@ function CarrierRow({
           </p>
         )}
 
-        <div className="mt-1 flex min-w-0 items-center gap-1.5 pl-[18px] text-xs text-fg-faint">
+        <div className="mt-1 flex min-w-0 items-center gap-1.5 text-xs text-fg-faint">
           <span className="shrink-0" title={carrier.lastActivityAt}>
             {formatTimeAgo(carrier.lastActivityAt, now)}
           </span>
@@ -82,13 +82,6 @@ function CarrierRow({
             <span className="tabular">{carrier.loadsCount}</span>
             <span className="sr-only">loads</span>
           </span>
-          <span className="min-w-0 flex-1" />
-          {carrier.needsHuman && (
-            <Badge tone="bg-risk-soft text-risk">
-              <LuHand size={11} aria-hidden />
-              Needs human
-            </Badge>
-          )}
         </div>
       </button>
     </li>
@@ -96,7 +89,7 @@ function CarrierRow({
 }
 
 // The cortex list skeleton: two bars per row.
-export function SkeletonRows({ rows = 5 }: { rows?: number }) {
+function SkeletonRows({ rows = 5 }: { rows?: number }) {
   return (
     <div aria-hidden className="space-y-3 p-4">
       {Array.from({ length: rows }, (_, i) => (
@@ -109,21 +102,18 @@ export function SkeletonRows({ rows = 5 }: { rows?: number }) {
   );
 }
 
-const pageButton =
-  "inline-flex size-8 cursor-pointer items-center justify-center rounded-md border border-line bg-panel text-fg shadow-xs transition-colors hover:bg-panel-raised disabled:pointer-events-none disabled:opacity-50";
-
 export function CarrierList({
   data,
   loading,
   error,
   now,
-  tab,
-  page,
+  title,
   filters,
   filtered,
   selectedKey,
-  onTab,
-  onPage,
+  loadingMore,
+  hasMore,
+  onLoadMore,
   onSelect,
   onClearFilters,
 }: {
@@ -131,26 +121,39 @@ export function CarrierList({
   loading: boolean;
   error: string | null;
   now: number;
-  tab: InboxTab;
-  page: number;
+  // The selected rail row's label.
+  title: string;
   // The filter chips and search box, rendered in the header.
   filters: React.ReactNode;
-  // Any filter other than the tab narrows the list.
+  // Any filter other than the rail row narrows the list.
   filtered: boolean;
   selectedKey: string | null;
-  onTab: (tab: InboxTab) => void;
-  onPage: (page: number) => void;
+  // The next page is on its way.
+  loadingMore: boolean;
+  // Rows past the loaded pages remain.
+  hasMore: boolean;
+  onLoadMore: () => void;
   onSelect: (key: string) => void;
   onClearFilters: () => void;
 }) {
   const buttons = useRef(new Map<string, HTMLButtonElement>());
+  const scroller = useRef<HTMLDivElement>(null);
+  const sentinel = useRef<HTMLDivElement>(null);
   const rows = data?.rows ?? [];
   const total = data?.total ?? 0;
-  const pageSize = data?.pageSize ?? 0;
-  const first = (page - 1) * pageSize + 1;
-  const last = Math.min(page * pageSize, total);
-  const everything = data ? tabs[0]!.count(data.counts) : 0;
-  const title = tabs.find((t) => t.tab === tab)?.title ?? "Carriers";
+  const everything = data ? data.counts.needsYou + data.counts.live + data.counts.active + data.counts.closed : 0;
+
+  // The sentinel under the last row asks for the next page as it nears the bottom of the pane. A new
+  // observer per page length reports at once, so a page too short to scroll still loads the next one.
+  useEffect(() => {
+    const target = sentinel.current;
+    if (!hasMore || target === null) return;
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) onLoadMore();
+    }, { root: scroller.current, rootMargin: "0px 0px 200px 0px" });
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [hasMore, rows.length, onLoadMore]);
 
   function onKeyDown(event: React.KeyboardEvent<HTMLUListElement>) {
     if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
@@ -225,7 +228,7 @@ export function CarrierList({
       <div className="shrink-0 border-b border-line px-4 py-3">
         <div className="mb-3 flex items-center justify-between gap-2">
           <h2 className="truncate font-semibold text-fg">{title}</h2>
-          <span className="tabular shrink-0 text-sm text-fg-muted">{data ? `${total} carriers` : ""}</span>
+          <span className="tabular shrink-0 text-sm text-fg-muted">{data ? `${total} ${total === 1 ? "carrier" : "carriers"}` : ""}</span>
         </div>
         {filters}
         {data?.liveUnavailable && (
@@ -242,36 +245,15 @@ export function CarrierList({
         )}
       </div>
 
-      <TabStrip
-        label="Carrier tabs"
-        tabs={tabs.map((t) => ({
-          value: t.tab,
-          label: t.label || <LuInbox size={14} aria-hidden />,
-          ariaLabel: t.label ? undefined : "All",
-          count: data ? t.count(data.counts) : null,
-          urgent: t.urgent,
-        }))}
-        active={tab}
-        onTab={onTab}
-      />
-
-      <div className="min-h-0 flex-1 overflow-y-auto">{body}</div>
-
-      {total > 0 && (
-        <div className="flex shrink-0 items-center justify-between border-t border-line px-4 py-2 text-sm text-fg-muted">
-          <span className="tabular">
-            {first}-{last} of {total}
-          </span>
-          <span className="flex items-center gap-1.5">
-            <button type="button" aria-label="Previous page" disabled={page <= 1} onClick={() => onPage(page - 1)} className={pageButton}>
-              <LuChevronLeft size={16} aria-hidden />
-            </button>
-            <button type="button" aria-label="Next page" disabled={last >= total} onClick={() => onPage(page + 1)} className={pageButton}>
-              <LuChevronRight size={16} aria-hidden />
-            </button>
-          </span>
-        </div>
-      )}
+      <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto">
+        {body}
+        {hasMore && rows.length > 0 && (
+          <div ref={sentinel} role="status" className="flex items-center justify-center gap-2 border-t border-line px-4 py-3 text-xs text-fg-faint">
+            {loadingMore && <LuLoaderCircle size={14} className="animate-spin" aria-hidden />}
+            {loadingMore ? "Loading more carriers..." : `${rows.length} of ${total}`}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

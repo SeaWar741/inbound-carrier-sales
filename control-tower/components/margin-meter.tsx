@@ -1,7 +1,8 @@
 "use client";
 
-import { LuChevronLeft, LuChevronRight } from "react-icons/lu";
+import { LuChevronLeft, LuChevronRight, LuReceipt } from "react-icons/lu";
 import { motion, useReducedMotion } from "motion/react";
+import { Section } from "@/components/section";
 import { finalRound, type WallOffer } from "@/lib/contracts";
 import { formatClock, formatPercent, formatPerMile, formatSignedUsd, formatUsd, outcomeLabel } from "@/lib/format";
 import { pricingBreakdown, type LoadOutcome } from "@/lib/pricing";
@@ -65,9 +66,9 @@ function NegotiationPath({ path, postedRate, maxBuy, outcome }: { path: WallOffe
   // The agreed amount is on the receipt above; the result line only names the outcome.
   const resultText = outcome.kind === "booked" ? "Booked" : outcome.kind === "holding" ? "Holding" : result.text;
   return (
-    <div className="flex flex-col gap-1.5 border-t border-line pt-2.5">
+    <div className="flex flex-col gap-2 border-t border-line pt-3">
       <div className="flex items-baseline justify-between text-[11px]">
-        <h4 className="font-medium uppercase tracking-wide text-fg-faint">Negotiation</h4>
+        <h4 className="font-semibold uppercase tracking-wide text-fg-faint">Negotiation</h4>
         <span className="flex gap-2">
           <span className="text-warn">Ask</span>
           <span className="text-accent">Counter</span>
@@ -147,21 +148,18 @@ export function MarginMeter({
     </span>
   );
 
-  const header = (
-    <div className="flex items-center justify-between gap-2">
-      <h3 className="text-xs font-medium uppercase tracking-wide text-fg-faint">
-        Pricing <span className="tabular font-normal normal-case tracking-normal text-fg-muted">{offer.loadId}</span>
-      </h3>
+  const aside = (
+    <span className="flex min-w-0 items-center gap-2">
+      <span className="tabular truncate text-xs text-fg-muted">{offer.loadId}</span>
       {rounds}
-    </div>
+    </span>
   );
 
   if (postedRate === null || maxBuy === null) {
     return (
-      <div className="flex flex-col gap-2 px-3 py-3">
-        {header}
+      <Section icon={LuReceipt} title="Pricing" aside={aside}>
         <p className="text-xs text-fg-faint">Rates were not recorded for this offer.</p>
-      </div>
+      </Section>
     );
   }
 
@@ -186,86 +184,84 @@ export function MarginMeter({
   const mile = (value: number | null) => (value === null ? null : formatPerMile(value));
 
   return (
-    <div className="flex flex-col gap-3 px-3 py-3">
-      {header}
+    <Section icon={LuReceipt} title="Pricing" aside={aside}>
+      <div className="flex flex-col gap-4">
+        <div className="relative pt-5 pb-5">
+          {/* Carrier ask above the track; clamped with an arrow when it is off the scale. */}
+          <Pinned at={askPct} className="top-0 flex items-center gap-0.5 text-warn">
+            {askBelow && <LuChevronLeft size={10} aria-hidden />}
+            <span>Ask{askAbove && " over ceiling"}</span>
+            {askAbove && <LuChevronRight size={10} aria-hidden />}
+          </Pinned>
 
-      <div className="relative pt-5 pb-5">
-        {/* Carrier ask above the track; clamped with an arrow when it is off the scale. */}
-        <Pinned at={askPct} className="top-0 flex items-center gap-0.5 text-warn">
-          {askBelow && <LuChevronLeft size={10} aria-hidden />}
-          <span>Ask{askAbove && " over ceiling"}</span>
-          {askAbove && <LuChevronRight size={10} aria-hidden />}
-        </Pinned>
+          <div className="relative h-2 overflow-hidden rounded-full bg-line">
+            <motion.div
+              className={`absolute inset-y-0 left-0 ${agreedRate !== null ? "bg-ok" : "bg-accent"}`}
+              initial={false}
+              animate={{ width: `${ourPct}%` }}
+              transition={spring}
+            />
+            <motion.div
+              className="absolute inset-y-0 bg-accent-soft outline outline-1 -outline-offset-1 outline-accent/60"
+              initial={false}
+              animate={{ left: `${ourPct}%`, width: `${bandWidth}%` }}
+              transition={spring}
+              aria-hidden
+            />
+          </div>
 
-        <div className="relative h-2 overflow-hidden rounded-full bg-line">
-          <motion.div
-            className={`absolute inset-y-0 left-0 ${agreedRate !== null ? "bg-ok" : "bg-accent"}`}
+          <motion.span
+            className="absolute top-4 h-4 w-0.5 -translate-x-1/2 rounded-full bg-warn"
             initial={false}
-            animate={{ width: `${ourPct}%` }}
-            transition={spring}
-          />
-          <motion.div
-            className="absolute inset-y-0 bg-accent-soft outline outline-1 -outline-offset-1 outline-accent/60"
-            initial={false}
-            animate={{ left: `${ourPct}%`, width: `${bandWidth}%` }}
+            animate={{ left: `${askPct}%` }}
             transition={spring}
             aria-hidden
           />
+
+          {ourRate !== null && (
+            <Pinned at={ourPct} className={`bottom-0 ${agreedRate !== null ? "text-ok" : "text-accent"}`}>
+              {agreedRate !== null ? "Agreed" : "Counter"}
+              {authorizedUsd > 0 && agreedRate === null && <span className="text-fg-muted"> + authorized</span>}
+            </Pinned>
+          )}
         </div>
 
-        <motion.span
-          className="absolute top-4 h-4 w-0.5 -translate-x-1/2 rounded-full bg-warn"
-          initial={false}
-          animate={{ left: `${askPct}%` }}
-          transition={spring}
-          aria-hidden
-        />
+        <dl className="flex flex-col gap-1.5 text-xs">
+          <Line label="Posted" hint="Approximate cost: the posted rate" value={formatUsd(postedRate)} note={mile(receipt.posted.perMile)} />
+          <Line label="Ceiling" hint="Max buy for this load" value={formatUsd(maxBuy)} note={mile(receipt.ceiling.perMile)} />
+          <Line label="Headroom" hint="Ceiling minus posted" value={formatUsd(receipt.headroom)} />
+          {receipt.openingAsk && (
+            <Line label={`Opening ask R${receipt.openingAsk.round}`} hint="The carrier's first ask on this load" value={formatUsd(receipt.openingAsk.usd)} tone="text-warn" />
+          )}
+          {receipt.counters.map((counter) => (
+            <Line key={counter.at} label={`R${counter.round} counter`} value={formatUsd(counter.usd)} tone="text-accent" />
+          ))}
+          {agreedRate === null && authorizedUsd > 0 && (
+            <Line label="Authorized" hint="Raised by an operator, not yet offered" value={formatSignedUsd(authorizedUsd)} tone="text-accent" />
+          )}
+          <Line
+            label={agreed ? "Agreed" : "Latest ask"}
+            value={formatUsd(receipt.final.usd)}
+            tone={agreed ? "font-semibold text-fg" : "text-warn"}
+            note={mile(receipt.final.perMile)}
+          />
+          <Line label="Over posted" hint={agreed ? "Agreed minus posted" : "Latest ask minus posted"} value={formatSignedUsd(receipt.overPosted)} />
+          <Line
+            total
+            label={agreed ? "Margin kept" : "Margin at ask"} hint={agreed ? "Ceiling minus agreed" : "Ceiling minus latest ask"}
+            value={formatUsd(receipt.margin.usd)}
+            tone={receipt.margin.usd < 0 ? "text-risk" : "text-ok"}
+            note={formatPercent(receipt.margin.pct)}
+          />
+          <Line
+            label="Headroom kept" hint="Margin as a share of the headroom"
+            value={receipt.headroomSharePct === null ? "-" : `${Math.round(receipt.headroomSharePct)}%`}
+            tone={receipt.headroomSharePct !== null && receipt.headroomSharePct < 0 ? "text-risk" : "text-fg"}
+          />
+        </dl>
 
-        {ourRate !== null && (
-          <Pinned at={ourPct} className={`bottom-0 ${agreedRate !== null ? "text-ok" : "text-accent"}`}>
-            {agreedRate !== null ? "Agreed" : "Counter"}
-            {authorizedUsd > 0 && agreedRate === null && <span className="text-fg-muted"> + authorized</span>}
-          </Pinned>
-        )}
+        {path.length > 0 && <NegotiationPath path={path} postedRate={postedRate} maxBuy={maxBuy} outcome={outcome} />}
       </div>
-
-      <dl className="flex flex-col gap-1 text-xs">
-        <Line label="Posted" hint="Approximate cost: the posted rate" value={formatUsd(postedRate)} note={mile(receipt.posted.perMile)} />
-        <Line label="Ceiling" hint="Max buy for this load" value={formatUsd(maxBuy)} note={mile(receipt.ceiling.perMile)} />
-        <Line label="Headroom" hint="Ceiling minus posted" value={formatUsd(receipt.headroom)} />
-        {receipt.openingAsk && (
-          <Line label={`Opening ask R${receipt.openingAsk.round}`} hint="The carrier's first ask on this load" value={formatUsd(receipt.openingAsk.usd)} tone="text-warn" />
-        )}
-        {receipt.counters.map((counter) => (
-          <Line key={counter.at} label={`R${counter.round} counter`} value={formatUsd(counter.usd)} tone="text-accent" />
-        ))}
-        {agreedRate === null && authorizedUsd > 0 && (
-          <Line label="Authorized" hint="Raised by an operator, not yet offered" value={formatSignedUsd(authorizedUsd)} tone="text-accent" />
-        )}
-        <Line
-          label={agreed ? "Agreed" : "Latest ask"}
-          value={formatUsd(receipt.final.usd)}
-          tone={agreed ? "font-semibold text-fg" : "text-warn"}
-          note={mile(receipt.final.perMile)}
-        />
-        <Line label="Over posted" hint={agreed ? "Agreed minus posted" : "Latest ask minus posted"} value={formatSignedUsd(receipt.overPosted)} />
-        <Line
-          total
-          label={agreed ? "Margin kept" : "Margin at ask"} hint={agreed ? "Ceiling minus agreed" : "Ceiling minus latest ask"}
-          value={formatUsd(receipt.margin.usd)}
-          tone={receipt.margin.usd < 0 ? "text-risk" : "text-ok"}
-          note={formatPercent(receipt.margin.pct)}
-        />
-        <Line
-          label="Headroom kept" hint="Margin as a share of the headroom"
-          value={receipt.headroomSharePct === null ? "-" : `${Math.round(receipt.headroomSharePct)}%`}
-          tone={receipt.headroomSharePct !== null && receipt.headroomSharePct < 0 ? "text-risk" : "text-fg"}
-        />
-      </dl>
-
-      {path.length > 0 && <NegotiationPath path={path} postedRate={postedRate} maxBuy={maxBuy} outcome={outcome} />}
-
-      <p className="text-[11px] text-fg-faint">Trip costs (fuel, tolls) arrive with Trip Intelligence.</p>
-    </div>
+    </Section>
   );
 }

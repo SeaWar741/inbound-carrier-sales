@@ -4,13 +4,16 @@ import { toTowerCall, type TowerCarrierCalls } from "@/lib/contracts";
 import { liveRuns } from "@/lib/happyrobot";
 
 // One carrier's latest calls, newest first, and its list row, with the live HappyRobot session
-// overlaid like the list. The browser sends the list's `since`; the tower adds the running calls
-// as `live`. Next decodes the tagged key ("mc:123"); getCarrierCalls encodes it again for the adapter.
+// overlaid like the list. The browser sends the list's window (`since`, or a `from`/`to` day range
+// the adapter validates); the tower adds the running calls as `live`. Next decodes the tagged key ("mc:123"); getCarrierCalls encodes it again for the adapter.
 export async function GET(request: Request, context: { params: Promise<{ key: string }> }) {
   const { key } = await context.params;
   const query = new URLSearchParams();
-  const since = new URL(request.url).searchParams.get("since");
-  if (since) query.set("since", since);
+  const incoming = new URL(request.url).searchParams;
+  for (const key of ["since", "from", "to"]) {
+    const value = incoming.get(key);
+    if (value) query.set(key, value);
+  }
   const running = await liveRuns(query);
 
   const carrierCalls = await getCarrierCalls(key, query);

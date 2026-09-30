@@ -2,7 +2,6 @@
 
 import { LuMessageSquareText, LuPhone } from "react-icons/lu";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityChips } from "@/components/activity-chips";
 import { InterventionBar, type SentIntervention } from "@/components/intervention-bar";
 import { PulseDot } from "@/components/pulse-dot";
 import { StageRail } from "@/components/stage-rail";
@@ -10,7 +9,7 @@ import { Transcript } from "@/components/transcript";
 import type { ErrorResponse, InterventionBody, InterventionResponse, TowerCall } from "@/lib/contracts";
 import { carrierState, deskDayKey, formatClock, formatDeskWhen, formatElapsed } from "@/lib/format";
 import { useCallStream } from "@/lib/use-call-stream";
-import { useVoice } from "@/lib/use-voice";
+import type { Voice } from "@/lib/use-voice";
 
 // Whispers and authorizations this browser sent, with delivery tracked from the stream's signal events.
 function useSentInterventions(callId: string, hasSession: boolean, signalCount: number) {
@@ -101,25 +100,20 @@ function endedLabel(call: TowerCall, now: number): string {
 
 export function CallDetail({
   call,
+  voice,
   now,
-  onTakeoverChange,
 }: {
   call: TowerCall;
+  // The operator's voice connection to this call, owned by the carrier view so the detail panel's
+  // action card drives the same one.
+  voice: Voice;
   now: number;
-  onTakeoverChange: (callId: string | null) => void;
 }) {
   // The transcript is looked up by call, so it stays readable after the call ends.
   const stream = useCallStream(call.callId);
-  const voice = useVoice(call.callId, call.sessionId !== null);
   const { sent, whisper, authorize } = useSentInterventions(call.callId, call.sessionId !== null, stream.signals.length);
   const state = carrierState(call);
   const ChannelIcon = call.channel === "text" ? LuMessageSquareText : LuPhone;
-  const takenOver = voice.mode === "takeover";
-
-  useEffect(() => {
-    onTakeoverChange(takenOver ? call.callId : null);
-  }, [takenOver, call.callId, onTakeoverChange]);
-  useEffect(() => () => onTakeoverChange(null), [onTakeoverChange]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -144,9 +138,9 @@ export function CallDetail({
         </span>
       </header>
 
-      <div className="flex flex-col gap-3 border-b border-line px-3 py-3">
+      {/* The step progress only; the transcript marks each tool call where it happened. */}
+      <div className="border-b border-line px-3 py-3">
         <StageRail call={call} />
-        <ActivityChips events={call.events} />
       </div>
 
       <div className="min-h-0 flex-1">

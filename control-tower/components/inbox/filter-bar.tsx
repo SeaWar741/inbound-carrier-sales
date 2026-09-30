@@ -2,10 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { IconType } from "react-icons";
-import { LuArrowDownUp, LuArrowRight, LuCalendarDays, LuChevronDown, LuCircleDot, LuRoute, LuSearch, LuTruck, LuX } from "react-icons/lu";
+import { Select } from "antd";
+import { LuArrowRight, LuArrowUpDown, LuChevronDown, LuContainer, LuFlag, LuRoute, LuSearch } from "react-icons/lu";
 import { equipmentLabel } from "@/components/hold-card";
-import { carrierStages, inboxSorts } from "@/lib/contracts";
-import { carrierStageLabels } from "@/lib/format";
+import { inboxSorts } from "@/lib/contracts";
 
 // The filters the inbox keeps in the URL; an empty string is "no filter" (or the adapter default).
 export type InboxFilters = {
@@ -14,6 +14,9 @@ export type InboxFilters = {
   origin: string;
   destination: string;
   since: string;
+  // A picked day range (YYYY-MM-DD, desk days); it replaces `since` while set.
+  from: string;
+  to: string;
   q: string;
   sort: string;
 };
@@ -24,12 +27,7 @@ const states = [
   "MD", "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI",
   "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY",
 ];
-// The adapter's `since` windows and sorts; the URL omits their defaults (7d, priority).
-const sinceOptions = [
-  { value: "", label: "7 days" },
-  { value: "today", label: "Today" },
-  { value: "30d", label: "30 days" },
-];
+// The adapter's sorts; the URL omits its default (priority).
 const sortLabels: Record<(typeof inboxSorts)[number], string> = {
   priority: "Priority",
   recent: "Recent",
@@ -94,12 +92,13 @@ export type Tab<T extends string> = {
   label: React.ReactNode;
   // Names a tab whose label is only an icon.
   ariaLabel?: string;
-  count: number | null;
+  // Null shows "-" while loading; a tab without a count leaves the pill out.
+  count?: number | null;
   // Keeps a red pill while its count is not zero.
   urgent?: boolean;
 };
 
-// The cortex tab strip: an underlined tab with a count pill.
+// The cortex tab strip: an underlined tab with an optional count pill.
 export function TabStrip<T extends string>({
   label,
   tabs,
@@ -129,9 +128,11 @@ export function TabStrip<T extends string>({
             }`}
           >
             {tab.label}
-            <span className={`tabular min-w-4 rounded-full px-1 py-0.5 text-center text-[10px] leading-none font-semibold ${pill}`}>
-              {tab.count ?? "-"}
-            </span>
+            {tab.count !== undefined && (
+              <span className={`tabular min-w-4 rounded-full px-1 py-0.5 text-center text-[10px] leading-none font-semibold ${pill}`}>
+                {tab.count ?? "-"}
+              </span>
+            )}
           </button>
         );
       })}
@@ -176,102 +177,90 @@ export function FilterSelect({
   );
 }
 
-// Origin and destination states as one chip: "TX -> Any".
-function LaneSelect({
-  origin,
-  destination,
+// An antd select in the list header: a colored leading icon, search by label, and a clear button.
+// An empty value shows the placeholder.
+function HeaderSelect({
+  label,
+  placeholder = label,
+  grow = 1,
+  icon: Icon,
+  tone,
+  value,
   onChange,
+  options,
 }: {
-  origin: string;
-  destination: string;
-  onChange: (key: "origin" | "destination", value: string) => void;
+  label: string;
+  placeholder?: string;
+  // Its share of the row's width.
+  grow?: number;
+  icon: IconType;
+  tone: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: { value: string; label: string }[];
 }) {
-  const set = origin !== "" || destination !== "";
-  const select = (key: "origin" | "destination", value: string, label: string) => (
-    <select
-      aria-label={label}
-      value={value}
-      onChange={(event) => onChange(key, event.target.value)}
-      className="field-sizing-content h-full cursor-pointer appearance-none bg-transparent px-0.5 outline-none focus-visible:underline"
-    >
-      <option value="">Any</option>
-      {states.map((state) => (
-        <option key={state} value={state}>
-          {state}
-        </option>
-      ))}
-    </select>
-  );
   return (
-    <span
-      className={`inline-flex h-7 shrink-0 items-center gap-0.5 rounded-lg border bg-panel pr-1.5 pl-2 text-xs font-medium transition-colors focus-within:ring-2 focus-within:ring-accent/40 hover:bg-panel-raised ${
-        set ? "border-accent/40 text-accent" : "border-line text-fg"
-      }`}
-    >
-      <LuRoute size={13} className={`mr-0.5 ${set ? "text-accent" : "text-fg-faint"}`} aria-hidden />
-      {select("origin", origin, "Origin state")}
-      <LuArrowRight size={12} className="text-fg-faint" aria-hidden />
-      {select("destination", destination, "Destination state")}
-    </span>
+    <Select
+      size="small"
+      aria-label={label}
+      title={label}
+      placeholder={placeholder}
+      value={value === "" ? undefined : value}
+      onChange={(next?: string) => onChange(next ?? "")}
+      options={options}
+      showSearch={{ optionFilterProp: "label" }}
+      allowClear
+      popupMatchSelectWidth={false}
+      prefix={<Icon size={14} className={tone} aria-hidden />}
+      // Inline, because antd's own styles outrank Tailwind's utility layer.
+      style={{ flex: `${grow} 1 0`, minWidth: 0 }}
+    />
   );
 }
 
-// Filter chips and the search box of the carrier list header. Every change goes to the URL.
+const equipmentOptions = equipmentCodes.map((c) => ({ value: c, label: equipmentLabel(c) }));
+const stateOptions = states.map((state) => ({ value: state, label: state }));
+// Priority is the default, so picking it clears the sort back to the placeholder.
+const sortOptions = inboxSorts.map((s) => ({ value: s, label: sortLabels[s] }));
+
+// The list header's filters, all on screen: the lane and equipment on one row, then the search box
+// and the sort. Stage and date live in the stage rail. Every change goes to the URL.
 export function FilterBar({
   filters,
   onChange,
-  onClear,
 }: {
   filters: InboxFilters;
   onChange: (key: keyof InboxFilters, value: string) => void;
-  onClear: () => void;
 }) {
   const onSearch = useCallback((q: string) => onChange("q", q), [onChange]);
-  const narrowed = [filters.stage, filters.equipment, filters.origin, filters.destination, filters.since, filters.q].some((v) => v !== "");
-
   return (
-    <>
-      <SearchInput q={filters.q} onSearch={onSearch} placeholder="Search MC, DOT, carrier, load..." label="Search carriers" className="mb-2" />
-
-      {/* Starts at the left and wraps to a second row when the chips outgrow the pane; never scrolls or clips a label. */}
-      <div className="flex flex-wrap items-center gap-1.5">
-        <FilterSelect
-          label="Stage"
-          icon={LuCircleDot}
-          value={filters.stage}
-          onChange={(v) => onChange("stage", v)}
-          options={[{ value: "", label: "Stage" }, ...carrierStages.map((s) => ({ value: s, label: carrierStageLabels[s] }))]}
-        />
-        <FilterSelect
+    <div className="flex flex-col gap-2">
+      <div className="flex min-w-0 items-center gap-1.5">
+        <HeaderSelect label="From" icon={LuRoute} tone="text-ok" value={filters.origin} onChange={(v) => onChange("origin", v)} options={stateOptions} />
+        <LuArrowRight size={12} className="shrink-0 text-fg-faint" aria-hidden />
+        <HeaderSelect label="To" icon={LuFlag} tone="text-ok" value={filters.destination} onChange={(v) => onChange("destination", v)} options={stateOptions} />
+        <HeaderSelect
           label="Equipment"
-          icon={LuTruck}
+          grow={1.5}
+          icon={LuContainer}
+          tone="text-accent"
           value={filters.equipment}
           onChange={(v) => onChange("equipment", v)}
-          options={[{ value: "", label: "Equipment" }, ...equipmentCodes.map((c) => ({ value: c, label: equipmentLabel(c) }))]}
+          options={equipmentOptions}
         />
-        <LaneSelect origin={filters.origin} destination={filters.destination} onChange={onChange} />
-        <FilterSelect label="Since" icon={LuCalendarDays} value={filters.since} onChange={(v) => onChange("since", v)} options={sinceOptions} />
-        {narrowed && (
-          <button
-            type="button"
-            onClick={onClear}
-            aria-label="Clear filters"
-            title="Clear filters"
-            className="inline-flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-lg text-fg-muted transition-colors hover:bg-panel-raised hover:text-risk"
-          >
-            <LuX size={14} aria-hidden />
-          </button>
-        )}
-        <span className="ml-auto shrink-0">
-          <FilterSelect
-            label="Sort"
-            icon={LuArrowDownUp}
-            value={filters.sort}
-            onChange={(v) => onChange("sort", v)}
-            options={inboxSorts.map((s) => ({ value: s === "priority" ? "" : s, label: sortLabels[s] }))}
-          />
-        </span>
       </div>
-    </>
+      <div className="flex min-w-0 items-center gap-1.5">
+        <SearchInput q={filters.q} onSearch={onSearch} placeholder="MC, carrier or load" label="Search carriers" className="min-w-0 flex-[2]" />
+        <HeaderSelect
+          label="Sort"
+          placeholder="Priority"
+          icon={LuArrowUpDown}
+          tone="text-warn"
+          value={filters.sort}
+          onChange={(v) => onChange("sort", v === "priority" ? "" : v)}
+          options={sortOptions}
+        />
+      </div>
+    </div>
   );
 }

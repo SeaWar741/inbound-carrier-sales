@@ -139,6 +139,31 @@ export function outcomeLabel(outcome: LoadOutcome): { text: string; tone: string
   }
 }
 
+// A tool name without the leading underscores HappyRobot puts on built-ins ("_hangup").
+export function toolKey(name: string): string {
+  return name.replace(/^_+/, "");
+}
+
+const toolLabels: Record<string, string> = {
+  verify_carrier: "Verified carrier",
+  send_otp: "Sent verification code",
+  check_otp: "Checked verification code",
+  search_loads: "Searched loads",
+  evaluate_offer: "Evaluated offer",
+  create_hold: "Placed hold",
+  request_human: "Asked for a human",
+  hangup: "Call ended by agent",
+};
+
+// An agent tool call as the transcript words it; an unknown tool reads as its name in words.
+export function toolLabel(name: string): string {
+  const key = toolKey(name);
+  const known = toolLabels[key];
+  if (known) return known;
+  const words = key.replaceAll("_", " ").trim();
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : name;
+}
+
 // The newest summary the agent wrote on a call.
 function lastSummary(call: Pick<TowerCall, "events">): string | null {
   return call.events.findLast((event) => event.summary)?.summary ?? null;

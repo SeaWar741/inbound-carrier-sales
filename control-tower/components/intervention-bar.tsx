@@ -30,6 +30,71 @@ const pill =
   "flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-40";
 const pillQuiet = `${pill} border-line-strong bg-panel-raised text-fg hover:border-fg-faint disabled:hover:border-line-strong`;
 
+// Listen, take over and hang up on a live call; shared by the intervention bar and the detail
+// panel's action card, which both drive the same voice connection.
+export function VoiceControls({ call, voice }: { call: TowerCall; voice: Voice }) {
+  const onCall = voice.mode === "takeover";
+  const listenBlocked = !call.live
+    ? "The call is not live"
+    : call.sessionId === null
+      ? "Waiting for the live session"
+      : call.channel !== "voice"
+        ? "Text session"
+        : null;
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {onCall ? (
+        <>
+          <span className="flex items-center gap-1.5 rounded-full bg-accent px-2.5 py-1 text-xs font-medium text-white">
+            <LuMic size={12} aria-hidden />
+            You are on the call
+          </span>
+          <button
+            type="button"
+            onClick={() => void voice.stop()}
+            className={pillQuiet}
+          >
+            <LuPhoneOff size={13} aria-hidden />
+            Hang up
+          </button>
+        </>
+      ) : (
+        <>
+          {voice.mode === "listening" ? (
+            <button type="button" onClick={() => void voice.stop()} className={`${pill} border-accent/60 bg-accent-soft text-accent`}>
+              <LuEarOff size={13} aria-hidden />
+              Stop listening
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => void voice.listen()}
+              disabled={listenBlocked !== null || voice.pending !== null}
+              title={listenBlocked ?? undefined}
+              className={pillQuiet}
+            >
+              <LuEar size={13} aria-hidden />
+              {voice.pending === "listen" ? "Joining..." : "Listen"}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => void voice.takeOver()}
+            disabled={voice.mode !== "listening" || voice.pending !== null}
+            title={voice.mode === "listening" ? "Speak to the carrier yourself" : "Listen first"}
+            className={pillQuiet}
+          >
+            <LuMic size={13} aria-hidden />
+            {voice.pending === "takeover" ? "Taking over..." : "Take over"}
+          </button>
+          {listenBlocked && <span className="text-xs text-fg-faint">{listenBlocked}</span>}
+        </>
+      )}
+    </div>
+  );
+}
+
 export function InterventionBar({
   call,
   voice,
@@ -53,13 +118,6 @@ export function InterventionBar({
       : onCall
         ? "You are on the call"
         : null;
-  const listenBlocked = !call.live
-    ? "The call is not live"
-    : call.sessionId === null
-      ? "Waiting for the live session"
-      : call.channel !== "voice"
-        ? "Text session"
-        : null;
 
   function sendDraft() {
     const message = draft.trim();
@@ -70,55 +128,7 @@ export function InterventionBar({
 
   return (
     <div className="flex flex-col gap-2 border-t border-line bg-panel px-3 py-2.5">
-      <div className="flex flex-wrap items-center gap-2">
-        {onCall ? (
-          <>
-            <span className="flex items-center gap-1.5 rounded-full bg-accent px-2.5 py-1 text-xs font-medium text-white">
-              <LuMic size={12} aria-hidden />
-              You are on the call
-            </span>
-            <button
-              type="button"
-              onClick={() => void voice.stop()}
-              className={pillQuiet}
-            >
-              <LuPhoneOff size={13} aria-hidden />
-              Hang up
-            </button>
-          </>
-        ) : (
-          <>
-            {voice.mode === "listening" ? (
-              <button type="button" onClick={() => void voice.stop()} className={`${pill} border-accent/60 bg-accent-soft text-accent`}>
-                <LuEarOff size={13} aria-hidden />
-                Stop listening
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => void voice.listen()}
-                disabled={listenBlocked !== null || voice.pending !== null}
-                title={listenBlocked ?? undefined}
-                className={pillQuiet}
-              >
-                <LuEar size={13} aria-hidden />
-                {voice.pending === "listen" ? "Joining..." : "Listen"}
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => void voice.takeOver()}
-              disabled={voice.mode !== "listening" || voice.pending !== null}
-              title={voice.mode === "listening" ? "Speak to the carrier yourself" : "Listen first"}
-              className={pillQuiet}
-            >
-              <LuMic size={13} aria-hidden />
-              {voice.pending === "takeover" ? "Taking over..." : "Take over"}
-            </button>
-            {listenBlocked && <span className="text-xs text-fg-faint">{listenBlocked}</span>}
-          </>
-        )}
-      </div>
+      <VoiceControls call={call} voice={voice} />
 
       <div className="flex flex-wrap items-center gap-1.5">
         {quickWhispers.map((quick) => (

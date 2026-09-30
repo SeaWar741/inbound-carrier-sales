@@ -1,12 +1,15 @@
 "use client";
 
 import { useMemo } from "react";
-import { LuMousePointerClick, LuTruck } from "react-icons/lu";
+import type { IconType } from "react-icons";
+import { LuCalendarClock, LuContainer, LuFlag, LuMap, LuMapPin, LuMousePointerClick, LuTruck } from "react-icons/lu";
 import { EmptyState } from "@/components/empty-state";
-import { equipmentLabel, HoldCard, LaneText } from "@/components/hold-card";
+import { equipmentLabel, formatPickup, HoldCard, LaneText } from "@/components/hold-card";
 import { MarginMeter } from "@/components/margin-meter";
 import { LaneMap, type LaneMapLoad } from "@/components/lane-map";
-import type { TowerCall, WallOffer } from "@/lib/contracts";
+import { Section } from "@/components/section";
+import type { TowerCall, TowerCarrier, WallOffer } from "@/lib/contracts";
+import { formatDateTime } from "@/lib/format";
 import { loadOutcome, negotiationPath } from "@/lib/pricing";
 
 // The load on the table: the held one while a hold stands, otherwise the one offered most recently.
@@ -19,13 +22,36 @@ function currentOffer(call: TowerCall): WallOffer | null {
   return call.offers.at(-1) ?? null;
 }
 
+// The load of the carrier's latest booked hold, which is the load its next trip describes.
+function latestBookedLoad(history: TowerCall[]): string | null {
+  const call = history.find((c) => c.hold?.status === "booked" || c.hold?.status === "booked_unconfirmed");
+  return call?.hold?.loadId ?? null;
+}
+
+function Fact({ icon: Icon, label, children }: { icon: IconType; label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <dt className="flex shrink-0 items-center gap-1.5 text-fg-muted">
+        <Icon size={13} className="shrink-0" aria-hidden />
+        {label}
+      </dt>
+      <dd className="min-w-0 truncate text-right text-fg">{children}</dd>
+    </div>
+  );
+}
+
+// The selected call's load as detail-panel sections, top to bottom: the load with its map, the
+// pricing, then a settled hold. A hold still waiting on the desk is the panel's action card instead.
 export function LoadPanel({
   selectedCall,
   history,
+  nextTrip,
 }: {
   selectedCall: TowerCall | null;
   // The carrier's calls, newest first, for the negotiation path and outcome of the load.
   history: TowerCall[];
+  // The carrier's next trip; its pickup and ETA show when it is this load.
+  nextTrip: TowerCarrier["nextTrip"];
 }) {
   const offer = selectedCall ? currentOffer(selectedCall) : null;
   const hold = selectedCall?.hold ?? null;
@@ -59,51 +85,63 @@ export function LoadPanel({
     : 0;
   const path = useMemo(() => (loadId ? negotiationPath(history, loadId) : []), [history, loadId]);
   const agreedRate = hold && hold.status !== "released" && hold.loadId === offer?.loadId ? hold.agreedRate : null;
+  const trip = nextTrip && loadId !== null && latestBookedLoad(history) === loadId ? nextTrip : null;
+
+  // An open hold is drawn by the action card at the top of the panel.
+  const settledHold = hold && hold.status !== "held" && hold.status !== "confirming" ? hold : null;
+
+  if (selectedCall === null) {
+    return <EmptyState className="py-10" icon={<LuMousePointerClick size={20} />} title="Select a call to see its load" hint="Map, pricing and hold follow the selection" />;
+  }
+  if (offer === null) {
+    return (
+      <>
+        {settledHold && <HoldCard key={settledHold.holdId} call={selectedCall} hold={settledHold} />}
+        <EmptyState className="py-10" icon={<LuTruck size={20} />} title="No load on the table yet" hint="The lane and pricing appear with the first offer" />
+      </>
+    );
+  }
+
+  const pickup = trip?.pickupAt ? formatDateTime(trip.pickupAt) : lane ? formatPickup(lane.pickupAt) : null;
 
   return (
-    <div className="flex flex-col">
-      <h2 className="border-b border-line px-3 py-2 text-xs font-medium uppercase tracking-wide text-fg-faint">Load</h2>
-
-      <div className="border-b border-line">
-        <div className="aspect-[16/10] px-2 pt-2">
+    <>
+      <Section icon={LuMap} title="Load" aside={<span className="tabular truncate text-xs text-fg-muted">{offer.loadId}</span>}>
+        <div className="h-[200px] overflow-hidden rounded-lg border border-line">
           <LaneMap loads={mapLoads} selectedId={loadId} />
         </div>
-        {offer && (
-          <div className="flex items-center gap-2 px-3 pb-2 text-xs">
-            {lane ? (
-              <>
-                <LaneText lane={lane} className="min-w-0 truncate text-fg" />
-                <span className="ml-auto shrink-0 text-fg-muted">
-                  {equipmentLabel(lane.equipment)} <span className="tabular">{lane.miles.toLocaleString("en-US")} mi</span>
-                </span>
-              </>
-            ) : (
-              <span className="text-fg-faint">
-                Lane not recorded for <span className="tabular">{offer.loadId}</span>
-              </span>
+        {lane ? (
+          <dl className="mt-3 flex flex-col gap-2 text-xs">
+            <Fact icon={LuMapPin} label="Lane">
+              <LaneText lane={lane} />
+            </Fact>
+            <Fact icon={LuContainer} label="Equipment">
+              {equipmentLabel(lane.equipment)} · <span className="tabular">{lane.miles.toLocaleString("en-US")} mi</span>
+            </Fact>
+            {pickup && (
+              <Fact icon={LuCalendarClock} label="Pickup">
+                <span className="tabular">{pickup}</span>
+              </Fact>
             )}
-          </div>
+            {trip?.etaAt && (
+              <Fact icon={LuFlag} label="ETA">
+                <span className="tabular">{formatDateTime(trip.etaAt)}</span>
+              </Fact>
+            )}
+          </dl>
+        ) : (
+          <p className="mt-3 text-xs text-fg-faint">Lane not recorded for this load.</p>
         )}
-      </div>
-
-      {selectedCall === null ? (
-        <EmptyState className="py-10" icon={<LuMousePointerClick size={20} />} title="Select a call to see its load" hint="Map, pricing and hold follow the selection" />
-      ) : offer === null ? (
-        <EmptyState className="py-10" icon={<LuTruck size={20} />} title="No load on the table yet" hint="The lane and pricing appear with the first offer" />
-      ) : (
-        <div className="border-b border-line">
-          <MarginMeter
-            key={offer.loadId}
-            offer={offer}
-            authorizedUsd={authorizedUsd}
-            agreedRate={agreedRate}
-            path={path}
-            outcome={loadOutcome(history, offer.loadId)}
-          />
-        </div>
-      )}
-
-      {selectedCall && hold && <HoldCard key={hold.holdId} call={selectedCall} hold={hold} />}
-    </div>
+      </Section>
+      <MarginMeter
+        key={offer.loadId}
+        offer={offer}
+        authorizedUsd={authorizedUsd}
+        agreedRate={agreedRate}
+        path={path}
+        outcome={loadOutcome(history, offer.loadId)}
+      />
+      {settledHold && <HoldCard key={settledHold.holdId} call={selectedCall} hold={settledHold} />}
+    </>
   );
 }

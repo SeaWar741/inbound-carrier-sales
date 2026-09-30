@@ -9,6 +9,7 @@ import {
   formatSignedUsd,
   formatTimeAgo,
   loadCards,
+  toolLabel,
 } from "./format.ts";
 
 describe("formatTimeAgo", () => {
@@ -18,6 +19,16 @@ describe("formatTimeAgo", () => {
     assert.equal(formatTimeAgo("2026-09-29T11:55:00Z", now), "5m");
     assert.equal(formatTimeAgo("2026-09-29T09:00:00Z", now), "3h");
     assert.equal(formatTimeAgo("2026-09-27T11:00:00Z", now), "2d");
+  });
+});
+
+describe("toolLabel", () => {
+  it("words known tools, drops the built-in underscore, and spells out unknown ones", () => {
+    assert.equal(toolLabel("evaluate_offer"), "Evaluated offer");
+    assert.equal(toolLabel("create_hold"), "Placed hold");
+    assert.equal(toolLabel("_hangup"), "Call ended by agent");
+    assert.equal(toolLabel("transfer_call"), "Transfer call");
+    assert.equal(toolLabel("_"), "_");
   });
 });
 

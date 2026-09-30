@@ -2,7 +2,7 @@
 
 import { motion, useReducedMotion } from "motion/react";
 
-const toneClass = { accent: "bg-accent", ok: "bg-ok" } as const;
+const toneClass = { accent: "bg-accent", ok: "bg-ok", live: "bg-tone-green" } as const;
 
 // A dot with a ring that pulses outward; the ring is dropped for reduced motion.
 // With a label it is announced as an image, otherwise it is decoration next to visible text.
