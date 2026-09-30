@@ -16,6 +16,7 @@ const toolNames: Record<string, string> = {
   "/v1/loads/search": "search_loads",
   "/v1/offers/evaluate": "evaluate_offer",
   "/v1/holds": "create_hold",
+  "/v1/trips/estimate": "get_trip_estimate",
 };
 
 // Only the routes named above are recorded. request_human is absent on purpose: its route
@@ -70,6 +71,8 @@ export function summarize(tool: string, body: Fields, response: Fields): string 
         response.status !== "ok" ? `Hold refused on load ${load}` : response.holdStatus === "booked" ? `Booked load ${load}` : `Holding load ${load}`;
       return rate ? `${head} at ${rate}` : head;
     }
+    case "get_trip_estimate":
+      return `Estimating the trip on ${text(body.loadId) ?? "a load"}`;
     default:
       return null;
   }

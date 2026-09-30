@@ -1,6 +1,7 @@
 "use client";
 
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import type { IconType } from "react-icons";
 import type { TowerLoad, TowerWall, TripStatus } from "@/lib/contracts";
 import { formatUsd } from "@/lib/format";
 import { emptyLoadFilters, statusCounts } from "@/lib/load-filters";
@@ -26,10 +27,26 @@ function Rolling({ value, className }: { value: string; className?: string }) {
   );
 }
 
-function Tile({ label, value, hint }: { label: string; value: string; hint: string }) {
+// The icon, when given, sits before the label in its own tone.
+export function Tile({
+  label,
+  value,
+  hint,
+  icon: Icon,
+  iconTone = "text-fg-muted",
+}: {
+  label: string;
+  value: string;
+  hint: string;
+  icon?: IconType;
+  iconTone?: string;
+}) {
   return (
     <div className="flex min-w-0 flex-col gap-1 rounded-[var(--radius-panel)] border border-line bg-panel px-4 py-3">
-      <dt className="truncate text-xs text-fg-muted">{label}</dt>
+      <dt className="flex min-w-0 items-center gap-1.5 text-xs text-fg-muted">
+        {Icon && <Icon size={14} className={`shrink-0 ${iconTone}`} aria-hidden />}
+        <span className="truncate">{label}</span>
+      </dt>
       <dd className="text-2xl font-medium leading-tight text-fg">
         <Rolling value={value} />
       </dd>

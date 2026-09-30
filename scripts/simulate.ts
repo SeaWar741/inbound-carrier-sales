@@ -2,7 +2,7 @@
 // development live version of the agent. Scenarios are created once by name and updated when a
 // persona changes.
 // Usage: npm run simulate [-- <persona>...] [-- --wait]
-//   (closer | haggler | walker | suspicious | ineligible | locked | human)
+//   (closer | haggler | walker | human | flexible | curious | netAsker | suspicious | ineligible | locked)
 // Personas that search get a free load picked at run time: an OPEN load of the board snapshot
 // that no Twin hold has taken (booked holds are never released, so those loads stay taken).
 import { existsSync, readFileSync } from "node:fs";
@@ -102,6 +102,43 @@ ${truck(load)}
 - After the rep's first counter, say you want to talk to a real person, a senior rep, about this rate.
 - After the rep answers that request, say you will wait for the rep, thank them and say goodbye.
 Keep every reply short.`,
+  },
+  // Runs any equipment: the search must go out without an equipment filter.
+  flexible: {
+    fits: (load: PickedLoad) => counters(load)[0]! > load.rate,
+    prompt: (load: PickedLoad) => `You are Alex, a dispatcher for J B HUNT TRANSPORT INC calling a freight broker to find a load.
+${eligibleCarrier}
+${readsFixedCode}
+- You have a truck empty in ${load.city}, ${load.state}, any destination. ${noPickupDate}
+- When asked about equipment, say "I run anything, whatever you've got." Never name an equipment type.
+- Take the first load pitched. When asked your rate, ask for about 20% above the loadboard rate, then accept the rep's first counter by saying the amount.
+- When the rep offers to hold the load, agree. Say goodbye only after the rep says a senior rep will confirm or the load is booked.
+Keep every reply short, like a busy dispatcher on the phone.`,
+  },
+  // Asks where the code goes before choosing a channel.
+  curious: {
+    fits: (load: PickedLoad) => counters(load)[0]! > load.rate,
+    prompt: (load: PickedLoad) => `You are Pat, a dispatcher for J B HUNT TRANSPORT INC calling a freight broker to find a load.
+- Your MC number is 135797. Give it when asked.
+- When the rep reads back your company name, accept "J B Hunt Transport Inc" or any close variant as correct.
+- When asked how to receive a verification code, first ask "Which email do you have on file for us?". After the rep answers, choose email.
+${readsFixedCode}
+${truck(load)}
+- Take the first ${equipmentLoad(load)} pitched. When asked your rate, ask for about 20% above the loadboard rate, then accept the rep's first counter by saying the amount.
+- When the rep offers to hold the load, agree. Say goodbye only after the rep says a senior rep will confirm or the load is booked.
+Keep every reply short.`,
+  },
+  // Asks what the load clears after fuel and tolls before naming a rate.
+  netAsker: {
+    fits: (load: PickedLoad) => counters(load)[0]! > load.rate,
+    prompt: (load: PickedLoad) => `You are Chris, a dispatcher for J B HUNT TRANSPORT INC calling a freight broker to find a load.
+${eligibleCarrier}
+${readsFixedCode}
+${truck(load)}
+- When a load is pitched, before naming any rate, ask "What would I actually clear on that after fuel and tolls?".
+- After the rep answers, ask for about 20% above the loadboard rate, then accept the rep's first counter by saying the amount.
+- When the rep offers to hold the load, agree. Say goodbye only after the rep says a senior rep will confirm or the load is booked.
+Keep every reply short, like a busy dispatcher on the phone.`,
   },
 } as const;
 type SearchingPersona = keyof typeof searchingPersonas;

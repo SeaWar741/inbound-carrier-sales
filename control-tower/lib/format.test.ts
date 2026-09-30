@@ -4,9 +4,9 @@ import type { TowerCall } from "./contracts.ts";
 import {
   callSummary,
   carrierName,
+  feasibilityBadge,
   formatDeskWhen,
   formatPerMile,
-  formatSignedUsd,
   formatTimeAgo,
   loadCards,
   toolLabel,
@@ -29,6 +29,19 @@ describe("toolLabel", () => {
     assert.equal(toolLabel("_hangup"), "Call ended by agent");
     assert.equal(toolLabel("transfer_call"), "Transfer call");
     assert.equal(toolLabel("_"), "_");
+  });
+
+  it("words the trip estimate", () => {
+    assert.equal(toolLabel("get_trip_estimate"), "Estimated trip");
+  });
+});
+
+describe("feasibilityBadge", () => {
+  it("badges team and impossible trips, never solo, and says how late an impossible one lands", () => {
+    assert.equal(feasibilityBadge({ feasibility: "solo", lateHours: 0 }), null);
+    assert.deepEqual(feasibilityBadge({ feasibility: "team", lateHours: 1.5 }), { text: "Needs team", tone: "bg-tone-amber-soft text-tone-amber" });
+    assert.deepEqual(feasibilityBadge({ feasibility: "impossible", lateHours: 7.6 }), { text: "Late ~8h", tone: "bg-tone-red-soft text-tone-red" });
+    assert.equal(feasibilityBadge({ feasibility: "impossible", lateHours: 2.4 })?.text, "Late ~2h");
   });
 });
 
@@ -107,6 +120,7 @@ describe("callSummary", () => {
     maxBuy: 7900,
     bookingRef: null,
     lane: null,
+    trip: null,
     createdAt: "2026-09-29T12:00:00.000Z",
   });
 
@@ -123,13 +137,7 @@ describe("callSummary", () => {
   });
 });
 
-describe("formatSignedUsd and formatPerMile", () => {
-  it("signs spreads and leaves zero bare", () => {
-    assert.equal(formatSignedUsd(134), "+$134");
-    assert.equal(formatSignedUsd(-50), "-$50");
-    assert.equal(formatSignedUsd(0.2), "$0");
-  });
-
+describe("formatPerMile", () => {
   it("prints dollars per mile with cents", () => {
     assert.equal(formatPerMile(2150 / 742), "$2.90/mi");
   });

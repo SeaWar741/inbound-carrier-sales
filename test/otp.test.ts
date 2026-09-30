@@ -3,6 +3,7 @@ import type { z } from "zod";
 import { loadConfig, type Config } from "../src/config.ts";
 import { checkCode, generateCode, hashCode } from "../src/domain/otp.ts";
 import type { SqlStatement } from "../src/infra/twin-client.ts";
+import type { CarrierMessage } from "../src/infra/otp-delivery-client.ts";
 import { otpRoutes, type OtpRouteDeps } from "../src/routes/otp.ts";
 import { buildServer } from "../src/server.ts";
 import { testConfig } from "./test-config.ts";
@@ -122,7 +123,7 @@ describe("OTP_FIXED_CODE config gate", () => {
 describe("OTP routes", () => {
   const calls = new Map<string, CallState>();
   const { twin, statements, hooks } = fakeTwin(calls);
-  const send = vi.fn<(channel: "email" | "sms", to: string, code: string) => Promise<string>>();
+  const send = vi.fn<(channel: "email" | "sms", to: string, message: CarrierMessage) => Promise<string>>();
   const supports = vi.fn<(channel: "email" | "sms") => boolean>();
   const contactByDot = vi.fn<OtpRouteDeps["census"]["contactByDot"]>();
   const routeConfig = { ...testConfig } satisfies Config;
@@ -132,7 +133,7 @@ describe("OTP routes", () => {
 
   const post = (url: string, payload: object) =>
     app.inject({ method: "POST", url, payload, headers: { "x-api-key": testConfig.AGENT_API_KEY } });
-  const sentCode = () => send.mock.calls.at(-1)?.[2] ?? "";
+  const sentCode = () => /\b(\d{6})\b/.exec(send.mock.calls.at(-1)?.[2].body ?? "")?.[1] ?? "";
 
   beforeEach(() => {
     calls.clear();
@@ -155,7 +156,12 @@ describe("OTP routes", () => {
     const res = await post("/v1/otp/send", { callId: "call-1", channel: "email" });
 
     expect(res.json()).toMatchObject({ status: "ok", sent: true, maskedDestination: "d***@e***.com", expiresInSeconds: 300 });
-    expect(send).toHaveBeenCalledWith("email", "demo@example.com", expect.stringMatching(/^\d{6}$/));
+    expect(send).toHaveBeenCalledWith("email", "demo@example.com", {
+      subject: "Your verification code",
+      body: expect.stringMatching(/code is \d{6}\. It expires in 5 minutes/),
+    });
+    // The hold notice later goes to this same contact.
+    expect(statements.find((s) => s.includes("SET otp_hash ="))).toMatch(/otp_channel = E'email', otp_destination = E'demo@example\.com'/);
     expect(contactByDot).not.toHaveBeenCalled();
     expect(res.body).not.toContain(sentCode());
     expect(statements.join("\n")).not.toContain(`'${sentCode()}'`);
@@ -166,7 +172,7 @@ describe("OTP routes", () => {
     routeConfig.OTP_FIXED_CODE = "424242";
     calls.set("call-1", eligibleCall());
     await post("/v1/otp/send", { callId: "call-1", channel: "email" });
-    expect(send).toHaveBeenCalledWith("email", "demo@example.com", "424242");
+    expect(sentCode()).toBe("424242");
     expect(calls.get("call-1")?.otpHash).toBe(hashCode(testConfig.OTP_HASH_SECRET, "call-1", "424242"));
   });
 
@@ -174,7 +180,7 @@ describe("OTP routes", () => {
     routeConfig.OTP_DELIVERY_MODE = "live";
     calls.set("call-1", eligibleCall());
     await post("/v1/otp/send", { callId: "call-1", channel: "sms" });
-    expect(send).toHaveBeenCalledWith("sms", "+15555550142", expect.any(String));
+    expect(send).toHaveBeenCalledWith("sms", "+15555550142", expect.objectContaining({ body: expect.any(String) }));
   });
 
   it("refuses carriers that were not verified as eligible", async () => {
@@ -250,11 +256,11 @@ describe("OTP routes", () => {
     calls.set("call-1", eligibleCall());
     for (const channel of [" Text ", "SMS message", "txt"]) {
       expect((await post("/v1/otp/send", { callId: "call-1", channel })).json()).toMatchObject({ status: "ok" });
-      expect(send).toHaveBeenLastCalledWith("sms", "+15555550100", expect.any(String));
+      expect(send).toHaveBeenLastCalledWith("sms", "+15555550100", expect.objectContaining({ body: expect.any(String) }));
     }
     for (const channel of ["E-mail", "mail", "EMAIL"]) {
       expect((await post("/v1/otp/send", { callId: "call-1", channel })).json()).toMatchObject({ status: "ok" });
-      expect(send).toHaveBeenLastCalledWith("email", "demo@example.com", expect.any(String));
+      expect(send).toHaveBeenLastCalledWith("email", "demo@example.com", expect.objectContaining({ body: expect.any(String) }));
     }
     const code = sentCode();
     const spoken = `${code.slice(0, 3)} - ${code.slice(3)}`;

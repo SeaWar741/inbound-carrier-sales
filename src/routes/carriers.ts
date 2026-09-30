@@ -1,6 +1,7 @@
 import type { FastifyPluginAsync } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
+import type { Config } from "../config.ts";
 import { verifyCarrierBody, verifyCarrierResponse, type VerifyCarrierResponse } from "../contract.ts";
 import { maskEmail, maskPhone, verifyCarrier, type Verification } from "../domain/verification.ts";
 import type { CensusClient, CensusContact } from "../infra/census-client.ts";
@@ -8,7 +9,12 @@ import type { FmcsaAuthority, FmcsaCarrier, FmcsaClient } from "../infra/fmcsa-c
 import { sql, type TwinClient } from "../infra/twin-client.ts";
 import { invalidRequestHandler } from "../plugins/invalid-request.ts";
 
-export type CarrierRouteDeps = { fmcsa: FmcsaClient; census: CensusClient; twin: TwinClient };
+export type CarrierRouteDeps = {
+  config: Pick<Config, "OTP_DELIVERY_MODE" | "OTP_DEMO_EMAIL" | "OTP_DEMO_PHONE">;
+  fmcsa: FmcsaClient;
+  census: CensusClient;
+  twin: TwinClient;
+};
 
 const messages = {
   ok: "The carrier is verified and eligible to book loads with us.",
@@ -117,7 +123,12 @@ export function carrierRoutes(deps: CarrierRouteDeps): FastifyPluginAsync {
             carrierName,
             dotNumber: resolvedDot,
             mcNumber: resolvedMc,
-            maskedContact: maskContact(contact),
+            // In demo mode codes go to the demo contacts, so the agent must describe those, not Census.
+            maskedContact: maskContact(
+              deps.config.OTP_DELIVERY_MODE === "demo"
+                ? { email: deps.config.OTP_DEMO_EMAIL ?? null, phone: deps.config.OTP_DEMO_PHONE ?? null, cellPhone: null, mcs150Date: null }
+                : contact,
+            ),
             riskFlags: verification.riskFlags,
           };
         } catch (error) {

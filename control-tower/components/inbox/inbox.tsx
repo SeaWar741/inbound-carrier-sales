@@ -10,6 +10,7 @@ import { InboxRail, selectedRailItem, type InboxTab, type InboxWindow, type Rail
 import { carrierStages, inboxTabs, type TowerCarrier, type TowerCarriers } from "@/lib/contracts";
 import { deskDayKey } from "@/lib/format";
 import { useNow } from "@/lib/use-now";
+import { updateSearch } from "@/lib/url-search";
 import { fetchTower, usePollWith } from "@/lib/use-poll";
 
 const carriersPollMs = 5_000;
@@ -103,27 +104,13 @@ export function Inbox() {
   };
   const filtered = filterKeys.some((key) => filters[key] !== "");
 
-  // Empty values drop the key. replaceState keeps the back button for leaving the inbox, not for every click.
-  const update = useCallback(
-    (changes: Record<string, string | null>) => {
-      const params = new URLSearchParams(window.location.search);
-      for (const [key, value] of Object.entries(changes)) {
-        if (value) params.set(key, value);
-        else params.delete(key);
-      }
-      const query = params.toString();
-      window.history.replaceState(null, "", query ? `?${query}` : window.location.pathname);
-    },
-    [],
-  );
-
   // A rail row sets its tab or stage and clears the other. The list restarts at the top on its own.
-  const onFilter = useCallback((key: keyof InboxFilters, value: string) => update({ [key]: value }), [update]);
-  const onRail = useCallback((item: RailItem) => update({ tab: item.tab === "all" ? null : item.tab, stage: item.stage }), [update]);
-  const onWindow = useCallback((next: InboxWindow) => update(next), [update]);
-  const onSelect = useCallback((key: string) => update({ carrier: key, call: null }), [update]);
-  const onSelectCall = useCallback((callId: string) => update({ call: callId }), [update]);
-  const onClearFilters = useCallback(() => update(Object.fromEntries(filterKeys.map((key) => [key, null]))), [update]);
+  const onFilter = useCallback((key: keyof InboxFilters, value: string) => updateSearch({ [key]: value }), []);
+  const onRail = useCallback((item: RailItem) => updateSearch({ tab: item.tab === "all" ? null : item.tab, stage: item.stage }), []);
+  const onWindow = useCallback((next: InboxWindow) => updateSearch(next), []);
+  const onSelect = useCallback((key: string) => updateSearch({ carrier: key, call: null }), []);
+  const onSelectCall = useCallback((callId: string) => updateSearch({ call: callId }), []);
+  const onClearFilters = useCallback(() => updateSearch(Object.fromEntries(filterKeys.map((key) => [key, null]))), []);
   const dateWindow: InboxWindow = { since: filters.since, from: filters.from, to: filters.to };
 
   return (

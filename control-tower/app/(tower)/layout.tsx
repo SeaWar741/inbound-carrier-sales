@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LuRadioTower, LuTriangleAlert } from "react-icons/lu";
+import { LuInbox, LuLayoutDashboard, LuRadar, LuRadioTower, LuTriangleAlert, LuUsers } from "react-icons/lu";
 import { AutonomySwitch } from "@/components/autonomy-switch";
 import { PulseDot } from "@/components/pulse-dot";
 import { TmsHealth } from "@/components/tms-health";
@@ -12,8 +12,10 @@ import { usePoll } from "@/lib/use-poll";
 import { WallContext } from "@/lib/use-wall";
 
 const nav = [
-  { href: "/", label: "Dashboard" },
-  { href: "/inbox", label: "Inbox" },
+  { href: "/", label: "Dashboard", icon: LuLayoutDashboard },
+  { href: "/inbox", label: "Inbox", icon: LuInbox },
+  { href: "/carriers", label: "Carriers", icon: LuUsers },
+  { href: "/demand", label: "Demand", icon: LuRadar },
 ];
 
 // The frame of every tower page: one top bar and the wall poll the pages share. The page body
@@ -38,17 +40,18 @@ export default function TowerLayout({ children }: { children: React.ReactNode })
 
           {/* The active tab sits on the bar's bottom border, like the tab strips inside the pages. */}
           <nav aria-label="Tower" className="flex h-full items-stretch gap-1">
-            {nav.map(({ href, label }) => {
+            {nav.map(({ href, label, icon: Icon }) => {
               const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
               return (
                 <Link
                   key={href}
                   href={href}
                   aria-current={active ? "page" : undefined}
-                  className={`-mb-px flex items-center border-b-2 px-2.5 text-sm transition-colors outline-none focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:ring-inset ${
+                  className={`-mb-px flex items-center gap-1.5 border-b-2 px-2.5 text-sm transition-colors outline-none focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:ring-inset ${
                     active ? "border-accent font-medium text-fg" : "border-transparent text-fg-muted hover:text-fg"
                   }`}
                 >
+                  <Icon size={15} className={active ? "text-accent" : undefined} aria-hidden />
                   {label}
                 </Link>
               );

@@ -10,6 +10,7 @@ import {
   operatorWallUnavailableResponse,
   setAutonomyBody,
   setAutonomyResponse,
+  tripSnapshot,
   type OperatorWallResponse,
   type WallCall,
   type WallLane,
@@ -33,8 +34,12 @@ const callColumns = sql`EXISTS (SELECT 1 FROM call_events e WHERE e.call_id = t.
             created_at::timestamptz AS created_at
           FROM offers WHERE call_id = t.call_id ORDER BY load_id, round DESC
         ) o), '[]'::json) AS offers,
+        COALESCE((SELECT json_agg(r ORDER BY r.created_at) FROM (
+          SELECT load_id, round, carrier_ask, decision, rate_to_say, created_at::timestamptz AS created_at
+          FROM offers WHERE call_id = t.call_id
+        ) r), '[]'::json) AS rounds,
         (SELECT row_to_json(h) FROM (
-          SELECT hold_id, load_id, status, agreed_rate, posted_rate, max_buy, booking_ref, created_at::timestamptz AS created_at
+          SELECT hold_id, load_id, status, agreed_rate, posted_rate, max_buy, booking_ref, trip, created_at::timestamptz AS created_at
           FROM holds WHERE call_id = t.call_id ORDER BY (status <> 'released') DESC, created_at DESC LIMIT 1
         ) h) AS hold,
         COALESCE((SELECT json_agg(e ORDER BY e.created_at) FROM (
@@ -123,6 +128,9 @@ export function laneOf(o: LaneColumns): WallLane | null {
   };
 }
 
+// Every round of every load on the call, so the tower can tell how the negotiation went.
+const roundRow = offerRow.pick({ load_id: true, round: true, carrier_ask: true, decision: true, rate_to_say: true, created_at: true });
+
 const holdRow = z.object({
   hold_id: z.string(),
   load_id: z.string(),
@@ -131,6 +139,8 @@ const holdRow = z.object({
   posted_rate: optionalMoney,
   max_buy: optionalMoney,
   booking_ref: z.string().nullable(),
+  // Holds placed before trip estimates, or without one, store none.
+  trip: tripSnapshot.nullable(),
   created_at: timestamp,
 });
 
@@ -160,6 +170,8 @@ export const callRow = z.object({
   created_at: timestamp,
   human_requested: z.boolean(),
   offers: z.array(offerRow),
+  // Older fixtures and rows without the column read as no rounds.
+  rounds: z.array(roundRow).default([]),
   hold: holdRow.nullable(),
   events: z.array(eventRow),
   interventions: z.array(interventionRow),
@@ -213,6 +225,14 @@ export function toWallCall(row: CallRow): WallCall {
       lane: laneOf(o),
       createdAt: o.created_at.toISOString(),
     })),
+    rounds: row.rounds.map((r) => ({
+      loadId: r.load_id,
+      round: r.round,
+      carrierAsk: r.carrier_ask,
+      decision: r.decision,
+      rateToSay: r.rate_to_say,
+      createdAt: r.created_at.toISOString(),
+    })),
     hold: row.hold && {
       holdId: row.hold.hold_id,
       loadId: row.hold.load_id,
@@ -222,6 +242,7 @@ export function toWallCall(row: CallRow): WallCall {
       maxBuy: row.hold.max_buy,
       bookingRef: row.hold.booking_ref,
       lane: holdLane,
+      trip: row.hold.trip,
       createdAt: row.hold.created_at.toISOString(),
     },
     events: row.events.map((e) => ({ tool: e.tool, summary: e.summary, status: e.status, createdAt: e.created_at.toISOString() })),

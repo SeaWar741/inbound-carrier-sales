@@ -1,4 +1,4 @@
-import type { CarrierStage, TowerCall } from "./contracts";
+import type { CarrierStage, TowerCall, TripSnapshot } from "./contracts";
 import type { LoadOutcome } from "./pricing";
 
 // Display helpers for money, durations and times. The desk runs on Chicago time.
@@ -22,13 +22,6 @@ export function formatUsd(amount: number): string {
   return usdWhole.format(amount);
 }
 
-// "+$134" or "-$50"; zero carries no sign.
-export function formatSignedUsd(amount: number): string {
-  const rounded = Math.round(amount);
-  if (rounded === 0) return usdWhole.format(0);
-  return `${rounded > 0 ? "+" : "-"}${usdWhole.format(Math.abs(rounded))}`;
-}
-
 // "$2.72/mi".
 export function formatPerMile(usdPerMile: number): string {
   return `$${usdPerMile.toFixed(2)}/mi`;
@@ -36,6 +29,18 @@ export function formatPerMile(usdPerMile: number): string {
 
 export function formatPercent(pct: number): string {
   return `${pct.toFixed(1)}%`;
+}
+
+// A trip one driver cannot make on time; solo needs no badge. Impossible says how late even a team lands.
+export function feasibilityBadge(trip: Pick<TripSnapshot, "feasibility" | "lateHours">): { text: string; tone: string } | null {
+  switch (trip.feasibility) {
+    case "solo":
+      return null;
+    case "team":
+      return { text: "Needs team", tone: "bg-tone-amber-soft text-tone-amber" };
+    case "impossible":
+      return { text: `Late ~${Math.round(trip.lateHours)}h`, tone: "bg-tone-red-soft text-tone-red" };
+  }
 }
 
 export function deskDayKey(iso: string | number): string {
@@ -104,6 +109,23 @@ export const carrierStageLabels: Record<CarrierStage, string> = {
   lost: "Lost",
 };
 
+const equipmentLabels: Record<string, string> = {
+  DRY_VAN: "Dry van",
+  REEFER: "Reefer",
+  FLATBED: "Flatbed",
+  STEP_DECK: "Step deck",
+  POWER_ONLY: "Power only",
+};
+
+// "1 call", "2 calls"; `many` for the irregular ones ("searches").
+export function plural(n: number, one: string, many = `${one}s`): string {
+  return `${n} ${n === 1 ? one : many}`;
+}
+
+export function equipmentLabel(code: string): string {
+  return equipmentLabels[code] ?? code;
+}
+
 // How a carrier is named in the inbox: its FMCSA name when stored, else its numbers.
 export function carrierName(carrier: { carrierName: string | null; mcNumber: string | null; dotNumber: string | null }): string {
   if (carrier.carrierName) return carrier.carrierName;
@@ -123,7 +145,7 @@ export function callStageLabel(call: Pick<TowerCall, "stage" | "round">): string
   }
 }
 
-// A load's outcome as the timeline and the pricing card word it, with its text color.
+// A load's outcome as the load picker words it, with its text color.
 export function outcomeLabel(outcome: LoadOutcome): { text: string; tone: string } {
   switch (outcome.kind) {
     case "booked":
@@ -153,6 +175,7 @@ const toolLabels: Record<string, string> = {
   create_hold: "Placed hold",
   request_human: "Asked for a human",
   hangup: "Call ended by agent",
+  get_trip_estimate: "Estimated trip",
 };
 
 // An agent tool call as the transcript words it; an unknown tool reads as its name in words.

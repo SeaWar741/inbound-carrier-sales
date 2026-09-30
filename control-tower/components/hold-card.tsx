@@ -1,9 +1,9 @@
 "use client";
 
 import type { IconType } from "react-icons";
-import { LuArrowRight, LuCircleCheck, LuHand, LuLock, LuTriangleAlert } from "react-icons/lu";
+import { LuArrowRight, LuCircleCheck, LuHand, LuLock, LuMail, LuTriangleAlert } from "react-icons/lu";
 import { useEffect, useRef, useState } from "react";
-import { ActionCard, type ActionTone, Section } from "@/components/section";
+import { ActionCard, type ActionTone } from "@/components/section";
 import type { ConfirmHoldResponse, ReleaseHoldResponse, TowerCall, WallLane } from "@/lib/contracts";
 import { carrierId, formatUsd } from "@/lib/format";
 
@@ -12,18 +12,6 @@ type HoldStatus = Hold["status"];
 
 // The second press must land within this window, so a stray click never books a load.
 const armWindowMs = 4_000;
-
-const equipmentLabels: Record<string, string> = {
-  DRY_VAN: "Dry van",
-  REEFER: "Reefer",
-  FLATBED: "Flatbed",
-  STEP_DECK: "Step deck",
-  POWER_ONLY: "Power only",
-};
-
-export function equipmentLabel(code: string): string {
-  return equipmentLabels[code] ?? code;
-}
 
 // The TMS gives YYYYMMDDHHMMSS with no timezone, so it is shown as written.
 const pickupFormat = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", month: "short", day: "numeric" });
@@ -36,14 +24,6 @@ export function formatPickup(wire: string): string {
 
 const finalStatuses: readonly HoldStatus[] = ["booked", "booked_unconfirmed", "released"];
 
-const statusChip: Record<HoldStatus, { text: string; tone: string }> = {
-  held: { text: "Held", tone: "bg-accent-soft text-accent" },
-  confirming: { text: "Booking", tone: "bg-warn-soft text-warn" },
-  booked: { text: "Booked", tone: "bg-ok-soft text-ok" },
-  booked_unconfirmed: { text: "Booked, unconfirmed", tone: "bg-warn-soft text-warn" },
-  released: { text: "Released", tone: "bg-line text-fg-muted" },
-};
-
 // The action card's header for each status: red while it waits on the desk.
 const holdAction: Record<HoldStatus, { title: string; tone: ActionTone; icon: IconType }> = {
   held: { title: "Hold waiting for your approval", tone: "red", icon: LuHand },
@@ -53,13 +33,10 @@ const holdAction: Record<HoldStatus, { title: string; tone: ActionTone; icon: Ic
   released: { title: "Hold released", tone: "gray", icon: LuLock },
 };
 
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex items-baseline justify-between gap-3 py-1">
-      <dt className="text-xs text-fg-faint">{label}</dt>
-      <dd className="text-right text-xs text-fg">{children}</dd>
-    </div>
-  );
+// The adapter writes a hold_notice when it tells the carrier how a hold ended, so an open hold has
+// none yet. Events come oldest first, and the latest one naming this load is the one that counts.
+export function holdNotice(call: Pick<TowerCall, "events">, hold: Pick<Hold, "loadId">): TowerCall["events"][number] | null {
+  return call.events.findLast((event) => event.tool === "hold_notice" && event.summary?.includes(hold.loadId)) ?? null;
 }
 
 // className adds the call site's own sizing, such as truncation in a narrow row.
@@ -87,8 +64,9 @@ async function postHold(url: string, headers: Record<string, string>): Promise<C
   return body;
 }
 
-// The simulated handoff: the operator books or releases the load the agent held. An open hold is an
-// action card at the top of the detail panel; a settled one is a section under the load.
+// The simulated handoff: the operator books or releases the load the agent held. Only an open hold
+// is drawn here, as an action card; the Deal card tells how a settled one ended. The load's lane,
+// pickup and equipment are in the Load section, so the card keeps to the amount, load and carrier.
 export function HoldCard({ call, hold }: { call: TowerCall; hold: Hold }) {
   const [armed, setArmed] = useState(false);
   const [pending, setPending] = useState<"confirm" | "release" | null>(null);
@@ -102,10 +80,9 @@ export function HoldCard({ call, hold }: { call: TowerCall; hold: Hold }) {
   const wallFinal = finalStatuses.includes(hold.status);
   const status: HoldStatus = wallFinal ? hold.status : (outcome?.status ?? hold.status);
   const bookingRef = hold.bookingRef ?? outcome?.bookingRef ?? null;
-  const chip = statusChip[status];
-  const lane = hold.lane;
-  const margin = hold.maxBuy === null ? null : hold.maxBuy - hold.agreedRate;
   const actionable = status === "held" && pending === null;
+  const open = status === "held" || status === "confirming";
+  const notice = open ? null : holdNotice(call, hold);
 
   const settle = (answer: ConfirmHoldResponse | ReleaseHoldResponse | null) => {
     if (!answer) return;
@@ -153,57 +130,16 @@ export function HoldCard({ call, hold }: { call: TowerCall; hold: Hold }) {
     }
   };
 
-  const chipEl = <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium leading-none ${chip.tone}`}>{chip.text}</span>;
-  // While the hold waits on the desk the card is the action: the amount, the load, and the buttons.
-  const open = status === "held" || status === "confirming";
-
   const content = (
     <>
-      {open ? (
-        <div className="flex flex-col gap-1">
-          <span className="tabular text-2xl font-semibold text-fg">{formatUsd(hold.agreedRate)}</span>
-          <span className="min-w-0 truncate text-sm text-fg">
-            <span className="tabular font-medium">{hold.loadId}</span>
-            {lane && (
-              <>
-                <span className="text-fg-faint"> · </span>
-                <LaneText lane={lane} />
-              </>
-            )}
-          </span>
-          <span className="text-xs text-fg-muted">
-            {carrierId(call)} · margin vs max buy <span className="tabular text-ok">{margin === null ? "-" : formatUsd(margin)}</span>
-          </span>
-        </div>
-      ) : (
-        <dl className="divide-y divide-line">
-          <Row label="Carrier">
-            <span className="tabular">{carrierId(call)}</span>
-            {call.mcNumber && call.dotNumber && <span className="tabular text-fg-faint"> DOT {call.dotNumber}</span>}
-          </Row>
-          <Row label="Load">
-            <span className="tabular">{hold.loadId}</span>
-          </Row>
-          <Row label="Lane">{lane ? <LaneText lane={lane} /> : <span className="text-fg-faint">Not recorded</span>}</Row>
-          {lane && (
-            <>
-              <Row label="Pickup">
-                <span className="tabular">{formatPickup(lane.pickupAt)}</span>
-              </Row>
-              <Row label="Equipment">{equipmentLabel(lane.equipment)}</Row>
-              <Row label="Miles">
-                <span className="tabular">{lane.miles.toLocaleString("en-US")}</span>
-              </Row>
-            </>
-          )}
-          <Row label="Agreed rate">
-            <span className="tabular font-semibold">{formatUsd(hold.agreedRate)}</span>
-          </Row>
-          <Row label="Margin vs max buy">
-            <span className="tabular text-ok">{margin === null ? "-" : formatUsd(margin)}</span>
-          </Row>
-        </dl>
-      )}
+      <div className="flex flex-col gap-1">
+        <span className="tabular text-2xl font-semibold text-fg">{formatUsd(hold.agreedRate)}</span>
+        <span className="tabular min-w-0 truncate text-xs text-fg-muted">
+          <span className="font-medium text-fg">{hold.loadId}</span>
+          <span className="text-fg-faint"> · </span>
+          {carrierId(call)}
+        </span>
+      </div>
 
       {(status === "booked" || status === "booked_unconfirmed") && (
         <p className={`mt-2 flex items-center gap-1.5 text-xs ${status === "booked" ? "text-ok" : "text-warn"}`}>
@@ -221,6 +157,12 @@ export function HoldCard({ call, hold }: { call: TowerCall; hold: Hold }) {
         <p className="mt-2 text-xs text-fg-muted">{outcome?.message ?? "The hold was released and the load is back on the board."}</p>
       )}
       {status === "confirming" && <p className="mt-2 text-xs text-warn">Booking in progress with the TMS.</p>}
+      {notice?.summary && (
+        <p className={`mt-1 flex items-center gap-1.5 text-xs ${notice.status === "sent" ? "text-fg-muted" : "text-warn"}`}>
+          <LuMail size={14} aria-hidden />
+          {notice.summary}
+        </p>
+      )}
 
       {status === "held" && (
         <div className="mt-3 flex flex-col gap-2">
@@ -264,19 +206,13 @@ export function HoldCard({ call, hold }: { call: TowerCall; hold: Hold }) {
     </>
   );
 
-  // While the wall still reports the hold open it is the panel's action card, and stays one while
-  // this browser's own answer settles; a settled hold is a quiet section.
-  if (hold.status === "held" || hold.status === "confirming") {
-    const action = holdAction[status];
-    return (
-      <ActionCard tone={action.tone} icon={action.icon} title={action.title}>
-        {content}
-      </ActionCard>
-    );
-  }
+  // While the wall still reports the hold open it is an action card, and stays one while this
+  // browser's own answer settles; once the wall settles it the Deal card takes over.
+  if (hold.status !== "held" && hold.status !== "confirming") return null;
+  const action = holdAction[status];
   return (
-    <Section icon={LuLock} title="Hold" aside={chipEl}>
+    <ActionCard tone={action.tone} icon={action.icon} title={action.title}>
       {content}
-    </Section>
+    </ActionCard>
   );
 }

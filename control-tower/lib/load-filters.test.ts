@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { TowerLoad } from "./contracts";
-import { emptyLoadFilters, filterLoads, loadEquipments, sortLoads, statusCounts } from "./load-filters.ts";
+import { emptyLoadFilters, filterLoads, loadEquipments, loadOrigins, sortLoads, statusCounts } from "./load-filters.ts";
 
 function load(over: Partial<TowerLoad> & { holdId: string }): TowerLoad {
   return {
@@ -66,19 +66,31 @@ describe("filterLoads", () => {
   it("narrows by status and equipment together", () => {
     assert.deepEqual(ids(filterLoads(loads, { ...emptyLoadFilters, status: "in_transit" })), ["b", "d"]);
     assert.deepEqual(ids(filterLoads(loads, { ...emptyLoadFilters, equipment: "REEFER" })), ["c"]);
-    assert.deepEqual(ids(filterLoads(loads, { q: "", status: "arrived", equipment: "REEFER" })), []);
+    assert.deepEqual(ids(filterLoads(loads, { ...emptyLoadFilters, status: "arrived", equipment: "REEFER" })), []);
+  });
+
+  it("narrows by origin state", () => {
+    assert.deepEqual(ids(filterLoads(loads, { ...emptyLoadFilters, origin: "CO" })), ["c"]);
+    assert.deepEqual(ids(filterLoads(loads, { ...emptyLoadFilters, origin: "IL", status: "in_transit" })), ["b", "d"]);
+    assert.deepEqual(ids(filterLoads(loads, { ...emptyLoadFilters, origin: "IL", equipment: "REEFER" })), []);
   });
 });
 
 describe("statusCounts", () => {
-  it("counts after search and equipment but ignores the status choice", () => {
-    assert.deepEqual(statusCounts(loads, { q: "", status: "arrived", equipment: "DRY_VAN" }), {
+  it("counts after search, equipment and origin but ignores the status choice", () => {
+    assert.deepEqual(statusCounts(loads, { ...emptyLoadFilters, status: "arrived", equipment: "DRY_VAN" }), {
       all: 3,
       in_transit: 2,
       upcoming: 0,
       arrived: 1,
     });
     assert.deepEqual(statusCounts(loads, { ...emptyLoadFilters, q: "chicago" }).all, 3);
+    assert.deepEqual(statusCounts(loads, { ...emptyLoadFilters, status: "arrived", origin: "CO" }), {
+      all: 1,
+      in_transit: 0,
+      upcoming: 1,
+      arrived: 0,
+    });
   });
 });
 
@@ -103,5 +115,11 @@ describe("sortLoads", () => {
 describe("loadEquipments", () => {
   it("lists the distinct equipment codes present", () => {
     assert.deepEqual(loadEquipments(loads), ["DRY_VAN", "REEFER"]);
+  });
+});
+
+describe("loadOrigins", () => {
+  it("lists the distinct origin states present", () => {
+    assert.deepEqual(loadOrigins(loads), ["CO", "IL"]);
   });
 });

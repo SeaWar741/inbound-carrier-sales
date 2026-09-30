@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { LuArrowUpRight, LuHand, LuLoaderCircle, LuPackage, LuPhone, LuTriangleAlert } from "react-icons/lu";
-import { CarrierStageIcon } from "@/components/inbox/stage-pill";
+import { LuArrowUpRight, LuClockAlert, LuHand, LuLoaderCircle, LuPackage, LuPhone, LuTriangleAlert, LuUsers } from "react-icons/lu";
+import { Badge, CarrierStageIcon } from "@/components/inbox/stage-pill";
 import type { TowerCarrier, TowerCarriers } from "@/lib/contracts";
-import { callSummary, carrierName, formatTimeAgo } from "@/lib/format";
+import { callSummary, carrierName, feasibilityBadge, formatTimeAgo } from "@/lib/format";
 
 // The list's loaded pages merged into one answer, with the query and page count they were read for.
 export type CarrierPages = TowerCarriers & { query: string; pages: number };
@@ -20,6 +20,21 @@ function StatusIcon({ carrier }: { carrier: TowerCarrier }) {
     );
   }
   return <CarrierStageIcon stage={carrier.carrierStage} />;
+}
+
+// Next to the status icon: the carrier's standing hold is a trip it cannot drive solo in time.
+function FeasibilityBadge({ carrier }: { carrier: TowerCarrier }) {
+  const hold = carrier.latestCall.hold;
+  if (!hold?.trip || hold.status === "released") return null;
+  const badge = feasibilityBadge(hold.trip);
+  if (badge === null) return null;
+  const Icon = hold.trip.feasibility === "team" ? LuUsers : LuClockAlert;
+  return (
+    <Badge tone={badge.tone}>
+      <Icon size={11} aria-hidden />
+      {badge.text}
+    </Badge>
+  );
 }
 
 // The cortex lead row: dot, name and status icon; numbers; last event; stage badge; time and counts.
@@ -54,6 +69,7 @@ function CarrierRow({
         <div className="flex min-w-0 items-center gap-2">
           <span className="min-w-0 truncate font-medium text-fg">{carrierName(carrier)}</span>
           <span className="min-w-0 flex-1" />
+          <FeasibilityBadge carrier={carrier} />
           <StatusIcon carrier={carrier} />
         </div>
 

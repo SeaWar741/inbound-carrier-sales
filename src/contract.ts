@@ -2,6 +2,7 @@ import { z } from "zod";
 import { maxAuthorizationUsd, otpDigits } from "./constants.ts";
 import { callRisks, callStages } from "./domain/call-stage.ts";
 import { tripStatuses } from "./domain/trip.ts";
+import { feasibilities, type TripSnapshot } from "./domain/trip-estimate.ts";
 import { cityInput, equipmentInput, loadIdInput, stateInput, zipInput } from "./infra/tms/codec.ts";
 import { autonomyModes, holdStatuses } from "./infra/twin-schemas.ts";
 
@@ -52,6 +53,13 @@ export type VerifyCarrierResponse = z.infer<typeof verifyCarrierResponse>;
 
 const callId = z.string().trim().min(1).max(128);
 
+// "Any", "anything" or "all" means no equipment filter, the same as leaving it blank.
+const anyEquipment = /^\s*(any|anything|all)\s*$/i;
+const optionalEquipment = z.preprocess(
+  (value) => (typeof value === "string" && anyEquipment.test(value) ? undefined : blankToUndefined(value)),
+  equipmentInput.optional(),
+);
+
 // Flat fields because each is one tool parameter; the route reads origin/destination objects.
 // The TMS codec's own inputs, so a bad filter is a 200 invalid_request, not a thrown error.
 export const searchLoadsBody = z
@@ -63,7 +71,7 @@ export const searchLoadsBody = z
     destinationCity: optionalField(cityInput),
     destinationState: optionalField(stateInput),
     destinationZip: optionalField(zipInput),
-    equipmentType: equipmentInput,
+    equipmentType: optionalEquipment,
     pickupDate: optionalField(z.iso.date()),
   })
   .refine((b) => b.originCity !== undefined || b.originState !== undefined || b.originZip !== undefined, {
@@ -94,6 +102,8 @@ export const pitchedLoad = z.object({
   pieces: z.number(),
   dims: z.string(),
   notes: z.string(),
+  // Whether one driver can legally make the window at the posted rate; null when no estimate was made.
+  feasibility: z.enum(feasibilities).nullable(),
 });
 export type PitchedLoad = z.infer<typeof pitchedLoad>;
 
@@ -128,6 +138,44 @@ export const evaluateOfferResponse = z.object({
   isFinalRound: z.boolean(),
 });
 export type EvaluateOfferResponse = z.infer<typeof evaluateOfferResponse>;
+
+export const tripEstimateBody = z.object({ callId, loadId: loadIdInput });
+export type TripEstimateBody = z.output<typeof tripEstimateBody>;
+
+// The stored trip snapshot as the wall reads it back (the estimator writes domain TripSnapshot). Holds
+// stored before lateHours and deliveryAt existed read back as on time with no appointment, so the wall
+// never fails on them; that is the one way this schema is wider than the domain type.
+export const tripSnapshot = z.object({
+  rate: z.number().int(),
+  dieselUsd: z.number().int(),
+  tollsUsd: z.number().int(),
+  carrierNetUsd: z.number().int(),
+  feasibility: z.enum(feasibilities),
+  legalEtaAt: z.iso.datetime(),
+  legalHours: z.number(),
+  lateHours: z.number().default(0),
+  deliveryAt: z.iso.datetime().nullable().default(null),
+  netPerHour: z.number().int(),
+  dieselPerGal: z.number(),
+  tollShare: z.number().nullable(),
+}) satisfies z.ZodType<Omit<TripSnapshot, "deliveryAt"> & { deliveryAt: string | null }>;
+
+// Only what the agent speaks from: the message, the net and whether the window needs a team.
+export const tripEstimateResponse = z.object({
+  status: z.enum([
+    "ok",
+    "not_verified",
+    "load_unavailable",
+    "tms_unavailable",
+    "estimate_unavailable",
+    "service_unavailable",
+    "invalid_request",
+  ]),
+  message: z.string(),
+  carrierNetUsd: tripSnapshot.shape.carrierNetUsd.nullable(),
+  feasibility: tripSnapshot.shape.feasibility.nullable(),
+});
+export type TripEstimateResponse = z.infer<typeof tripEstimateResponse>;
 
 // Callers and the agent name the channel loosely: "Text", "e-mail", "SMS message".
 const channelAliases = new Map([
@@ -196,6 +244,7 @@ export const createHoldResponse = z.object({
     "mc_number_required",
     "load_unavailable",
     "load_on_hold",
+    "window_too_tight",
     "tms_unavailable",
     "service_unavailable",
     "invalid_request",
@@ -289,6 +338,9 @@ const wallOffer = z.object({
   createdAt: z.iso.datetime(),
 });
 
+// One negotiation round; wallOffer keeps only the latest round per load.
+const wallRound = wallOffer.pick({ loadId: true, round: true, carrierAsk: true, decision: true, rateToSay: true, createdAt: true });
+
 const wallHold = z.object({
   holdId: z.string(),
   loadId: z.string(),
@@ -299,6 +351,8 @@ const wallHold = z.object({
   bookingRef: z.string().nullable(),
   // From the latest offer of the same call on this load.
   lane: wallLane.nullable(),
+  // The estimate snapshotted when the hold was placed; null on holds without one.
+  trip: tripSnapshot.nullable(),
   createdAt: z.iso.datetime(),
 });
 
@@ -332,6 +386,7 @@ export const wallCall = z.object({
   riskReason: z.string().nullable(),
   // Oldest first, the latest round of each load.
   offers: z.array(wallOffer),
+  rounds: z.array(wallRound),
   hold: wallHold.nullable(),
   // Oldest first, the last ones of the call only.
   events: z.array(wallEvent),
@@ -496,3 +551,159 @@ export type OperatorCarrierCallsQuery = z.output<typeof operatorCarrierCallsQuer
 // `since` window, null when it has no call there.
 export const operatorCarrierCallsResponse = z.object({ status: z.literal("ok"), calls: z.array(wallCall), carrier: operatorCarrier.nullable() });
 export type OperatorCarrierCallsResponse = z.infer<typeof operatorCarrierCallsResponse>;
+
+export const networkViews = ["all", "new", "at_risk", "top", "growth"] as const;
+export const carrierRelationships = ["new", "at_risk", "active"] as const;
+export const networkSorts = ["mc", "carrier", "lastCall", "calls", "bookings"] as const;
+export const demandSorts = ["lane", "equipment", "unmet", "thisWeek", "carriers"] as const;
+export const pageSizes = [10, 25, 50] as const;
+
+const sortDir = z.enum(["asc", "desc"]).default("desc");
+const pageSize = z.coerce.number().pipe(z.literal(pageSizes)).default(25);
+
+// The bar filters and a view over a fixed 30 day window, long enough to see a carrier's pattern.
+export const operatorNetworkQuery = operatorCarriersFields.pick({ equipment: true, origin: true, page: true }).extend({
+  view: z.enum(networkViews).default("all"),
+  // MC, DOT or carrier name.
+  q: optionalField(z.string().trim().max(64)),
+  sort: z.enum(networkSorts).default("lastCall"),
+  dir: sortDir,
+  pageSize,
+});
+export type OperatorNetworkQuery = z.output<typeof operatorNetworkQuery>;
+
+const networkCarrier = z.object({
+  key: z.string(),
+  mcNumber: z.string().nullable(),
+  dotNumber: z.string().nullable(),
+  carrierName: z.string().nullable(),
+  // new, else at_risk, else active; lifetime facts decide it, not the window.
+  relationship: z.enum(carrierRelationships),
+  // Independent of the relationship and of each other.
+  top: z.boolean(),
+  // One of the carrier's lanes is open: the board has an open load on that exact origin, destination
+  // and equipment (a search's Any matches every value), or on its origin and equipment when the carrier
+  // booked that exact lane at least twice. Under an equipment or origin filter, only an open lane that
+  // matches it counts.
+  growth: z.boolean(),
+  facts: z.object({
+    lifetimeCalls: z.number().int(),
+    lifetimeBookings: z.number().int(),
+    lastCallAt: z.iso.datetime(),
+    // Calls in the last 14 days and in the 14 days before those.
+    callsRecent: z.number().int(),
+    callsPrior: z.number().int(),
+    // The rest are inside the window; negotiable calls have at least one offer.
+    calls: z.number().int(),
+    negotiableCalls: z.number().int(),
+    bookings: z.number().int(),
+  }),
+  // The carrier's lanes in the window, from its searches and negotiated loads; null means any. Count is
+  // calls; open means the board has an open load on it now, and open lanes come first.
+  lanes: z.array(
+    z.object({
+      originState: z.string().nullable(),
+      destinationState: z.string().nullable(),
+      equipment: z.string().nullable(),
+      count: z.number().int(),
+      open: z.boolean(),
+    }),
+  ),
+});
+export type NetworkCarrier = z.infer<typeof networkCarrier>;
+
+export const operatorNetworkResponse = z.object({
+  status: z.literal("ok"),
+  rows: z.array(networkCarrier),
+  // Carriers in the view after the filters; the counts apply the filters but not the view.
+  total: z.number().int(),
+  page: z.number().int(),
+  pageSize: z.number().int(),
+  counts: z.object({ all: z.number().int(), atRisk: z.number().int(), growth: z.number().int() }),
+  // Over the filtered carriers, not the view: carriers with a call in the window, their bookings and negotiated loads.
+  kpis: z.object({ called: z.number().int(), booked: z.number().int(), negotiated: z.number().int() }),
+  // Distinct listed carriers per open lane (the top 5) and per origin state with one, without the
+  // filters or the view, so the side panel keeps its shape while the list narrows.
+  openLanes: z.array(z.object({ originState: z.string(), equipment: z.string(), carriers: z.number().int() })),
+  openOrigins: z.array(z.object({ originState: z.string(), carriers: z.number().int() })),
+  // False when the TMS board could not be read; growth is then false for every carrier.
+  boardAvailable: z.boolean(),
+});
+export type OperatorNetworkResponse = z.infer<typeof operatorNetworkResponse>;
+
+// The unmet demand radar reads the last 4 desk (Chicago) weeks, this one included; the bar filters narrow the rows.
+export const operatorDemandQuery = operatorCarriersFields.pick({ equipment: true, origin: true, page: true }).extend({
+  // An origin or destination state, or an MC or carrier name among the lane's asks; it keeps rows, never changes their counts.
+  q: optionalField(z.string().trim().max(64)),
+  // The next move: source keeps lanes with searches that found nothing, rate those with offers that did not book.
+  next: optionalField(z.enum(["source", "rate"])),
+  sort: z.enum(demandSorts).default("unmet"),
+  dir: sortDir,
+  pageSize,
+});
+export type OperatorDemandQuery = z.output<typeof operatorDemandQuery>;
+
+// One lane carriers asked for and we did not cover; a null destination or equipment is the "Any" the
+// carrier asked for. Only unmet asks count: a search that found a load is left out everywhere.
+// No search is linked to the booking it led to and no carrier rejection is stored, so neither is counted.
+const demandLane = z.object({
+  originState: z.string(),
+  destinationState: z.string().nullable(),
+  equipment: z.string().nullable(),
+  // Searches that returned no load.
+  noMatch: z.number().int(),
+  // Loads negotiated on a call that never got a hold (held, confirming or booked) on that call.
+  offeredNoBooking: z.number().int(),
+  // Unmet asks (noMatch + offeredNoBooking) in this and the previous desk week.
+  thisWeek: z.number().int(),
+  previousWeek: z.number().int(),
+  // Distinct carriers behind the unmet asks.
+  carriers: z.number().int(),
+});
+export type DemandLane = z.infer<typeof demandLane>;
+
+export const operatorDemandResponse = z.object({
+  status: z.literal("ok"),
+  rows: z.array(demandLane),
+  total: z.number().int(),
+  // Across every row the filters keep, not only this page.
+  totals: z.object({
+    noMatch: z.number().int(),
+    offeredNoBooking: z.number().int(),
+    carriers: z.number().int(),
+    thisWeek: z.number().int(),
+    previousWeek: z.number().int(),
+  }),
+  // Unmet asks per origin state over every lane, without the filters.
+  origins: z.array(z.object({ originState: z.string(), unmet: z.number().int() })),
+  page: z.number().int(),
+  pageSize: z.number().int(),
+});
+export type OperatorDemandResponse = z.infer<typeof operatorDemandResponse>;
+
+// One radar row: destination and equipment left out select the "Any" row, not every row.
+export const operatorDemandCarriersQuery = z.object({
+  origin: stateInput,
+  destination: optionalField(stateInput),
+  equipment: optionalField(equipmentInput),
+  page: operatorCarriersFields.shape.page,
+});
+export type OperatorDemandCarriersQuery = z.output<typeof operatorDemandCarriersQuery>;
+
+const demandCarrier = z.object({
+  key: z.string(),
+  mcNumber: z.string().nullable(),
+  carrierName: z.string().nullable(),
+  // The carrier's unmet asks on the row's lane: searches that found nothing plus offered loads without a booking.
+  asks: z.number().int(),
+});
+export type DemandCarrier = z.infer<typeof demandCarrier>;
+
+export const operatorDemandCarriersResponse = z.object({
+  status: z.literal("ok"),
+  rows: z.array(demandCarrier),
+  total: z.number().int(),
+  page: z.number().int(),
+  pageSize: z.number().int(),
+});
+export type OperatorDemandCarriersResponse = z.infer<typeof operatorDemandCarriersResponse>;

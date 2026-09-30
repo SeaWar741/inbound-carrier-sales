@@ -20,7 +20,7 @@ import {
   LuTruck,
 } from "react-icons/lu";
 import { CallDetail } from "@/components/call-detail";
-import { equipmentLabel, HoldCard } from "@/components/hold-card";
+import { HoldCard } from "@/components/hold-card";
 import type { InboxWindow } from "@/components/inbox/inbox-rail";
 import { Badge, CarrierStagePill, carrierStageStyle } from "@/components/inbox/stage-pill";
 import { VoiceControls } from "@/components/intervention-bar";
@@ -28,21 +28,7 @@ import { LoadPanel } from "@/components/load-panel";
 import { PulseDot } from "@/components/pulse-dot";
 import { ActionCard, Section } from "@/components/section";
 import type { TowerCall, TowerCarrier, TowerCarrierCalls, WallLane } from "@/lib/contracts";
-import {
-  callSummary,
-  carrierId,
-  carrierName,
-  deskDayKey,
-  formatDateTime,
-  formatElapsed,
-  formatDeskWhen,
-  formatPercent,
-  formatPerMile,
-  formatUsd,
-  loadCards,
-  outcomeLabel,
-  type LoadCard,
-} from "@/lib/format";
+import { callSummary, carrierId, carrierName, deskDayKey, equipmentLabel, formatDateTime, formatDeskWhen, formatElapsed, formatPercent, formatPerMile, formatUsd, loadCards, outcomeLabel, type LoadCard } from "@/lib/format";
 import { carrierPricing, loadOutcome, type LoadOutcome } from "@/lib/pricing";
 import { usePoll } from "@/lib/use-poll";
 import { useVoice, type Voice } from "@/lib/use-voice";
@@ -87,8 +73,8 @@ function CarrierRecord({ carrier, calls }: { carrier: TowerCarrier | null; calls
           {pricing.bookingRate !== null && <span className="font-normal text-fg-muted"> ({formatPercent(pricing.bookingRate)})</span>}
         </Fact>
         <Fact icon={LuDollarSign} label="Avg agreed $/mi">{orDash(pricing.avgAgreedPerMile, formatPerMile)}</Fact>
-        <Fact icon={LuPiggyBank} label="Avg margin kept">{orDash(pricing.avgMarginKept, formatUsd)}</Fact>
-        <Fact icon={LuRepeat} label="Avg round at agreement">{orDash(pricing.avgRoundsToAgree, (v) => `R${v.toFixed(1)}`)}</Fact>
+        <Fact icon={LuPiggyBank} label="We keep, on avg">{orDash(pricing.avgMarginKept, formatUsd)}</Fact>
+        <Fact icon={LuRepeat} label="Rounds to a deal">{orDash(pricing.avgRoundsToAgree, (v) => `${v.toFixed(1)} on avg`)}</Fact>
         <Fact icon={LuCalendarClock} label="Next pickup">{carrier?.nextTrip?.pickupAt ? formatDateTime(carrier.nextTrip.pickupAt) : "-"}</Fact>
         <Fact icon={LuLock} label="Open hold">
           {hold ? `${hold.loadId} at ${formatUsd(hold.agreedRate)}${hold.status === "confirming" ? ", confirming" : ""}` : "None"}
@@ -322,9 +308,9 @@ function humanRequest(calls: TowerCall[]): { call: TowerCall; reason: string } |
   return null;
 }
 
-// The top of the detail panel whenever a person is needed: each hold waiting on the desk and a
-// carrier asking for a person, as action cards. The voice controls act on the selected call, so a
-// request on another call offers to open it first.
+// The top of the detail panel whenever a person is needed: each hold waiting on the desk (but the
+// selected call's, which its Deal card carries) and a carrier asking for a person, as action cards.
+// The voice controls act on the selected call, so a request on another call offers to open it first.
 function NeedsYou({
   calls,
   selected,
@@ -338,7 +324,10 @@ function NeedsYou({
   now: number;
   onSelectCall: (callId: string) => void;
 }) {
-  const holds = calls.flatMap((call) => (call.hold && (call.hold.status === "held" || call.hold.status === "confirming") ? [{ call, hold: call.hold }] : []));
+  // The selected call's open hold is the action card of its Deal, further down the panel.
+  const holds = calls.flatMap((call) =>
+    call.callId !== selected?.callId && call.hold && (call.hold.status === "held" || call.hold.status === "confirming") ? [{ call, hold: call.hold }] : [],
+  );
   const request = humanRequest(calls);
   if (holds.length === 0 && request === null) return null;
   return (
@@ -415,7 +404,9 @@ export function CarrierDetail({
   const dot = carrier?.dotNumber ?? latest?.dotNumber ?? null;
   // The numbers line never repeats what the name already says ("MC 135797" over "DOT 80806").
   const numbers = [mc && `MC ${mc}`, dot && `DOT ${dot}`].filter((part) => part && part !== name).join(" · ");
-  const eta = carrier?.nextTrip?.etaAt ?? null;
+  // The selected load's standing hold carries a legal (HOS) ETA; the carrier's next trip only a flat-speed one.
+  const selectedHold = selected?.hold && selected.hold.status !== "released" ? selected.hold : null;
+  const eta = selectedHold?.trip?.legalEtaAt ?? carrier?.nextTrip?.etaAt ?? null;
   const callsCount = carrier?.callsCount ?? calls.length;
   const loadsCount = carrier?.loadsCount ?? null;
 

@@ -91,7 +91,7 @@ function toOperatorLoad(row: LoadRow, now: Date): OperatorLoad | null {
 }
 
 // A carrier's key from a calls row: tagged so an MC, a DOT and a call id with equal digits never merge.
-const carrierKey = (alias: "c" | "t") =>
+export const carrierKey = (alias: "c" | "t") =>
   `COALESCE('mc:' || ${alias}.mc_number, 'dot:' || ${alias}.dot_number, 'call:' || ${alias}.call_id)`;
 
 const sinceBounds: Record<OperatorCarriersQuery["since"], SqlStatement> = {
@@ -110,7 +110,7 @@ const deskDayStart = (day: string, plusDays: number) =>
 
 // The `created_at` condition of the window: a picked range runs from the start of `from` to the
 // start of the day after `to`, so both days are whole.
-function windowCondition(inboxWindow: InboxWindow): string {
+export function windowCondition(inboxWindow: InboxWindow): string {
   if (inboxWindow.from !== undefined && inboxWindow.to !== undefined) {
     return `c.created_at >= ` + deskDayStart(inboxWindow.from, 0) + ` AND c.created_at < ` + deskDayStart(inboxWindow.to, 1);
   }
@@ -126,7 +126,7 @@ const sortOrders: Record<OperatorCarriersQuery["sort"], string> = {
 };
 
 // LIKE wildcards in the search box are literal characters.
-const containsPattern = (q: string) => `%${q.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_")}%`;
+export const containsPattern = (q: string) => `%${q.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_")}%`;
 
 // The CTEs up to `staged`: one row per carrier with its stage. A carrier is every call sharing
 // carrierKey inside the window (`since` or the day range), narrowed to one carrier when `key` is given. needs_approval

@@ -69,6 +69,7 @@ const callJson = {
     posted_rate: 2100,
     max_buy: 2500,
     booking_ref: "BR-1",
+    trip: null,
     created_at: "2026-09-29T15:09:00+00:00",
   },
   events: [{ tool: "confirm_hold", summary: "booked", status: "ok", created_at: "2026-09-29T15:10:00+00:00" }],

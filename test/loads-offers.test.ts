@@ -1,9 +1,11 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Config } from "../src/config.ts";
 import { testConfig } from "./test-config.ts";
+import type { TripSnapshot } from "../src/domain/trip-estimate.ts";
 import type { LoadDetail, LoadSummary } from "../src/infra/tms/codec.ts";
 import { TmsBusinessError, TmsUnavailableError } from "../src/infra/tms/errors.ts";
 import { TmsClient } from "../src/infra/tms/tms-client.ts";
+import type { TripEstimates } from "../src/infra/trip-estimator.ts";
 import { TwinClient } from "../src/infra/twin-client.ts";
 import { loadRoutes, type LoadRouteDeps } from "../src/routes/loads.ts";
 import { offerRoutes } from "../src/routes/offers.ts";
@@ -31,6 +33,9 @@ const authorized = new Map<string, number>();
 type OfferRow = { callId: string; loadId: string; round: number; carrierAsk: number; decision: string; rateToSay: number | null };
 let offers: (OfferRow & { postedRate?: number; maxBuy?: number; lane?: string[] })[] = [];
 const sqlLog: string[] = [];
+// Recorded searches, as their INSERT text; a flag makes the insert fail.
+const searchInserts: string[] = [];
+let failSearchInsert = false;
 
 const twinFetch = vi.fn<typeof fetch>(async (_input, init) => {
   const body: unknown = JSON.parse(typeof init?.body === "string" ? init.body : "{}");
@@ -57,6 +62,11 @@ const twinFetch = vi.fn<typeof fetch>(async (_input, init) => {
       return jsonResponse({ message: 'duplicate key value violates unique constraint "offers_call_id_load_id_round_key"' }, 400);
     }
     offers.push(row);
+    return jsonResponse({ command: "INSERT", rowCount: 1, rows: [], truncated: false });
+  }
+  if (text.startsWith("INSERT INTO load_searches")) {
+    if (failSearchInsert) return jsonResponse({ message: 'relation "load_searches" does not exist' }, 400);
+    searchInserts.push(text);
     return jsonResponse({ command: "INSERT", rowCount: 1, rows: [], truncated: false });
   }
   const callState = /FROM offers o WHERE o\.call_id = c\.call_id AND o\.load_id = E'([^']*)'[\s\S]*WHERE c\.call_id = E'([^']*)'/.exec(text);
@@ -98,8 +108,11 @@ const twin = new TwinClient({ apiKey: "k", fetch: twinFetch });
 const tmsClient = (fake: FakeTms) =>
   new TmsClient({ host: "127.0.0.1", port: fake.port, token: config.TMS_TOKEN, maxAttempts: 1, attemptDeadlineMs: 500 });
 
-function serverWith(tms: LoadRouteDeps["tms"]) {
-  return buildServer(config, { agentRoutes: [loadRoutes({ tms, twin }), offerRoutes({ tms, twin })], operatorRoutes: [] });
+// No vendor keys in tests: the default estimator answers null, like a deployment without EIA and ORS.
+const noTrips: TripEstimates = { estimate: async () => null };
+
+function serverWith(tms: LoadRouteDeps["tms"], trips: TripEstimates = noTrips) {
+  return buildServer(config, { agentRoutes: [loadRoutes({ tms, twin, trips }), offerRoutes({ tms, twin })], operatorRoutes: [] });
 }
 
 let fake: FakeTms;
@@ -121,6 +134,8 @@ beforeEach(() => {
   authorized.clear();
   offers = [];
   sqlLog.length = 0;
+  searchInserts.length = 0;
+  failSearchInsert = false;
   twinFetch.mockClear();
 });
 
@@ -185,6 +200,7 @@ describe("POST /v1/loads/search", () => {
       pieces: 25,
       dims: "41ft x 8ft x 9ft",
       notes: "",
+      feasibility: null,
     });
     expectNoMaxBuy(res.body);
     const [query] = fake.requests.slice(-3);
@@ -206,6 +222,50 @@ describe("POST /v1/loads/search", () => {
     expect(fake.requests.at(-3)).not.toContain("DEST_");
   });
 
+  it("searches every equipment type when the caller says any, anything or all", async () => {
+    for (const equipmentType of ["any", "Anything", " ALL ", ""]) {
+      const res = await search({ callId: "call-ok", originCity: "Savannah", originState: "GA", equipmentType });
+      expect(res.json()).toMatchObject({ status: "ok" });
+      const query = fake.requests.findLast((line) => line.includes("CMD:LOAD_QUERY"));
+      expect(query).toContain("ORIG_CITY:Savannah|ORIG_STATE:GA|MAX_RESULTS:");
+      expect(query).not.toContain("EQTYPE");
+    }
+    const omitted = await search({ callId: "call-ok", originState: "GA" });
+    expect(omitted.json()).toMatchObject({ status: "ok" });
+  });
+
+  it("adds each pitched load's feasibility at the posted rate, estimated in parallel", async () => {
+    const tms = {
+      queryLoads: vi.fn(async () => ["LD1", "LD2", "LD3"].map((id) => summary(id, "OPEN"))),
+      getLoad: vi.fn(async (loadId: string) => detail(loadId, "OPEN")),
+    };
+    // Each estimate waits until all three have started, so a sequential search would never finish.
+    let started = 0;
+    let allStarted: () => void = () => {};
+    const together = new Promise<void>((resolve) => (allStarted = resolve));
+    const outcomes = [async () => ({ feasibility: "team" }) as TripSnapshot, async () => null, async () => ({ feasibility: "solo" }) as TripSnapshot];
+    const estimate = vi.fn<TripEstimates["estimate"]>(async () => {
+      const outcome = outcomes[started] ?? (async () => null);
+      started += 1;
+      if (started === 3) allStarted();
+      await together;
+      return outcome();
+    });
+    const target = serverWith(tms, { estimate });
+    const res = await search({ callId: "call-ok", originState: "GA" }, target);
+    await target.close();
+    const body = res.json();
+    expect(body.status).toBe("ok");
+    // LD2 got no estimate; the search still pitches it, without feasibility.
+    expect(body.loads.map((l: { loadId: string; feasibility: string | null }) => [l.loadId, l.feasibility])).toEqual([
+      ["LD1", "team"],
+      ["LD2", null],
+      ["LD3", "solo"],
+    ]);
+    expect(estimate.mock.calls.map(([trip]) => trip.rate)).toEqual([2000, 2000, 2000]);
+    expectNoMaxBuy(res.body);
+  });
+
   it("refuses an unverified or unknown call without touching the TMS", async () => {
     const before = fake.requests.length;
     for (const callId of ["call-unverified", "call-unknown"]) {
@@ -215,8 +275,8 @@ describe("POST /v1/loads/search", () => {
     expect(fake.requests.length).toBe(before);
   });
 
-  it("keeps only OPEN loads, caps the pitch at 3, and fetches details only for those", async () => {
-    const statuses = ["BOOKED", "OPEN", "COVERED", "OPEN", "OPEN", "OPEN", "open"];
+  it("keeps only OPEN loads, reads up to 6 candidates, and caps the pitch at 3", async () => {
+    const statuses = ["BOOKED", "OPEN", "COVERED", "OPEN", "OPEN", "OPEN", "open", "OPEN", "OPEN", "OPEN", "OPEN"];
     const tms = {
       queryLoads: vi.fn(async () => statuses.map((status, i) => summary(`LD${i}`, status))),
       getLoad: vi.fn(async (loadId: string) => detail(loadId, loadId === "LD3" ? "BOOKED" : "OPEN")),
@@ -224,10 +284,58 @@ describe("POST /v1/loads/search", () => {
     const target = serverWith(tms);
     const res = await search({ callId: "call-ok", originZip: "31401", equipmentType: "DRY_VAN" }, target);
     await target.close();
-    expect(tms.getLoad.mock.calls.map(([id]) => id)).toEqual(["LD1", "LD3", "LD4"]);
+    expect(tms.getLoad.mock.calls.map(([id]) => id)).toEqual(["LD1", "LD3", "LD4", "LD5", "LD7", "LD8"]);
     // LD3 changed status between query and detail, so it is dropped rather than pitched.
-    expect(res.json().loads.map((l: { loadId: string }) => l.loadId)).toEqual(["LD1", "LD4"]);
+    expect(res.json().loads.map((l: { loadId: string }) => l.loadId)).toEqual(["LD1", "LD4", "LD5"]);
     expectNoMaxBuy(res.body);
+  });
+
+  it("never pitches a load no crew can deliver on time, and keeps one without an estimate", async () => {
+    const ids = ["LD1", "LD2", "LD3", "LD4", "LD5", "LD6"];
+    const tms = {
+      queryLoads: vi.fn(async () => ids.map((id) => summary(id, "OPEN"))),
+      getLoad: vi.fn(async (loadId: string) => detail(loadId, "OPEN")),
+    };
+    const outcomes: Record<string, TripSnapshot["feasibility"] | null> = {
+      LD1: "impossible",
+      LD2: null,
+      LD3: "impossible",
+      LD4: "team",
+      LD5: "solo",
+      LD6: "solo",
+    };
+    // Estimates start in candidate order, so the nth call is the nth load.
+    let started = 0;
+    const estimate = vi.fn<TripEstimates["estimate"]>(async () => {
+      const feasibility = outcomes[ids[started++] ?? ""] ?? null;
+      return feasibility === null ? null : ({ feasibility } as TripSnapshot);
+    });
+    const target = serverWith(tms, { estimate });
+    const res = await search({ callId: "call-ok", originState: "GA" }, target);
+    await target.close();
+    expect(res.json().status).toBe("ok");
+    expect(res.json().loads.map((l: { loadId: string; feasibility: string | null }) => [l.loadId, l.feasibility])).toEqual([
+      ["LD2", null],
+      ["LD4", "team"],
+      ["LD5", "solo"],
+    ]);
+    expect(estimate).toHaveBeenCalledTimes(6);
+  });
+
+  it("answers no_loads when every candidate's delivery window is too tight", async () => {
+    const tms = {
+      queryLoads: vi.fn(async () => ["LD1", "LD2"].map((id) => summary(id, "OPEN"))),
+      getLoad: vi.fn(async (loadId: string) => detail(loadId, "OPEN")),
+    };
+    const estimate = vi.fn<TripEstimates["estimate"]>(async () => ({ feasibility: "impossible" }) as TripSnapshot);
+    const target = serverWith(tms, { estimate });
+    const res = await search({ callId: "call-ok", originState: "GA" }, target);
+    await target.close();
+    expect(res.json()).toEqual({
+      status: "no_loads",
+      message: "The loads I have on that lane right now have delivery windows too tight to run legally.",
+      loads: [],
+    });
   });
 
   it("drops a load the TMS no longer finds and answers no_loads when none are open", async () => {
@@ -255,7 +363,7 @@ describe("POST /v1/loads/search", () => {
     await target.close();
     // The caller's own hold stays visible; only another call's hold hides a load.
     expect(res.json().loads.map((l: { loadId: string }) => l.loadId)).toEqual(["LD2", "LD3", "LD4"]);
-    expect(tms.getLoad.mock.calls.map(([id]) => id)).toEqual(["LD2", "LD3", "LD4"]);
+    expect(tms.getLoad.mock.calls.map(([id]) => id)).toEqual(["LD2", "LD3", "LD4", "LD5"]);
     const holdQueries = sqlLog.filter((text) => text.includes("FROM holds"));
     expect(holdQueries).toEqual([
       "SELECT load_id FROM holds WHERE load_id IN (E'LD1', E'LD2', E'LD3', E'LD4', E'LD5') AND status <> 'released' AND call_id <> E'call-ok'",
@@ -275,6 +383,23 @@ describe("POST /v1/loads/search", () => {
     await target.close();
     expect(res.json()).toMatchObject({ status: "ok", message: "I found one open load that fits." });
     expect(res.json().loads.map((l: { loadId: string }) => l.loadId)).toEqual(["LD2"]);
+  });
+
+  it("records no search when nothing was pitched and some details could not be read", async () => {
+    const tms = {
+      queryLoads: vi.fn(async () => [summary("LD1", "OPEN"), summary("LD2", "OPEN")]),
+      getLoad: vi.fn(async (loadId: string) => {
+        if (loadId === "LD1") throw new TmsUnavailableError("LOAD_GET", 3, false, "timeout");
+        return detail(loadId, "OPEN");
+      }),
+    };
+    // The one load that was read cannot be delivered on time, so nothing is pitched.
+    const target = serverWith(tms, { estimate: async () => ({ feasibility: "impossible" }) as TripSnapshot });
+    const res = await search({ callId: "call-ok", originState: "GA" }, target);
+    await target.close();
+    expect(res.json()).toMatchObject({ status: "no_loads" });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(searchInserts).toEqual([]);
   });
 
   it("answers tms_unavailable when no load detail could be read", async () => {
@@ -311,6 +436,51 @@ describe("POST /v1/loads/search", () => {
       expect(res.statusCode).toBe(200);
       expect(res.json()).toMatchObject({ status: "invalid_request", loads: [] });
     }
+  });
+
+  it("records a search that reached the board with its pitched and dropped counts", async () => {
+    const tms = {
+      queryLoads: vi.fn(async () => ["LD1", "LD2"].map((id) => summary(id, "OPEN"))),
+      getLoad: vi.fn(async (loadId: string) => detail(loadId, "OPEN")),
+    };
+    // Estimates start in candidate order: the first load is impossible, the second deliverable.
+    let started = 0;
+    const estimate = vi.fn<TripEstimates["estimate"]>(async () => ({ feasibility: started++ === 0 ? "impossible" : "solo" }) as TripSnapshot);
+    const target = serverWith(tms, { estimate });
+    const res = await search({ callId: "call-ok", originState: "TX", destinationState: "GA", equipmentType: "REEFER" }, target);
+    await target.close();
+    expect(res.json()).toMatchObject({ status: "ok" });
+    await vi.waitFor(() => expect(searchInserts).toHaveLength(1));
+    expect(searchInserts[0]).toMatch(
+      /VALUES \(E'call-ok', NULL, E'TX', NULL, NULL, E'GA', NULL, E'REEFER', NULL, 1, 1\)$/,
+    );
+  });
+
+  it("records a search with no match as zero results and any equipment as NULL", async () => {
+    const tms = { queryLoads: vi.fn(async () => []), getLoad: vi.fn() };
+    const target = serverWith(tms);
+    const res = await search({ callId: "call-ok", originState: "TX", equipmentType: "any" }, target);
+    await target.close();
+    expect(res.json()).toMatchObject({ status: "no_loads" });
+    await vi.waitFor(() => expect(searchInserts).toHaveLength(1));
+    expect(searchInserts[0]).toMatch(/VALUES \(E'call-ok', NULL, E'TX', NULL, NULL, NULL, NULL, NULL, NULL, 0, 0\)$/);
+  });
+
+  it("records nothing when the board or the call lookup is unavailable, or the call is not verified", async () => {
+    await withFake(["empty-close"], (target) => search({ callId: "call-ok", originState: "GA", equipmentType: "DRY_VAN" }, target));
+    await search({ callId: "call-unverified", originState: "GA" });
+    // Give a stray fire-and-forget insert the time it would need to land.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(searchInserts).toEqual([]);
+  });
+
+  it("still answers the carrier when the search cannot be recorded", async () => {
+    failSearchInsert = true;
+    const tms = { queryLoads: vi.fn(async () => []), getLoad: vi.fn() };
+    const target = serverWith(tms);
+    const res = await search({ callId: "call-ok", originState: "TX" }, target);
+    await target.close();
+    expect(res.json()).toMatchObject({ status: "no_loads" });
   });
 
   it("stays behind the agent key", async () => {

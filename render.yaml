@@ -17,6 +17,13 @@ services:
         sync: false
       - key: HAPPYROBOT_API_KEY
         sync: false
+      # Trip estimates; without both the agent pitches loads without diesel, tolls or feasibility.
+      # EIA: free key from the registration at https://www.eia.gov/opendata/register.php (api.eia.gov).
+      - key: EIA_API_KEY
+        sync: false
+      # ORS: free Standard plan key from https://openrouteservice.org/dev/#/signup.
+      - key: ORS_API_KEY
+        sync: false
       - key: AGENT_API_KEY
         sync: false
       - key: OPERATOR_API_KEY

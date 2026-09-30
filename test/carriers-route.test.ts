@@ -46,10 +46,12 @@ beforeEach(() => {
   twinFetch.mockImplementation(async () => jsonResponse({ command: "INSERT", rowCount: 1, rows: [], truncated: false }));
 });
 
-function serverWith(fetchImpl: typeof fetch) {
+// Live mode by default, so the masked contact is the one Census has on file.
+function serverWith(fetchImpl: typeof fetch, routeConfig: Config = { ...config, OTP_DELIVERY_MODE: "live" }) {
   return buildServer(config, {
     agentRoutes: [
       carrierRoutes({
+        config: routeConfig,
         fmcsa: new FmcsaClient({ webKey: config.FMCSA_API_KEY, fetch: fetchImpl }),
         census: new CensusClient({ fetch: fetchImpl }),
         twin: new TwinClient({ apiKey: "k", fetch: twinFetch }),
@@ -90,6 +92,13 @@ describe("POST /v1/carriers/verify", () => {
     expect(lastSql()).toContain("VALUES (E'call-1', E'80806', E'135797', TRUE, FALSE, E'J B HUNT TRANSPORT INC')");
     expect(lastSql()).toContain("carrier_name = EXCLUDED.carrier_name");
     expect(lastSql()).toContain("ON CONFLICT (call_id) DO UPDATE");
+  });
+
+  it("describes the demo contacts in demo mode, since that is where codes go", async () => {
+    const demo = serverWith(vendorFetch(), config);
+    const res = await verify({ callId: "call-demo", mcNumber: "MC-135797" }, demo);
+    expect(res.json()).toMatchObject({ maskedContact: { email: "d***@e***.com", phone: "***-***-0100" } });
+    await demo.close();
   });
 
   it("resolves the MC from authority on a DOT lookup", async () => {

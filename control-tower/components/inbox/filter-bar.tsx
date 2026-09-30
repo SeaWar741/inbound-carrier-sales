@@ -1,11 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { IconType } from "react-icons";
 import { Select } from "antd";
 import { LuArrowRight, LuArrowUpDown, LuChevronDown, LuContainer, LuFlag, LuRoute, LuSearch } from "react-icons/lu";
-import { equipmentLabel } from "@/components/hold-card";
 import { inboxSorts } from "@/lib/contracts";
+import { equipmentLabel } from "@/lib/format";
 
 // The filters the inbox keeps in the URL; an empty string is "no filter" (or the adapter default).
 export type InboxFilters = {
@@ -177,9 +177,11 @@ export function FilterSelect({
   );
 }
 
+type HeaderOption = { value: string; label: string };
+
 // An antd select in the list header: a colored leading icon, search by label, and a clear button.
-// An empty value shows the placeholder.
-function HeaderSelect({
+// An empty value shows the placeholder. `optionRender` draws a menu row, for options with an icon.
+export function HeaderSelect({
   label,
   placeholder = label,
   grow = 1,
@@ -188,6 +190,7 @@ function HeaderSelect({
   value,
   onChange,
   options,
+  optionRender,
 }: {
   label: string;
   placeholder?: string;
@@ -197,7 +200,8 @@ function HeaderSelect({
   tone: string;
   value: string;
   onChange: (value: string) => void;
-  options: { value: string; label: string }[];
+  options: HeaderOption[];
+  optionRender?: (option: HeaderOption) => ReactNode;
 }) {
   return (
     <Select
@@ -208,6 +212,7 @@ function HeaderSelect({
       value={value === "" ? undefined : value}
       onChange={(next?: string) => onChange(next ?? "")}
       options={options}
+      optionRender={optionRender && ((option) => optionRender(option.data as HeaderOption))}
       showSearch={{ optionFilterProp: "label" }}
       allowClear
       popupMatchSelectWidth={false}
@@ -218,8 +223,8 @@ function HeaderSelect({
   );
 }
 
-const equipmentOptions = equipmentCodes.map((c) => ({ value: c, label: equipmentLabel(c) }));
-const stateOptions = states.map((state) => ({ value: state, label: state }));
+export const equipmentOptions = equipmentCodes.map((c) => ({ value: c, label: equipmentLabel(c) }));
+export const stateOptions = states.map((state) => ({ value: state, label: state }));
 // Priority is the default, so picking it clears the sort back to the placeholder.
 const sortOptions = inboxSorts.map((s) => ({ value: s, label: sortLabels[s] }));
 

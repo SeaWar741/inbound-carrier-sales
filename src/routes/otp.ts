@@ -48,6 +48,11 @@ const notVerified = (status: Exclude<CheckOtpResponse["status"], "ok">, message:
   attemptsLeft,
 });
 
+const codeMessage = (code: string) => ({
+  subject: "Your verification code",
+  body: `Your carrier verification code is ${code}. It expires in ${otpTtlSeconds / 60} minutes. If you did not request it, you can ignore this message.`,
+});
+
 // Census phones are 10-digit US numbers; SMS needs E.164.
 function toE164(phone: string): string | undefined {
   const digits = phone.replace(/\D/g, "");
@@ -118,12 +123,13 @@ export function otpRoutes(deps: OtpRouteDeps): FastifyPluginAsync {
         await deps.twin.query(
           sql`UPDATE calls SET otp_hash = ${hashCode(deps.config.OTP_HASH_SECRET, callId, code)},
                 otp_expires_at = now() + ${otpTtlSeconds} * interval '1 second',
-                otp_attempts = 0, otp_sends = otp_sends + 1, otp_last_sent_at = now()
+                otp_attempts = 0, otp_sends = otp_sends + 1, otp_last_sent_at = now(),
+                otp_channel = ${channel}, otp_destination = ${destination}
               WHERE call_id = ${callId} RETURNING call_id`,
           z.unknown(),
         );
         try {
-          await deps.delivery.send(channel, destination, code);
+          await deps.delivery.send(channel, destination, codeMessage(code));
         } catch (error) {
           request.log.warn({ err: error, channel }, "otp delivery failed");
           return notSent("delivery_unavailable", messages.deliveryUnavailable);

@@ -7,6 +7,7 @@ import { FmcsaClient } from "./infra/fmcsa-client.ts";
 import { OtpDeliveryClient } from "./infra/otp-delivery-client.ts";
 import { TmsClient } from "./infra/tms/tms-client.ts";
 import { TmsHealthRecorder } from "./infra/tms/tms-health.ts";
+import { TripEstimator } from "./infra/trip-estimator.ts";
 import { TwinClient } from "./infra/twin-client.ts";
 import { requireApiKey } from "./plugins/auth.ts";
 import { recordCallEvents, type CallEventDeps } from "./plugins/call-events.ts";
@@ -17,8 +18,10 @@ import { confirmHoldRoutes, holdRoutes, releaseHoldRoutes } from "./routes/holds
 import { loadRoutes } from "./routes/loads.ts";
 import { offerRoutes } from "./routes/offers.ts";
 import { operatorInboxRoutes } from "./routes/operator-inbox.ts";
+import { operatorNetworkRoutes } from "./routes/operator-network.ts";
 import { operatorWallRoutes } from "./routes/operator.ts";
 import { otpRoutes } from "./routes/otp.ts";
+import { tripRoutes } from "./routes/trips.ts";
 
 export type RouteSets = {
   agentRoutes: FastifyPluginAsync[];
@@ -73,16 +76,19 @@ if (import.meta.main) {
     token: config.TMS_TOKEN,
     onExchange: (exchange) => tmsHealth.record(exchange),
   });
+  const trips = TripEstimator.fromConfig(config);
   const app = buildServer(config, {
     agentRoutes: [
-      carrierRoutes({ fmcsa, census, twin }),
+      carrierRoutes({ config, fmcsa, census, twin }),
       otpRoutes({ config, census, delivery, twin }),
-      loadRoutes({ tms, twin }),
+      loadRoutes({ tms, twin, trips }),
       offerRoutes({ tms, twin }),
-      holdRoutes({ tms, twin }),
+      tripRoutes({ tms, twin, trips }),
+      holdRoutes({ tms, twin, trips, delivery }),
       handoffRoutes({ twin }),
     ],
-    operatorRoutes: [confirmHoldRoutes({ tms, twin }), releaseHoldRoutes({ twin }), operatorWallRoutes({ twin, tmsHealth }), operatorInboxRoutes({ twin })],
+    operatorRoutes: [confirmHoldRoutes({ tms, twin, delivery }), releaseHoldRoutes({ twin, delivery }), operatorWallRoutes({ twin, tmsHealth }), operatorInboxRoutes({ twin }), operatorNetworkRoutes({ twin, tms })],
   }, { twin });
+  if (!config.EIA_API_KEY || !config.ORS_API_KEY) app.log.warn("trip estimates disabled: EIA_API_KEY/ORS_API_KEY not set");
   await app.listen({ host: "0.0.0.0", port: config.PORT });
 }

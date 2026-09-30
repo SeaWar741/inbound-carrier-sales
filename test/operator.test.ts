@@ -18,6 +18,20 @@ const wallRow = {
   autonomy: "human",
 };
 
+// The hold's trip snapshot as stored in holds.trip (jsonb), passed through to the wall as is.
+const trip = {
+  rate: 2300,
+  dieselUsd: 620,
+  tollsUsd: 45,
+  carrierNetUsd: 1635,
+  feasibility: "team",
+  legalEtaAt: "2026-10-04T20:00:00.000Z",
+  legalHours: 30.5,
+  netPerHour: 54,
+  dieselPerGal: 3.72,
+  tollShare: 0.12,
+};
+
 // Call rows as Twin nests them in json: nested timestamps with an offset.
 const callRows = [
   {
@@ -78,6 +92,7 @@ const callRows = [
       posted_rate: 2100,
       max_buy: 2500,
       booking_ref: "BR-1",
+      trip,
       created_at: "2026-09-29T15:09:00+00:00",
     },
     events: [
@@ -193,8 +208,10 @@ describe("toWallCall", () => {
         { loadId: "LD00881", round: 2, carrierAsk: 2300, decision: "accept", rateToSay: 2300, postedRate: 2100, maxBuy: 2500, lane },
         { loadId: "LD00848", round: 1, lane: null },
       ],
-      hold: { status: "booked", agreedRate: 2300, maxBuy: 2500, bookingRef: "BR-1", lane, createdAt: "2026-09-29T15:09:00.000Z" },
+      hold: { status: "booked", agreedRate: 2300, maxBuy: 2500, bookingRef: "BR-1", lane, trip, createdAt: "2026-09-29T15:09:00.000Z" },
     });
+    // A snapshot stored before lateness and the appointment were recorded reads as on time with none.
+    expect(booked?.hold?.trip).toMatchObject({ lateHours: 0, deliveryAt: null });
     expect(booked?.events.map((e) => e.tool)).toEqual(["verify_carrier", "create_hold"]);
     expect(booked?.interventions).toEqual([
       { kind: "authorization", loadId: "LD00881", amountUsd: 50, message: "Authorize +$50", createdAt: "2026-09-29T15:07:00.000Z" },
