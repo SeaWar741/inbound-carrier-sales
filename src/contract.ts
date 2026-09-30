@@ -1,7 +1,9 @@
 import { z } from "zod";
-import { otpDigits } from "./constants.ts";
+import { maxAuthorizationUsd, otpDigits } from "./constants.ts";
+import { callRisks, callStages } from "./domain/call-stage.ts";
+import { tripStatuses } from "./domain/trip.ts";
 import { cityInput, equipmentInput, loadIdInput, stateInput, zipInput } from "./infra/tms/codec.ts";
-import { holdStatuses } from "./infra/twin-schemas.ts";
+import { autonomyModes, holdStatuses } from "./infra/twin-schemas.ts";
 
 // Request and response schemas for the agent and operator APIs.
 
@@ -246,3 +248,235 @@ export const releaseHoldResponse = z.object({
   reason: z.string().nullable(),
 });
 export type ReleaseHoldResponse = z.infer<typeof releaseHoldResponse>;
+
+// The reason is free text from the agent; a blank one is the same as none, and a long one is
+// cut rather than rejected so the handoff never fails over wording.
+export const requestHumanBody = z.object({
+  callId,
+  reason: optionalField(z.string().trim().transform((value) => value.slice(0, 200))),
+});
+export type RequestHumanBody = z.output<typeof requestHumanBody>;
+
+export const requestHumanResponse = z.object({
+  status: z.enum(["transferring", "service_unavailable", "invalid_request"]),
+  message: z.string(),
+});
+export type RequestHumanResponse = z.infer<typeof requestHumanResponse>;
+
+const wallPlace = z.object({ city: z.string(), state: z.string(), zip: z.string() });
+
+// The load's lane as stored with the offer; null for offers recorded before lanes were kept.
+// pickupAt is the TMS wall clock, YYYYMMDDHHMMSS with no timezone.
+const wallLane = z.object({
+  origin: wallPlace,
+  destination: wallPlace,
+  equipment: z.string(),
+  miles: z.number().int(),
+  pickupAt: z.string(),
+});
+export type WallLane = z.infer<typeof wallLane>;
+
+// Operator only: posted rate and max buy are shown here and nowhere on the agent API.
+const wallOffer = z.object({
+  loadId: z.string(),
+  round: z.number().int(),
+  carrierAsk: z.number(),
+  decision: z.enum(["accept", "counter", "reject"]),
+  rateToSay: z.number().nullable(),
+  postedRate: z.number().nullable(),
+  maxBuy: z.number().nullable(),
+  lane: wallLane.nullable(),
+  createdAt: z.iso.datetime(),
+});
+
+const wallHold = z.object({
+  holdId: z.string(),
+  loadId: z.string(),
+  status: z.enum(holdStatuses),
+  agreedRate: z.number(),
+  postedRate: z.number().nullable(),
+  maxBuy: z.number().nullable(),
+  bookingRef: z.string().nullable(),
+  // From the latest offer of the same call on this load.
+  lane: wallLane.nullable(),
+  createdAt: z.iso.datetime(),
+});
+
+const wallEvent = z.object({
+  tool: z.string(),
+  summary: z.string().nullable(),
+  status: z.string().nullable(),
+  createdAt: z.iso.datetime(),
+});
+
+export const interventionKinds = ["whisper", "authorization", "listen", "takeover"] as const;
+
+const wallIntervention = z.object({
+  kind: z.enum(interventionKinds),
+  loadId: z.string().nullable(),
+  amountUsd: z.number().int().nullable(),
+  message: z.string().nullable(),
+  createdAt: z.iso.datetime(),
+});
+
+export const wallCall = z.object({
+  callId: z.string(),
+  mcNumber: z.string().nullable(),
+  dotNumber: z.string().nullable(),
+  eligible: z.boolean(),
+  verified: z.boolean(),
+  otp: z.object({ attempts: z.number().int(), locked: z.boolean(), expiresAt: z.iso.datetime().nullable() }),
+  stage: z.enum(callStages),
+  round: z.number().int().nullable(),
+  risk: z.enum(callRisks),
+  riskReason: z.string().nullable(),
+  // Oldest first, the latest round of each load.
+  offers: z.array(wallOffer),
+  hold: wallHold.nullable(),
+  // Oldest first, the last ones of the call only.
+  events: z.array(wallEvent),
+  // Oldest first, every operator action on the call.
+  interventions: z.array(wallIntervention),
+  createdAt: z.iso.datetime(),
+});
+export type WallCall = z.infer<typeof wallCall>;
+
+export const tmsHealth = z.object({
+  since: z.iso.datetime(),
+  attempts: z.number().int(),
+  retries: z.number().int(),
+  faultsAbsorbed: z.number().int(),
+  latencySamples: z.number().int(),
+  latencyP50Ms: z.number().nullable(),
+  latencyP95Ms: z.number().nullable(),
+});
+
+export const operatorWallResponse = z.object({
+  status: z.literal("ok"),
+  day: z.iso.date(),
+  counters: z.object({
+    calls: z.number().int(),
+    booked: z.number().int(),
+    // Refused at verification: not eligible, or OTP locked. A fact, not a fraud verdict.
+    blocked: z.number().int(),
+    dollarsGenerated: z.number(),
+    marginSaved: z.number(),
+  }),
+  tmsHealth,
+  // "human": a rep confirms every hold. "autonomous": create_hold books right away.
+  autonomy: z.enum(autonomyModes),
+});
+export type OperatorWallResponse = z.infer<typeof operatorWallResponse>;
+
+export const operatorWallUnavailableResponse = z.object({ status: z.literal("service_unavailable"), message: z.string() });
+
+// An authorization is dollars on top of one load's scheduled counter; evaluateOffer caps it at that load's max buy.
+export const createInterventionParams = z.object({ callId: z.string().trim().min(1).max(128) });
+export const createInterventionBody = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal("authorization"),
+    loadId: loadIdInput,
+    amountUsd: z.number().int().positive().max(maxAuthorizationUsd),
+    message: z.string().trim().max(500).optional(),
+  }),
+  z.strictObject({ kind: z.enum(["whisper", "listen", "takeover"]), message: z.string().trim().max(500).optional() }),
+]);
+export type CreateInterventionBody = z.infer<typeof createInterventionBody>;
+export const createInterventionResponse = z.object({ status: z.literal("recorded"), id: z.uuid() });
+
+export const setAutonomyBody = z.strictObject({ mode: z.enum(autonomyModes) });
+export const setAutonomyResponse = z.object({ status: z.literal("ok"), mode: z.enum(autonomyModes) });
+
+// Booked loads around now: ETA in the last 24 h through pickups in the next 7 days, earliest pickup first.
+// pickupAt and etaAt are instants; status is decided by the adapter (tripSql), progress is 0..1 at response time.
+const operatorLoad = z.object({
+  holdId: z.string(),
+  loadId: z.string(),
+  callId: z.string(),
+  mcNumber: z.string().nullable(),
+  // The FMCSA name at verification; null for calls verified before it was stored.
+  carrierName: z.string().nullable(),
+  agreedRate: z.number(),
+  lane: wallLane,
+  pickupAt: z.iso.datetime(),
+  etaAt: z.iso.datetime(),
+  status: z.enum(tripStatuses),
+  progress: z.number().min(0).max(1),
+});
+export type OperatorLoad = z.infer<typeof operatorLoad>;
+
+export const operatorLoadsResponse = z.object({ status: z.literal("ok"), loads: z.array(operatorLoad) });
+export type OperatorLoadsResponse = z.infer<typeof operatorLoadsResponse>;
+
+export const carrierStages = ["live", "negotiating", "needs_approval", "booked", "in_transit", "arrived", "lost"] as const;
+export type CarrierStage = (typeof carrierStages)[number];
+export const inboxTabs = ["needs_you", "live", "active", "closed", "all"] as const;
+export const inboxSorts = ["priority", "recent", "rate", "pickup"] as const;
+
+// A repeated key (`stage=live&stage=booked`) arrives as an array and a single one as a string.
+// Empty entries are dropped, so `stage=` is no filter.
+const listParam = <T extends z.ZodType>(item: T, max: number) =>
+  z.preprocess(
+    (value) =>
+      (Array.isArray(value) ? value : value === undefined ? [] : [value]).filter((v) => !(typeof v === "string" && v.trim() === "")),
+    z.array(item).max(max),
+  );
+
+export const operatorCarriersQuery = z.object({
+  tab: z.enum(inboxTabs).default("all"),
+  stage: listParam(z.enum(carrierStages), carrierStages.length),
+  equipment: listParam(equipmentInput, 10),
+  origin: optionalField(stateInput),
+  destination: optionalField(stateInput),
+  // today is the desk's (Chicago) calendar day, like the wall; 7d and 30d are rolling windows.
+  since: z.enum(["today", "7d", "30d"]).default("7d"),
+  // MC, DOT, carrier name or a load id the carrier was offered.
+  q: optionalField(z.string().trim().max(64)),
+  sort: z.enum(inboxSorts).default("priority"),
+  page: z.coerce.number().int().min(1).max(10_000).default(1),
+  // Call ids HappyRobot reports as running; only the tower knows which calls are live.
+  live: listParam(z.string().trim().min(1).max(128), 200),
+});
+export type OperatorCarriersQuery = z.output<typeof operatorCarriersQuery>;
+
+const operatorCarrier = z.object({
+  // 'mc:<mc>', else 'dot:<dot>', else 'call:<call id>' of the carrier's calls.
+  key: z.string(),
+  mcNumber: z.string().nullable(),
+  dotNumber: z.string().nullable(),
+  // The latest FMCSA name stored on one of its calls; null when none was stored.
+  carrierName: z.string().nullable(),
+  // Calls and distinct offered loads inside the `since` window.
+  callsCount: z.number().int(),
+  loadsCount: z.number().int(),
+  lastActivityAt: z.iso.datetime(),
+  carrierStage: z.enum(carrierStages),
+  // The latest call is live and asked for a human.
+  needsHuman: z.boolean(),
+  // The trip of the carrier's latest booked hold; times are null when its load has no lane stored.
+  nextTrip: z
+    .object({ pickupAt: z.iso.datetime().nullable(), etaAt: z.iso.datetime().nullable(), status: z.enum(tripStatuses).nullable() })
+    .nullable(),
+  latestCall: wallCall,
+});
+export type OperatorCarrier = z.infer<typeof operatorCarrier>;
+
+export const operatorCarriersResponse = z.object({
+  status: z.literal("ok"),
+  rows: z.array(operatorCarrier),
+  // Carriers in the selected tab after the filters; counts are per tab after the same filters.
+  total: z.number().int(),
+  page: z.number().int(),
+  pageSize: z.number().int(),
+  counts: z.object({ needsYou: z.number().int(), live: z.number().int(), active: z.number().int(), closed: z.number().int() }),
+});
+export type OperatorCarriersResponse = z.infer<typeof operatorCarriersResponse>;
+
+export const operatorCarrierCallsParams = z.object({ key: z.string().trim().min(1).max(128) });
+// The carrier summary reads the same window and live calls as the list, so it matches the carrier's row.
+export const operatorCarrierCallsQuery = operatorCarriersQuery.pick({ since: true, live: true });
+export type OperatorCarrierCallsQuery = z.output<typeof operatorCarrierCallsQuery>;
+// Newest call first; an unknown key answers an empty list. The carrier is its list row in the
+// `since` window, null when it has no call there.
+export const operatorCarrierCallsResponse = z.object({ status: z.literal("ok"), calls: z.array(wallCall), carrier: operatorCarrier.nullable() });
+export type OperatorCarrierCallsResponse = z.infer<typeof operatorCarrierCallsResponse>;

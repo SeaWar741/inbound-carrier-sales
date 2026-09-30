@@ -3,3 +3,6 @@ node_modules/
 !.env.example
 coverage/
 .DS_Store
+
+# local code graph output, never committed
+graphify-out/

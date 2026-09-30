@@ -106,7 +106,26 @@ const tools: ToolSpec[] = [
     ],
     body: { loadId: "load_id", agreedRate: "agreed_rate" },
   },
+  {
+    name: "request_human",
+    exposedFields: ["status", "message"],
+    description: "Hand the call to a senior rep. Call it when the carrier asks for a human or a senior rep.",
+    path: "/v1/calls/request-human",
+    waitMessage: "One moment.",
+    parameters: [{ name: "reason", description: "Why the carrier wants a human, in a few words, if they said", required: false }],
+    body: { reason: "reason" },
+  },
 ];
+
+// Signals let a senior rep watching the call steer the agent mid call. The platform accepts
+// this field on the agent node, but the SDK does not type it, so it is set on the plain node.
+const agentSignalsConfig = { enabled: true, shouldRespondOnSignal: true, customTopics: [] as string[] };
+
+function withAgentSignals(nodes: NodeInput[], agent: NodeRef): NodeInput[] {
+  return nodes.map((node, index) =>
+    index === agent.__index ? { ...node, configuration: { ...node.configuration, agentSignalsConfig } } : node,
+  );
+}
 
 // The adapter keys every call by the HappyRobot run id.
 const runId = variable("current", "run_id");
@@ -139,7 +158,7 @@ export function buildAgent(options: AgentOptions): {
 } {
   const wf = new WorkflowBuilder("inbound-carrier-sales");
   const trigger = aiWebCall(wf, "web_call", { params: [] });
-  const { prompt } = aiAgentInbound(wf, "carrier_sales_agent", trigger, {
+  const { agent, prompt } = aiAgentInbound(wf, "carrier_sales_agent", trigger, {
     agent: {
       name: text("Pablo"),
       languages: [{ type: "static", static: { id: "en", name: "English" } }],
@@ -153,7 +172,7 @@ export function buildAgent(options: AgentOptions): {
   for (const spec of tools) addTool(wf, prompt, spec, options);
   return {
     name: wf.name,
-    nodes: wf.toNodes(),
+    nodes: withAgentSignals(wf.toNodes(), agent),
     exposedToolFields: Object.fromEntries(tools.map((t) => [t.name, t.exposedFields])),
     // One row per completed call with every variable the run produced (transcript, tool results).
     runDumpTable: "call_log",

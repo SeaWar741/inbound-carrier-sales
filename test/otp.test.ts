@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { z } from "zod";
-import type { Config } from "../src/config.ts";
+import { loadConfig, type Config } from "../src/config.ts";
 import { checkCode, generateCode, hashCode } from "../src/domain/otp.ts";
 import type { SqlStatement } from "../src/infra/twin-client.ts";
 import { otpRoutes, type OtpRouteDeps } from "../src/routes/otp.ts";
@@ -104,6 +104,21 @@ const eligibleCall = (): CallState => ({
   verified: false,
 });
 
+describe("OTP_FIXED_CODE config gate", () => {
+  const env = (overrides: Record<string, string>) =>
+    Object.fromEntries(Object.entries({ ...testConfig, PORT: "8080", ...overrides }).map(([k, v]) => [k, String(v)]));
+
+  it("is accepted in demo mode against a local fake TMS", () => {
+    expect(loadConfig(env({ OTP_FIXED_CODE: "424242" })).OTP_FIXED_CODE).toBe("424242");
+    expect(loadConfig(env({ OTP_FIXED_CODE: "424242", TMS_HOST: "localhost" })).OTP_FIXED_CODE).toBe("424242");
+  });
+
+  it("refuses to boot against a real TMS host or in live mode", () => {
+    expect(() => loadConfig(env({ OTP_FIXED_CODE: "424242", TMS_HOST: "tms.example.com" }))).toThrow(/OTP_FIXED_CODE/);
+    expect(() => loadConfig(env({ OTP_FIXED_CODE: "424242", OTP_DELIVERY_MODE: "live" }))).toThrow(/OTP_FIXED_CODE/);
+  });
+});
+
 describe("OTP routes", () => {
   const calls = new Map<string, CallState>();
   const { twin, statements, hooks } = fakeTwin(calls);
@@ -131,6 +146,7 @@ describe("OTP routes", () => {
       mcs150Date: null,
     });
     routeConfig.OTP_DELIVERY_MODE = "demo";
+    delete routeConfig.OTP_FIXED_CODE;
     delete hooks.beforeVerify;
   });
 
@@ -146,6 +162,14 @@ describe("OTP routes", () => {
     expect(calls.get("call-1")?.otpHash).toBe(hashCode(testConfig.OTP_HASH_SECRET, "call-1", sentCode()));
   });
 
+  it("sends the pinned code when OTP_FIXED_CODE is set", async () => {
+    routeConfig.OTP_FIXED_CODE = "424242";
+    calls.set("call-1", eligibleCall());
+    await post("/v1/otp/send", { callId: "call-1", channel: "email" });
+    expect(send).toHaveBeenCalledWith("email", "demo@example.com", "424242");
+    expect(calls.get("call-1")?.otpHash).toBe(hashCode(testConfig.OTP_HASH_SECRET, "call-1", "424242"));
+  });
+
   it("uses the carrier's contact on file only in live mode", async () => {
     routeConfig.OTP_DELIVERY_MODE = "live";
     calls.set("call-1", eligibleCall());
@@ -158,6 +182,12 @@ describe("OTP routes", () => {
     expect((await post("/v1/otp/send", { callId: "call-1", channel: "email" })).json()).toMatchObject({ status: "not_eligible", sent: false });
     expect((await post("/v1/otp/send", { callId: "unknown", channel: "email" })).json()).toMatchObject({ status: "not_eligible" });
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it("skips the per-DOT limit only with a fixed code", async () => {
+    routeConfig.OTP_FIXED_CODE = "424242";
+    calls.set("call-1", { ...eligibleCall(), sendsLastHour: 3 });
+    expect((await post("/v1/otp/send", { callId: "call-1", channel: "email" })).json()).toMatchObject({ status: "ok" });
   });
 
   it("limits sends per DOT per hour", async () => {

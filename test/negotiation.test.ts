@@ -70,3 +70,25 @@ describe("evaluateOffer", () => {
     }
   });
 });
+
+describe("operator authorization", () => {
+  it("lifts the counter by the authorized amount", () => {
+    const base = evaluateOffer({ postedRate: 2000, maxBuy: 2600, carrierAsk: 5000, round: 1 });
+    const lifted = evaluateOffer({ postedRate: 2000, maxBuy: 2600, carrierAsk: 5000, round: 1, authorizedUsd: 50 });
+    expect(lifted.rateToSay).toBe((base.rateToSay ?? 0) + 50);
+  });
+
+  it("never goes past the max buy, in any round, for any amount", () => {
+    for (let round = 1; round <= 4; round++) {
+      for (const authorizedUsd of [0, 1, 50, 599, 600, 10_000]) {
+        const result = evaluateOffer({ postedRate: 2000, maxBuy: 2600, carrierAsk: 9999, round, authorizedUsd });
+        if (result.rateToSay !== null) expect(result.rateToSay).toBeLessThanOrEqual(2600);
+        expect(evaluateOffer({ postedRate: 2000, maxBuy: 2600, carrierAsk: 2601, round, authorizedUsd }).decision).not.toBe("accept");
+      }
+    }
+  });
+
+  it("never lowers the counter when the max buy sits under the posted rate", () => {
+    expect(evaluateOffer({ postedRate: 2000, maxBuy: 1900, carrierAsk: 5000, round: 1, authorizedUsd: 50 }).rateToSay).toBe(2000);
+  });
+});

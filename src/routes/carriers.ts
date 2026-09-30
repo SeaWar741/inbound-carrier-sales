@@ -98,13 +98,14 @@ export function carrierRoutes(deps: CarrierRouteDeps): FastifyPluginAsync {
             verification = verifyCarrier({ match: candidates.length === 0 ? "none" : "multiple" });
           }
 
+          const carrierName = carrier?.legalName ?? carrier?.dbaName ?? null;
           await deps.twin.query(
             // A new lookup resets identity: the OTP must be passed again for whatever carrier this is.
-            sql`INSERT INTO calls (call_id, dot_number, mc_number, eligible, verified)
-                VALUES (${callId}, ${resolvedDot}, ${resolvedMc}, ${verification.eligible}, FALSE)
+            sql`INSERT INTO calls (call_id, dot_number, mc_number, eligible, verified, carrier_name)
+                VALUES (${callId}, ${resolvedDot}, ${resolvedMc}, ${verification.eligible}, FALSE, ${carrierName})
                 ON CONFLICT (call_id) DO UPDATE SET dot_number = EXCLUDED.dot_number,
                   mc_number = EXCLUDED.mc_number, eligible = EXCLUDED.eligible, verified = FALSE,
-                  otp_hash = NULL`,
+                  carrier_name = EXCLUDED.carrier_name, otp_hash = NULL`,
             z.unknown(),
           );
 
@@ -113,7 +114,7 @@ export function carrierRoutes(deps: CarrierRouteDeps): FastifyPluginAsync {
             message: messageFor(verification),
             eligible: verification.eligible,
             reasons: verification.reasons,
-            carrierName: carrier?.legalName ?? carrier?.dbaName ?? null,
+            carrierName,
             dotNumber: resolvedDot,
             mcNumber: resolvedMc,
             maskedContact: maskContact(contact),

@@ -6,13 +6,18 @@ import { CensusClient } from "./infra/census-client.ts";
 import { FmcsaClient } from "./infra/fmcsa-client.ts";
 import { OtpDeliveryClient } from "./infra/otp-delivery-client.ts";
 import { TmsClient } from "./infra/tms/tms-client.ts";
+import { TmsHealthRecorder } from "./infra/tms/tms-health.ts";
 import { TwinClient } from "./infra/twin-client.ts";
 import { requireApiKey } from "./plugins/auth.ts";
+import { recordCallEvents, type CallEventDeps } from "./plugins/call-events.ts";
 import { carrierRoutes } from "./routes/carriers.ts";
+import { handoffRoutes } from "./routes/handoff.ts";
 import { healthRoutes } from "./routes/health.ts";
 import { confirmHoldRoutes, holdRoutes, releaseHoldRoutes } from "./routes/holds.ts";
 import { loadRoutes } from "./routes/loads.ts";
 import { offerRoutes } from "./routes/offers.ts";
+import { operatorInboxRoutes } from "./routes/operator-inbox.ts";
+import { operatorWallRoutes } from "./routes/operator.ts";
 import { otpRoutes } from "./routes/otp.ts";
 
 export type RouteSets = {
@@ -20,7 +25,8 @@ export type RouteSets = {
   operatorRoutes: FastifyPluginAsync[];
 };
 
-export function buildServer(config: Config, routes: RouteSets) {
+// Call events are recorded only when a Twin is given, so route tests can leave them out.
+export function buildServer(config: Config, routes: RouteSets, callEvents?: CallEventDeps) {
   const app = Fastify({
     logger: { redact: ["req.headers[\"x-api-key\"]", "req.headers.authorization"] },
   });
@@ -33,6 +39,7 @@ export function buildServer(config: Config, routes: RouteSets) {
   app.register(
     async (scope) => {
       scope.addHook("onRequest", requireApiKey(config.AGENT_API_KEY));
+      if (callEvents) recordCallEvents(scope, callEvents);
       for (const plugin of routes.agentRoutes) await scope.register(plugin);
     },
     { prefix: "/v1" },
@@ -59,7 +66,13 @@ if (import.meta.main) {
     emailWorkflowId: config.OTP_EMAIL_WORKFLOW_ID,
     ...(config.OTP_SMS_WORKFLOW_ID && { smsWorkflowId: config.OTP_SMS_WORKFLOW_ID }),
   });
-  const tms = new TmsClient({ host: config.TMS_HOST, port: config.TMS_PORT, token: config.TMS_TOKEN });
+  const tmsHealth = new TmsHealthRecorder();
+  const tms = new TmsClient({
+    host: config.TMS_HOST,
+    port: config.TMS_PORT,
+    token: config.TMS_TOKEN,
+    onExchange: (exchange) => tmsHealth.record(exchange),
+  });
   const app = buildServer(config, {
     agentRoutes: [
       carrierRoutes({ fmcsa, census, twin }),
@@ -67,8 +80,9 @@ if (import.meta.main) {
       loadRoutes({ tms, twin }),
       offerRoutes({ tms, twin }),
       holdRoutes({ tms, twin }),
+      handoffRoutes({ twin }),
     ],
-    operatorRoutes: [confirmHoldRoutes({ tms, twin }), releaseHoldRoutes({ twin })],
-  });
+    operatorRoutes: [confirmHoldRoutes({ tms, twin }), releaseHoldRoutes({ twin }), operatorWallRoutes({ twin, tmsHealth }), operatorInboxRoutes({ twin })],
+  }, { twin });
   await app.listen({ host: "0.0.0.0", port: config.PORT });
 }

@@ -45,13 +45,63 @@ export const tableDdl = {
     created_at timestamp NOT NULL DEFAULT now(),
     updated_at timestamp NOT NULL DEFAULT now()
   )`,
+  // One row per named agent tool call (request_human writes its own before answering); the operator wall reads it.
+  call_events: `CREATE TABLE IF NOT EXISTS call_events (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    call_id text NOT NULL,
+    tool text NOT NULL,
+    summary text,
+    status text,
+    created_at timestamp NOT NULL DEFAULT now()
+  )`,
+  // Every operator action on a live call. An authorization raises the counter on one load,
+  // never past that load's max buy (see evaluateOffer).
+  interventions: `CREATE TABLE IF NOT EXISTS interventions (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    call_id text NOT NULL,
+    kind text NOT NULL CHECK (kind IN ('whisper', 'authorization', 'listen', 'takeover')),
+    load_id text,
+    amount_usd int8 CHECK (amount_usd > 0),
+    message text,
+    created_at timestamp NOT NULL DEFAULT now(),
+    CHECK ((kind = 'authorization') = (load_id IS NOT NULL AND amount_usd IS NOT NULL))
+  )`,
+  // Operator switches. 'autonomy' is 'human' (the default: a rep confirms every hold) or
+  // 'autonomous' (create_hold books right away, under the same max buy guard).
+  settings: `CREATE TABLE IF NOT EXISTS settings (
+    key text PRIMARY KEY,
+    value text NOT NULL,
+    updated_at timestamp NOT NULL DEFAULT now()
+  )`,
 } as const;
 
 // Changes to tables that already exist; each statement is idempotent and runs on every bootstrap.
 export const migrations = [
   // Two calls racing to hold one load: the index, not a read-then-insert, picks the winner.
   "CREATE UNIQUE INDEX IF NOT EXISTS holds_one_active_per_load ON holds (load_id) WHERE status <> 'released'",
+  // The load's posted rate and max buy at decision time, for the operator only; never sent to the agent.
+  "ALTER TABLE offers ADD COLUMN IF NOT EXISTS posted_rate int8",
+  "ALTER TABLE offers ADD COLUMN IF NOT EXISTS max_buy int8",
+  "ALTER TABLE holds ADD COLUMN IF NOT EXISTS posted_rate int8",
+  "ALTER TABLE holds ADD COLUMN IF NOT EXISTS max_buy int8",
+  // The load's lane at decision time, so the operator map needs no TMS read.
+  "ALTER TABLE offers ADD COLUMN IF NOT EXISTS origin_city text",
+  "ALTER TABLE offers ADD COLUMN IF NOT EXISTS origin_state text",
+  "ALTER TABLE offers ADD COLUMN IF NOT EXISTS origin_zip text",
+  "ALTER TABLE offers ADD COLUMN IF NOT EXISTS destination_city text",
+  "ALTER TABLE offers ADD COLUMN IF NOT EXISTS destination_state text",
+  "ALTER TABLE offers ADD COLUMN IF NOT EXISTS destination_zip text",
+  "ALTER TABLE offers ADD COLUMN IF NOT EXISTS equipment text",
+  "ALTER TABLE offers ADD COLUMN IF NOT EXISTS miles int8",
+  "ALTER TABLE offers ADD COLUMN IF NOT EXISTS pickup_at text",
+  "CREATE INDEX IF NOT EXISTS call_events_by_call ON call_events (call_id, created_at)",
+  "CREATE INDEX IF NOT EXISTS interventions_by_call ON interventions (call_id, created_at)",
+  // The FMCSA name at verification, so the inbox can name a carrier without calling FMCSA again.
+  "ALTER TABLE calls ADD COLUMN IF NOT EXISTS carrier_name text",
 ] as const;
+
+export const autonomyModes = ["human", "autonomous"] as const;
+export type AutonomyMode = (typeof autonomyModes)[number];
 
 export const holdStatuses = ["held", "confirming", "booked", "booked_unconfirmed", "released"] as const;
 

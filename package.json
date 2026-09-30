@@ -3,13 +3,16 @@
   "version": "0.1.0",
   "description": "TMS adapter and HappyRobot workflow for inbound carrier sales",
   "scripts": {
-    "test": "vitest run",
+    "test": "vitest run --dir test",
     "start": "node src/server.ts",
     "dev": "node --watch --env-file-if-exists=.env src/server.ts",
     "typecheck": "tsc",
     "bootstrap:twin": "node --env-file-if-exists=.env scripts/bootstrap-twin.ts",
     "smoke:tms": "node --env-file-if-exists=.env scripts/tms-smoke.ts",
-    "push:workflow": "node --env-file-if-exists=.env workflow/push.ts"
+    "fake:tms": "node --env-file-if-exists=.env test/fake-tms-server.ts",
+    "push:workflow": "node --env-file-if-exists=.env workflow/push.ts",
+    "simulate": "node --env-file-if-exists=.env scripts/simulate.ts",
+    "seed:demo": "node --env-file-if-exists=.env scripts/seed-demo.ts"
   },
   "type": "module",
   "dependencies": {

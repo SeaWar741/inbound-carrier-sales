@@ -1,0 +1,40 @@
+{
+  "name": "control-tower",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "copy-worker": "node -e \"const fs=require('node:fs');fs.mkdirSync('public/maplibre',{recursive:true});for(const f of ['maplibre-gl-worker.mjs','maplibre-gl-shared.mjs'])fs.copyFileSync('node_modules/maplibre-gl/dist/'+f,'public/maplibre/'+f)\"",
+    "predev": "npm run copy-worker",
+    "dev": "next dev --port 3000",
+    "prebuild": "npm run copy-worker",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test \"lib/**/*.test.ts\""
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@happyrobot-ai/sdk": "^0.1.51",
+    "geist": "^1.7.2",
+    "livekit-client": "^2.22.3",
+    "maplibre-gl": "^6.11.2",
+    "motion": "^13.4.6",
+    "next": "^16.3.7",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "react-icons": "^5.7.0",
+    "server-only": "^0.0.1",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/node": "^26.6.3",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.9.3"
+  }
+}

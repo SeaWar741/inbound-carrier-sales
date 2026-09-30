@@ -35,3 +35,22 @@ export const twinRequestTimeoutMs = 2_000;
 export const verificationRequestTimeoutMs = 2_000;
 // An MCS-150 contact change this recent is a common precursor of carrier identity fraud.
 export const contactChangeWindowDays = 30;
+
+// Operator wall: "today" is the brokerage's business day, not the server's or UTC's.
+export const operatorTimeZone = "America/Chicago";
+// The wall shows the tail of a call, not its full history.
+export const wallEventsPerCall = 20;
+// A typo guard on one operator authorization; the real ceiling is always the load's max buy.
+export const maxAuthorizationUsd = 1_000;
+// TMS health: 500 attempts is well over an hour of demo traffic, and sorting it per wall poll is trivial.
+export const tmsHealthLatencySamples = 500;
+
+// Trip ETA: there is no delivery time in the TMS, so ETA = pickup + miles at a long-haul average
+// that already absorbs stops and hours-of-service breaks. Cycle 4 replaces it with a routed time.
+export const avgTransitMph = 50;
+// Operator inbox: one screen of carriers at 1280 px; the page size is not a parameter.
+export const inboxPageSize = 25;
+// The dashboard's booked loads: a week of pickups is far below this; it only bounds a runaway result.
+export const dashboardLoadsLimit = 500;
+// A carrier's timeline shows its recent calls, not its full history.
+export const carrierCallsLimit = 50;
