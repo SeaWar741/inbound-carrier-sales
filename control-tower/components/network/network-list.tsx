@@ -1,25 +1,15 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useRef } from "react";
 import { LuLoaderCircle, LuTriangleAlert } from "react-icons/lu";
 import { NetworkChips, TrendArrow } from "@/components/network/network-chips";
+import { Count, SkeletonRows, useLoadMore } from "@/components/paged-list";
 import type { NetworkCarrier, TowerNetwork } from "@/lib/contracts";
 import { carrierName, formatTimeAgo } from "@/lib/format";
 import { networkReason, type NetworkWindow } from "@/lib/network";
 
-// The list's loaded pages merged into one answer, with the query and page count they were read for.
-export type NetworkPages = TowerNetwork & { query: string; pages: number };
-
 // Name and reason take the room left; every count column is the same narrow width.
 const columns = "grid grid-cols-[minmax(0,1fr)_repeat(4,5rem)_4rem_2.5rem] items-center gap-3";
-
-function Count({ value, label }: { value: number; label: string }) {
-  return (
-    <span className="tabular text-right text-sm text-fg" title={`${value} ${label}`}>
-      {value}
-    </span>
-  );
-}
 
 function NetworkRow({
   carrier,
@@ -74,20 +64,6 @@ function NetworkRow({
   );
 }
 
-// The cortex list skeleton: two bars per row.
-function SkeletonRows({ rows = 6 }: { rows?: number }) {
-  return (
-    <div aria-hidden className="space-y-3 p-4">
-      {Array.from({ length: rows }, (_, i) => (
-        <div key={i} className="space-y-2">
-          <div className="h-4 w-1/2 animate-pulse rounded-md bg-panel-raised" />
-          <div className="h-3 w-3/4 animate-pulse rounded-md bg-panel-raised" />
-        </div>
-      ))}
-    </div>
-  );
-}
-
 // The carriers of the chosen view, newest call first, with the next page loading as the list nears its end.
 export function NetworkList({
   data,
@@ -121,22 +97,9 @@ export function NetworkList({
   onClearFilters: () => void;
 }) {
   const buttons = useRef(new Map<string, HTMLButtonElement>());
-  const scroller = useRef<HTMLDivElement>(null);
-  const sentinel = useRef<HTMLDivElement>(null);
   const rows = data?.rows ?? [];
   const total = data?.total ?? 0;
-
-  // Same paging as the inbox list: a new observer per page length reports at once, so a page too
-  // short to scroll still loads the next one.
-  useEffect(() => {
-    const target = sentinel.current;
-    if (!hasMore || target === null) return;
-    const observer = new IntersectionObserver((entries) => {
-      if (entries.some((entry) => entry.isIntersecting)) onLoadMore();
-    }, { root: scroller.current, rootMargin: "0px 0px 200px 0px" });
-    observer.observe(target);
-    return () => observer.disconnect();
-  }, [hasMore, rows.length, onLoadMore]);
+  const { scroller, sentinel } = useLoadMore(hasMore, rows.length, onLoadMore);
 
   function onKeyDown(event: React.KeyboardEvent<HTMLUListElement>) {
     if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;

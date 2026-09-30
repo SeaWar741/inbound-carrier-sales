@@ -43,15 +43,23 @@ describe("networkReason", () => {
   });
 
   it("says a silent at-risk carrier's last call and past bookings", () => {
-    const quiet = carrier({ relationship: "at_risk", facts: { lastCallAt: daysAgo(19.5), lifetimeBookings: 3 } });
+    const quiet = carrier({ relationship: "at_risk", facts: { lastCallAt: daysAgo(19.5), callsRecent: 0, lifetimeBookings: 3 } });
     assert.equal(networkReason(quiet, now, thirtyDays), "Last call 19 d ago; 3 bookings before");
-    const once = carrier({ relationship: "at_risk", facts: { lastCallAt: daysAgo(20), lifetimeBookings: 1 } });
+    const once = carrier({ relationship: "at_risk", facts: { lastCallAt: daysAgo(20), callsRecent: 0, lifetimeBookings: 1 } });
     assert.equal(networkReason(once, now, thirtyDays), "Last call 20 d ago; 1 booking before");
   });
 
   it("says an at-risk carrier that still calls is calling less", () => {
     const fading = carrier({ relationship: "at_risk", facts: { lastCallAt: daysAgo(3), callsRecent: 1, callsPrior: 4 } });
     assert.equal(networkReason(fading, now, thirtyDays), "Calls down: 1 in 14 d vs 4 before");
+  });
+
+  it("reads which rule fired from the recent calls, not from the last call's date", () => {
+    // The database clock and the browser's differ, so the browser's day count can land on either side of 14.
+    const edge = carrier({ relationship: "at_risk", facts: { lastCallAt: daysAgo(13.9), callsRecent: 0, lifetimeBookings: 2 } });
+    assert.equal(networkReason(edge, now, thirtyDays), "Last call 13 d ago; 2 bookings before");
+    const counted = carrier({ relationship: "at_risk", facts: { lastCallAt: daysAgo(14.1), callsRecent: 1, callsPrior: 5 } });
+    assert.equal(networkReason(counted, now, thirtyDays), "Calls down: 1 in 14 d vs 5 before");
   });
 
   it("words a top carrier's booking rate with the window", () => {
@@ -90,7 +98,7 @@ describe("networkReason", () => {
       top: true,
       growth: true,
       lanes: [{ originState: "TX", destinationState: "IL", equipment: "DRY_VAN", count: 2, open: true }],
-      facts: { lastCallAt: daysAgo(19), lifetimeBookings: 3, bookings: 4, negotiableCalls: 5 },
+      facts: { lastCallAt: daysAgo(19), callsRecent: 0, lifetimeBookings: 3, bookings: 4, negotiableCalls: 5 },
     });
     assert.equal(
       networkReason(all, now, thirtyDays),

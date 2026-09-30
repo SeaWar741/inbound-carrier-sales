@@ -109,6 +109,18 @@ export const carrierStageLabels: Record<CarrierStage, string> = {
   lost: "Lost",
 };
 
+const equipmentLabels: Record<string, string> = {
+  DRY_VAN: "Dry van",
+  REEFER: "Reefer",
+  FLATBED: "Flatbed",
+  STEP_DECK: "Step deck",
+  POWER_ONLY: "Power only",
+};
+
+export function equipmentLabel(code: string): string {
+  return equipmentLabels[code] ?? code;
+}
+
 // How a carrier is named in the inbox: its FMCSA name when stored, else its numbers.
 export function carrierName(carrier: { carrierName: string | null; mcNumber: string | null; dotNumber: string | null }): string {
   if (carrier.carrierName) return carrier.carrierName;

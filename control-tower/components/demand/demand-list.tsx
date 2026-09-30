@@ -1,15 +1,12 @@
 "use client";
 
 import type { IconType } from "react-icons";
-import { useEffect, useRef } from "react";
 import { LuArrowDownRight, LuArrowRight, LuArrowUpRight, LuChevronDown, LuChevronRight, LuContainer, LuLoaderCircle, LuTriangleAlert } from "react-icons/lu";
 import { DemandCarriers } from "@/components/demand/demand-carriers";
 import { equipmentLabel } from "@/components/hold-card";
+import { Count, SkeletonRows, useLoadMore } from "@/components/paged-list";
 import type { DemandLane, TowerDemand } from "@/lib/contracts";
 import { demandKey, demandSignal, demandTrend, laneLabel, type DemandTrend } from "@/lib/demand";
-
-// The list's loaded pages merged into one answer, with the query and page count they were read for.
-export type DemandPages = TowerDemand & { query: string; pages: number };
 
 // Lane and sentence take the room left; every count column is the same narrow width.
 const columns = "grid grid-cols-[minmax(0,1fr)_repeat(4,5.5rem)_12rem] items-center gap-3";
@@ -20,14 +17,6 @@ const trendStyle: Record<DemandTrend, { icon: IconType; tone: string; word: stri
   down: { icon: LuArrowDownRight, tone: "text-ok", word: "Fewer this week" },
   flat: { icon: LuArrowRight, tone: "text-fg-faint", word: "Same as last week" },
 };
-
-function Count({ value, label }: { value: number; label: string }) {
-  return (
-    <span className="tabular text-right text-sm text-fg" title={`${value} ${label}`}>
-      {value}
-    </span>
-  );
-}
 
 function Trend({ lane }: { lane: DemandLane }) {
   const { trend, text } = demandTrend(lane);
@@ -76,20 +65,6 @@ function DemandRow({ lane, expanded, onToggle }: { lane: DemandLane; expanded: b
   );
 }
 
-// The cortex list skeleton: two bars per row.
-function SkeletonRows({ rows = 6 }: { rows?: number }) {
-  return (
-    <div aria-hidden className="space-y-3 p-4">
-      {Array.from({ length: rows }, (_, i) => (
-        <div key={i} className="space-y-2">
-          <div className="h-4 w-1/2 animate-pulse rounded-md bg-panel-raised" />
-          <div className="h-3 w-3/4 animate-pulse rounded-md bg-panel-raised" />
-        </div>
-      ))}
-    </div>
-  );
-}
-
 // The lanes carriers asked for and the board did not cover, most unmet first as the adapter sends
 // them, with the next page loading as the list nears its end.
 export function DemandList({
@@ -118,22 +93,9 @@ export function DemandList({
   onToggle: (key: string) => void;
   onClearFilters: () => void;
 }) {
-  const scroller = useRef<HTMLDivElement>(null);
-  const sentinel = useRef<HTMLDivElement>(null);
   const rows = data?.rows ?? [];
   const total = data?.total ?? 0;
-
-  // Same paging as the carriers list: a new observer per page length reports at once, so a page too
-  // short to scroll still loads the next one.
-  useEffect(() => {
-    const target = sentinel.current;
-    if (!hasMore || target === null) return;
-    const observer = new IntersectionObserver((entries) => {
-      if (entries.some((entry) => entry.isIntersecting)) onLoadMore();
-    }, { root: scroller.current, rootMargin: "0px 0px 200px 0px" });
-    observer.observe(target);
-    return () => observer.disconnect();
-  }, [hasMore, rows.length, onLoadMore]);
+  const { scroller, sentinel } = useLoadMore(hasMore, rows.length, onLoadMore);
 
   let body: React.ReactNode;
   if (data === null) {

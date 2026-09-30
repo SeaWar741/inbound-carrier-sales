@@ -1,18 +1,19 @@
 "use client";
 
 import { useSearchParams } from "next/navigation";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo } from "react";
 import { LuContainer, LuMousePointerClick, LuRoute, LuTriangleAlert, LuUsers } from "react-icons/lu";
 import { equipmentOptions, HeaderSelect, SearchInput, stateOptions, TabStrip, type Tab } from "@/components/inbox/filter-bar";
 import { DateRange } from "@/components/inbox/inbox-rail";
 import { growthStyle, relationshipStyle, topStyle, type ChipStyle } from "@/components/network/network-chips";
 import { NetworkDetail } from "@/components/network/network-detail";
-import { NetworkList, type NetworkPages } from "@/components/network/network-list";
-import { networkViews, type NetworkCarrier, type NetworkView, type TowerNetwork } from "@/lib/contracts";
+import { NetworkList } from "@/components/network/network-list";
+import { networkViews, type NetworkView, type TowerNetwork } from "@/lib/contracts";
 import { deskDayKey } from "@/lib/format";
 import { fromInboxWindow, toInboxWindow, type NetworkWindow } from "@/lib/network";
 import { useNow } from "@/lib/use-now";
-import { fetchTower, usePollWith } from "@/lib/use-poll";
+import { updateSearch, usePagedList } from "@/lib/use-paged-list";
+import { usePoll } from "@/lib/use-poll";
 
 // The network changes with calls, not by the second, and each read also checks the TMS board.
 const networkPollMs = 30_000;
@@ -26,24 +27,26 @@ const sinceValues = ["today", "7d", "30d"];
 const isoDay = /^\d{4}-\d{2}-\d{2}$/;
 const allStyle: Pick<ChipStyle, "label" | "icon" | "iconTone"> = { label: "All", icon: LuUsers, iconTone: "text-fg-muted" };
 
-// Pages 1 to `pages` in one go, merged in order like the inbox list; a carrier on two pages shows once.
-async function loadPages(query: string, pages: number, signal: AbortSignal): Promise<NetworkPages> {
-  const answers = await Promise.all(
-    Array.from({ length: pages }, (_, i) => {
-      const params = new URLSearchParams(query);
-      if (i > 0) params.set("page", String(i + 1));
-      const search = params.toString();
-      return fetchTower<TowerNetwork>(`/api/network${search ? `?${search}` : ""}`, signal, "carrier network");
-    }),
-  );
-  const seen = new Set<string>();
-  const rows: NetworkCarrier[] = [];
-  for (const row of answers.flatMap((answer) => answer.rows)) {
-    if (seen.has(row.key)) continue;
-    seen.add(row.key);
-    rows.push(row);
+// The selected carrier when the loaded pages do not hold it (a shared link to a carrier past page one,
+// or one a filter hides): its row fetched by key, like the inbox detail fetches its carrier.
+function CarrierByKey({ carrierKey, listQuery, now, dateWindow }: { carrierKey: string; listQuery: string; now: number; dateWindow: NetworkWindow }) {
+  // Only the window carries over; the view (All when left out) and the filters would hide it again.
+  const list = new URLSearchParams(listQuery);
+  const params = new URLSearchParams({ key: carrierKey });
+  for (const key of ["since", "from", "to"]) {
+    const value = list.get(key);
+    if (value) params.set(key, value);
   }
-  return { ...answers[0]!, rows, query, pages };
+  const { data, loading } = usePoll<TowerNetwork>(`/api/network?${params.toString()}`, networkPollMs, "carrier network");
+  const carrier = data?.rows[0];
+  if (carrier) return <NetworkDetail carrier={carrier} now={now} dateWindow={dateWindow} />;
+  return (
+    <div className="grid h-full place-items-center bg-bg">
+      <p className="px-8 text-center text-fg-muted">
+        {loading ? "Loading carrier..." : data ? "No calls from this carrier in this window" : "The carrier network is unavailable"}
+      </p>
+    </div>
+  );
 }
 
 // A view chip's label: the same icon and tone as the chip on its rows, with an optional hint below.
@@ -90,23 +93,13 @@ export function Network() {
     return query.toString();
   }, [searchParams, range]);
 
-  // How many pages the list shows; any new query starts again at one.
-  const [paging, setPaging] = useState({ query: listQuery, pages: 1 });
-  const pages = paging.query === listQuery ? paging.pages : 1;
-  const { data, error, loading } = usePollWith<NetworkPages>(
-    `${listQuery}#${pages}`,
-    (signal) => loadPages(listQuery, pages, signal),
+  const { data, error, loading, loadingMore, hasMore, onLoadMore } = usePagedList<TowerNetwork>(
+    "/api/network",
+    listQuery,
+    (row) => row.key,
     networkPollMs,
     "carrier network",
   );
-  // Until the new query answers, the list shows the old one, which must not ask for more pages.
-  const current = data !== null && data.query === listQuery ? data : null;
-  const loadingMore = current !== null && current.pages < pages;
-  const hasMore = current !== null && current.rows.length < current.total && current.pages * current.pageSize < current.total;
-  const onLoadMore = useCallback(() => {
-    if (current === null || loadingMore || !hasMore) return;
-    setPaging({ query: listQuery, pages: current.pages + 1 });
-  }, [current, loadingMore, hasMore, listQuery]);
 
   const view: NetworkView = networkViews.find((v) => v === searchParams.get("view")) ?? "all";
   const q = searchParams.get("q") ?? "";
@@ -119,24 +112,15 @@ export function Network() {
   const selectedKey = searchParams.get("carrier");
   // A search that leaves one carrier (the /carriers?q= links) shows it without another click.
   const selected = rows.find((row) => row.key === selectedKey) ?? (selectedKey === null && q !== "" && rows.length === 1 ? rows[0]! : null);
+  // A selection the loaded rows do not hold is fetched on its own once the list has answered.
+  const missingKey = selected === null && selectedKey !== null && data !== null ? selectedKey : null;
 
-  // Empty values drop the key. replaceState keeps the back button for leaving the page, not for every click.
-  const update = useCallback((changes: Record<string, string | null>) => {
-    const params = new URLSearchParams(window.location.search);
-    for (const [key, value] of Object.entries(changes)) {
-      if (value) params.set(key, value);
-      else params.delete(key);
-    }
-    const query = params.toString();
-    window.history.replaceState(null, "", query ? `?${query}` : window.location.pathname);
-  }, []);
-
-  const onView = useCallback((next: NetworkView) => update({ view: next === "all" ? null : next }), [update]);
-  const onSearch = useCallback((next: string) => update({ q: next }), [update]);
-  const onSelect = useCallback((key: string) => update({ carrier: key }), [update]);
-  const onClearFilters = useCallback(() => update(Object.fromEntries(filterKeys.map((key) => [key, null]))), [update]);
+  const onView = useCallback((next: NetworkView) => updateSearch({ view: next === "all" ? null : next }), []);
+  const onSearch = useCallback((next: string) => updateSearch({ q: next }), []);
+  const onSelect = useCallback((key: string) => updateSearch({ carrier: key }), []);
+  const onClearFilters = useCallback(() => updateSearch(Object.fromEntries(filterKeys.map((key) => [key, null]))), []);
   // The inbox picker reads the window its own way; the URL keeps the page's.
-  const onWindow = useCallback((next: NetworkWindow) => update(fromInboxWindow(next)), [update]);
+  const onWindow = useCallback((next: NetworkWindow) => updateSearch(fromInboxWindow(next)), []);
 
   const counts = data?.counts;
   // Top and Growth are tags on top of the relationship, so their counts overlap the others.
@@ -165,14 +149,14 @@ export function Network() {
           <DateRange dateWindow={toInboxWindow(dateWindow)} today={deskDayKey(now)} onWindow={onWindow} />
         </div>
         <div className="flex min-w-0 flex-1 items-center gap-1.5">
-          <HeaderSelect label="From" icon={LuRoute} tone="text-ok" value={origin} onChange={(v) => update({ origin: v })} options={stateOptions} />
+          <HeaderSelect label="From" icon={LuRoute} tone="text-ok" value={origin} onChange={(v) => updateSearch({ origin: v })} options={stateOptions} />
           <HeaderSelect
             label="Equipment"
             grow={1.5}
             icon={LuContainer}
             tone="text-accent"
             value={equipment}
-            onChange={(v) => update({ equipment: v })}
+            onChange={(v) => updateSearch({ equipment: v })}
             options={equipmentOptions}
           />
           <SearchInput q={q} onSearch={onSearch} placeholder="MC, DOT or carrier" label="Search carriers" className="min-w-0 flex-[2]" />
@@ -204,6 +188,8 @@ export function Network() {
       <div className="h-full min-h-0 w-[420px] shrink-0">
         {selected ? (
           <NetworkDetail carrier={selected} now={now} dateWindow={dateWindow} />
+        ) : missingKey ? (
+          <CarrierByKey key={missingKey} carrierKey={missingKey} listQuery={listQuery} now={now} dateWindow={dateWindow} />
         ) : (
           <div className="grid h-full place-items-center bg-bg">
             <div className="text-center text-fg-muted">

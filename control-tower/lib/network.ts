@@ -1,7 +1,7 @@
 import type { NetworkCarrier } from "./contracts";
-import { deskDayKey } from "./format.ts";
+import { deskDayKey, equipmentLabel } from "./format.ts";
 
-// Mirrors the adapter's segmentRecentDays: the at-risk and trend comparisons read two 14-day spans.
+// Mirrors the adapter's segmentRecentDays, only to word the span the at-risk sentence compares.
 export const recentDays = 14;
 const dayMs = 86_400_000;
 // The inbox's longest `since` preset; an older last call needs an explicit day range there.
@@ -37,12 +37,6 @@ export function windowPhrase(dateWindow: NetworkWindow): string {
   return "in 30 d";
 }
 
-// "REEFER" reads "Reefer", "DRY_VAN" reads "Dry van".
-function equipmentWords(code: string): string {
-  const words = code.toLowerCase().replaceAll("_", " ");
-  return words.charAt(0).toUpperCase() + words.slice(1);
-}
-
 // Whole days since the carrier's last call.
 export function daysSinceLastCall(carrier: Pick<NetworkCarrier, "facts">, now: number): number {
   return Math.floor((now - Date.parse(carrier.facts.lastCallAt)) / dayMs);
@@ -52,9 +46,9 @@ function relationshipSentence(carrier: NetworkCarrier, now: number): string | nu
   const { facts } = carrier;
   if (carrier.relationship === "new") return `${plural(facts.lifetimeCalls, "call")} so far`;
   if (carrier.relationship === "at_risk") {
-    const days = daysSinceLastCall(carrier, now);
-    // At risk means silent for the recent span or calling less than half as often; the sentence says which.
-    if (days >= recentDays) return `Last call ${days} d ago; ${plural(facts.lifetimeBookings, "booking")} before`;
+    // The adapter marks a carrier at risk for no calls in the recent span or for calling less than half
+    // as often; no recent calls is the first, so the sentence reads the facts rather than the dates.
+    if (facts.callsRecent === 0) return `Last call ${daysSinceLastCall(carrier, now)} d ago; ${plural(facts.lifetimeBookings, "booking")} before`;
     return `Calls down: ${facts.callsRecent} in ${recentDays} d vs ${facts.callsPrior} before`;
   }
   return null;
@@ -74,7 +68,7 @@ function growthSentence(carrier: NetworkCarrier): string {
   const lane = carrier.lanes.find((l) => l.open);
   if (!lane?.originState) return "A lane it runs is open on the board now";
   if (!lane.equipment) return `Asked for ${lane.originState} · any equipment, open on the board now`;
-  return `Has run ${lane.originState} · ${equipmentWords(lane.equipment)}, open on the board now`;
+  return `Has run ${lane.originState} · ${equipmentLabel(lane.equipment)}, open on the board now`;
 }
 
 // Why the carrier sits where it does: the relationship sentence, then one per tag. A plain active

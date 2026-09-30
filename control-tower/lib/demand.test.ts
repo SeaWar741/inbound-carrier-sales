@@ -19,21 +19,21 @@ function lane(overrides: Partial<DemandLane> = {}): DemandLane {
 }
 
 describe("demandSignal", () => {
-  it("counts searches, carriers, matches and offers without a booking", () => {
-    assert.equal(demandSignal(lane()), "7 searches by 4 carriers, 0 matched; 2 offered, no booking");
-    assert.equal(demandSignal(lane({ noMatch: 2 })), "7 searches by 4 carriers, 5 matched; 2 offered, no booking");
+  it("leads with the carriers, then counts searches, matches and offers without a booking", () => {
+    assert.equal(demandSignal(lane()), "4 carriers asked: 7 searches, 0 matched; 2 offered, no booking");
+    assert.equal(demandSignal(lane({ noMatch: 2 })), "4 carriers asked: 7 searches, 5 matched; 2 offered, no booking");
   });
 
   it("uses the singular for one search and one carrier", () => {
-    assert.equal(demandSignal(lane({ searches: 1, noMatch: 1, carriers: 1, offeredNoBooking: 1 })), "1 search by 1 carrier, 0 matched; 1 offered, no booking");
+    assert.equal(demandSignal(lane({ searches: 1, noMatch: 1, carriers: 1, offeredNoBooking: 1 })), "1 carrier asked: 1 search, 0 matched; 1 offered, no booking");
   });
 
   it("leaves the offer clause out when nothing was offered", () => {
-    assert.equal(demandSignal(lane({ offeredNoBooking: 0 })), "7 searches by 4 carriers, 0 matched");
+    assert.equal(demandSignal(lane({ offeredNoBooking: 0 })), "4 carriers asked: 7 searches, 0 matched");
   });
 
   it("words a lane with offers but no searches", () => {
-    assert.equal(demandSignal(lane({ searches: 0, noMatch: 0, offeredNoBooking: 3, carriers: 1 })), "3 offered to 1 carrier, no booking");
+    assert.equal(demandSignal(lane({ searches: 0, noMatch: 0, offeredNoBooking: 3, carriers: 1 })), "1 carrier asked: 3 offered, no booking");
   });
 
   it("never says rejected", () => {

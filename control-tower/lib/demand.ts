@@ -12,14 +12,16 @@ export function laneLabel(lane: Pick<DemandLane, "originState" | "destinationSta
   return `${lane.originState} → ${lane.destinationState ?? "Any"}`;
 }
 
-// What the board missed on the lane, in words: "7 searches by 4 carriers, 5 matched; 2 offered, no
-// booking". Matched is every search that returned a load. A clause with nothing to say is left out.
+// What the board missed on the lane, in words: "4 carriers asked: 7 searches, 5 matched; 2 offered,
+// no booking". The carrier count covers searches and offers together, so it leads rather than being
+// pinned on either. Matched is every search that returned a load. A clause with nothing to say is left out.
 export function demandSignal(lane: Pick<DemandLane, "searches" | "noMatch" | "offeredNoBooking" | "carriers">): string {
   const by = plural(lane.carriers, "carrier");
-  const offered = lane.offeredNoBooking > 0 ? `${lane.offeredNoBooking} offered, no booking` : null;
-  if (lane.searches === 0) return offered ? `${lane.offeredNoBooking} offered to ${by}, no booking` : `No asks from ${by}`;
-  const searched = `${plural(lane.searches, "search", "searches")} by ${by}, ${lane.searches - lane.noMatch} matched`;
-  return offered ? `${searched}; ${offered}` : searched;
+  const clauses = [
+    lane.searches > 0 ? `${plural(lane.searches, "search", "searches")}, ${lane.searches - lane.noMatch} matched` : null,
+    lane.offeredNoBooking > 0 ? `${lane.offeredNoBooking} offered, no booking` : null,
+  ].filter((clause) => clause !== null);
+  return clauses.length > 0 ? `${by} asked: ${clauses.join("; ")}` : `No asks from ${by}`;
 }
 
 export type DemandTrend = "up" | "down" | "flat";
