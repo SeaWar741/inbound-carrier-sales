@@ -7,7 +7,6 @@ import {
   feasibilityBadge,
   formatDeskWhen,
   formatPerMile,
-  formatSignedUsd,
   formatTimeAgo,
   loadCards,
   toolLabel,
@@ -138,13 +137,7 @@ describe("callSummary", () => {
   });
 });
 
-describe("formatSignedUsd and formatPerMile", () => {
-  it("signs spreads and leaves zero bare", () => {
-    assert.equal(formatSignedUsd(134), "+$134");
-    assert.equal(formatSignedUsd(-50), "-$50");
-    assert.equal(formatSignedUsd(0.2), "$0");
-  });
-
+describe("formatPerMile", () => {
   it("prints dollars per mile with cents", () => {
     assert.equal(formatPerMile(2150 / 742), "$2.90/mi");
   });

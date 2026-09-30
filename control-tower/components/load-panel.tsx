@@ -3,14 +3,13 @@
 import { useMemo } from "react";
 import type { IconType } from "react-icons";
 import { LuCalendarClock, LuContainer, LuFlag, LuMap, LuMapPin, LuMousePointerClick, LuTruck } from "react-icons/lu";
+import { DealCard } from "@/components/deal-card";
 import { EmptyState } from "@/components/empty-state";
 import { equipmentLabel, formatPickup, HoldCard, LaneText } from "@/components/hold-card";
-import { MarginMeter } from "@/components/margin-meter";
 import { LaneMap, type LaneMapLoad } from "@/components/lane-map";
 import { Section } from "@/components/section";
 import type { TowerCall, TowerCarrier, WallOffer } from "@/lib/contracts";
 import { formatDateTime } from "@/lib/format";
-import { loadOutcome, negotiationPath } from "@/lib/pricing";
 
 // The load on the table: the held one while a hold stands, otherwise the one offered most recently.
 function currentOffer(call: TowerCall): WallOffer | null {
@@ -40,15 +39,16 @@ function Fact({ icon: Icon, label, children }: { icon: IconType; label: string; 
   );
 }
 
-// The selected call's load as detail-panel sections, top to bottom: the load with its map, the
-// pricing, then a settled hold. A hold still waiting on the desk is the panel's action card instead.
+// The selected call's load as detail-panel sections, top to bottom: the load with its map, then the
+// deal. The call's open hold is drawn here as the deal's action card, so the needs-you list above
+// leaves it out.
 export function LoadPanel({
   selectedCall,
   history,
   nextTrip,
 }: {
   selectedCall: TowerCall | null;
-  // The carrier's calls, newest first, for the negotiation path and outcome of the load.
+  // The carrier's calls, newest first, to tell whether this load is the carrier's next trip.
   history: TowerCall[];
   // The carrier's next trip; its pickup and ETA show when it is this load.
   nextTrip: TowerCarrier["nextTrip"];
@@ -76,20 +76,10 @@ export function LoadPanel({
     [loadId, lane],
   );
 
-  // Authorizations before the latest offer are already inside its counter (evaluate_offer adds
-  // them); only newer ones are headroom the agent has not priced yet.
-  const authorizedUsd = offer
-    ? (selectedCall?.interventions ?? [])
-        .filter((i) => i.kind === "authorization" && i.loadId === offer.loadId && i.createdAt > offer.createdAt)
-        .reduce((sum, i) => sum + (i.amountUsd ?? 0), 0)
-    : 0;
-  const path = useMemo(() => (loadId ? negotiationPath(history, loadId) : []), [history, loadId]);
   const standingHold = hold && hold.status !== "released" && hold.loadId === offer?.loadId ? hold : null;
-  const agreedRate = standingHold?.agreedRate ?? null;
   const trip = nextTrip && loadId !== null && latestBookedLoad(history) === loadId ? nextTrip : null;
-
-  // An open hold is drawn by the action card at the top of the panel.
-  const settledHold = hold && hold.status !== "held" && hold.status !== "confirming" ? hold : null;
+  const openHold = hold && (hold.status === "held" || hold.status === "confirming") ? hold : null;
+  const openHoldCard = selectedCall && openHold && <HoldCard key={openHold.holdId} call={selectedCall} hold={openHold} />;
 
   if (selectedCall === null) {
     return <EmptyState className="py-10" icon={<LuMousePointerClick size={20} />} title="Select a call to see its load" hint="Map, pricing and hold follow the selection" />;
@@ -97,7 +87,17 @@ export function LoadPanel({
   if (offer === null) {
     return (
       <>
-        {settledHold && <HoldCard key={settledHold.holdId} call={selectedCall} hold={settledHold} />}
+        {hold && (
+          <DealCard
+            call={selectedCall}
+            loadId={hold.loadId}
+            postedRate={hold.postedRate}
+            maxBuy={hold.maxBuy}
+            miles={hold.lane?.miles ?? null}
+            trip={hold.status === "released" ? null : hold.trip}
+            action={openHoldCard}
+          />
+        )}
         <EmptyState className="py-10" icon={<LuTruck size={20} />} title="No load on the table yet" hint="The lane and pricing appear with the first offer" />
       </>
     );
@@ -136,16 +136,18 @@ export function LoadPanel({
           <p className="mt-3 text-xs text-fg-faint">Lane not recorded for this load.</p>
         )}
       </Section>
-      <MarginMeter
+      {/* A hold on a load that has no offer on this call still needs its buttons. */}
+      {openHold && openHold.loadId !== offer.loadId && <div className="p-4 pt-0">{openHoldCard}</div>}
+      <DealCard
         key={offer.loadId}
-        offer={offer}
-        authorizedUsd={authorizedUsd}
-        agreedRate={agreedRate}
+        call={selectedCall}
+        loadId={offer.loadId}
+        postedRate={offer.postedRate ?? standingHold?.postedRate ?? null}
+        maxBuy={offer.maxBuy ?? standingHold?.maxBuy ?? null}
+        miles={lane?.miles ?? null}
         trip={standingHold?.trip ?? null}
-        path={path}
-        outcome={loadOutcome(history, offer.loadId)}
+        action={openHold?.loadId === offer.loadId ? openHoldCard : undefined}
       />
-      {settledHold && <HoldCard key={settledHold.holdId} call={selectedCall} hold={settledHold} />}
     </>
   );
 }

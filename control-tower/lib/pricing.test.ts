@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { TowerCall, WallOffer } from "./contracts.ts";
-import { average, carrierPricing, loadOutcome, marginKept, negotiationPath, perMile, pricingBreakdown } from "./pricing.ts";
+import { average, carrierPricing, loadOutcome, marginKept, perMile } from "./pricing.ts";
 
 const lane = (miles: number) => ({
   origin: { city: "Albuquerque", state: "NM", zip: "87102" },
@@ -70,21 +70,6 @@ describe("average", () => {
   });
 });
 
-describe("negotiationPath", () => {
-  it("collects the load's offers across calls, oldest first", () => {
-    const calls = [
-      call([offer("LD1", 3, 2400, 2150, "2026-09-29T12:00:00.000Z")]),
-      call([offer("LD2", 1, 3000, 2600, "2026-09-29T11:30:00.000Z")]),
-      call([offer("LD1", 1, 2500, 2050, "2026-09-29T11:00:00.000Z")]),
-    ];
-    assert.deepEqual(
-      negotiationPath(calls, "LD1").map((o) => o.round),
-      [1, 3],
-    );
-    assert.deepEqual(negotiationPath([], "LD1"), []);
-  });
-});
-
 describe("loadOutcome", () => {
   const at = "2026-09-29T12:00:00.000Z";
   it("follows the newest hold on the load", () => {
@@ -143,53 +128,5 @@ describe("carrierPricing", () => {
     assert.equal(pricing.avgAgreedPerMile, (2.15 + 2.05) / 2);
     assert.equal(pricing.avgMarginKept, (50 + 150) / 2);
     assert.equal(pricing.avgRoundsToAgree, 2);
-  });
-});
-
-describe("pricingBreakdown", () => {
-  const path = [
-    { round: 1, carrierAsk: 8200, rateToSay: 7300, createdAt: "2026-09-29T10:00:00.000Z" },
-    { round: 2, carrierAsk: 7800, rateToSay: null, createdAt: "2026-09-29T10:05:00.000Z" },
-    { round: 3, carrierAsk: 7600, rateToSay: 7600, createdAt: "2026-09-29T10:10:00.000Z" },
-  ];
-
-  it("reads an agreed load top to bottom", () => {
-    const b = pricingBreakdown({ postedRate: 7052, maxBuy: 7937, miles: 2335, path, agreedRate: 7600, latestAsk: 7600 });
-    assert.equal(b.headroom, 885);
-    assert.deepEqual(b.openingAsk, { round: 1, usd: 8200 });
-    assert.deepEqual(b.counters.map((c) => [c.round, c.usd]), [[1, 7300], [3, 7600]]);
-    assert.equal(b.final.kind, "agreed");
-    assert.equal(b.final.usd, 7600);
-    assert.equal(b.final.perMile, 7600 / 2335);
-    assert.equal(b.posted.perMile, 7052 / 2335);
-    assert.equal(b.overPosted, 548);
-    assert.equal(b.margin.usd, 337);
-    assert.equal(b.margin.pct, (337 / 7937) * 100);
-    assert.equal(b.headroomSharePct, (337 / 885) * 100);
-  });
-
-  it("reads against the latest ask when nothing is agreed, negative over the ceiling", () => {
-    const b = pricingBreakdown({ postedRate: 2000, maxBuy: 2200, miles: 1000, path, agreedRate: null, latestAsk: 2400 });
-    assert.equal(b.final.kind, "ask");
-    assert.equal(b.final.usd, 2400);
-    assert.equal(b.overPosted, 400);
-    assert.equal(b.margin.usd, -200);
-    assert.equal(b.headroomSharePct, -100);
-  });
-
-  it("answers no headroom share when posted equals the ceiling", () => {
-    const b = pricingBreakdown({ postedRate: 2000, maxBuy: 2000, miles: 1000, path: [], agreedRate: 2000, latestAsk: 2000 });
-    assert.equal(b.headroom, 0);
-    assert.equal(b.headroomSharePct, null);
-    assert.equal(b.openingAsk, null);
-    assert.deepEqual(b.counters, []);
-  });
-
-  it("leaves $/mi out when the lane distance is missing", () => {
-    const b = pricingBreakdown({ postedRate: 2000, maxBuy: 2200, miles: null, path, agreedRate: 2100, latestAsk: 2100 });
-    assert.equal(b.posted.perMile, null);
-    assert.equal(b.ceiling.perMile, null);
-    assert.equal(b.final.perMile, null);
-    assert.equal(b.margin.usd, 100);
   });
 });

@@ -1,4 +1,4 @@
-import type { TowerCall, WallOffer } from "./contracts";
+import type { TowerCall } from "./contracts";
 
 // Rate math for the operator's pricing views. The posted rate is the target buy (the approximate
 // cost of the load) and the max buy is the ceiling; margin is what stays under the ceiling.
@@ -21,14 +21,6 @@ export function perMile(rate: number | null, miles: number | null | undefined): 
 export function average(values: number[]): number | null {
   if (values.length === 0) return null;
   return values.reduce((sum, value) => sum + value, 0) / values.length;
-}
-
-// Every recorded offer on one load across a carrier's calls, oldest first. A call keeps only its
-// latest offer per load, so each entry is where one call left the negotiation.
-export function negotiationPath(calls: Pick<TowerCall, "offers">[], loadId: string): WallOffer[] {
-  return calls
-    .flatMap((call) => call.offers.filter((offer) => offer.loadId === loadId))
-    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
 
 export type LoadOutcome =
@@ -89,56 +81,5 @@ export function carrierPricing(calls: PricedCall[]): CarrierPricing {
     avgAgreedPerMile: average(booked.flatMap((b) => perMile(b.agreedRate, b.miles) ?? [])),
     avgMarginKept: average(booked.flatMap((b) => marginKept(b.maxBuy, b.agreedRate)?.usd ?? [])),
     avgRoundsToAgree: average(booked.flatMap((b) => b.round ?? [])),
-  };
-}
-
-export type BreakdownLine = { usd: number; perMile: number | null };
-
-export type PricingBreakdown = {
-  posted: BreakdownLine;
-  ceiling: BreakdownLine;
-  // Ceiling minus posted: the room there is to pay over the approximate cost.
-  headroom: number;
-  // The carrier's first ask on the load and the round it came in; null without a recorded offer.
-  openingAsk: { round: number; usd: number } | null;
-  // Every counter we said, oldest first; rejects without a number are left out.
-  counters: { round: number; usd: number; at: string }[];
-  // The agreed rate, or the carrier's latest ask while nothing is agreed.
-  final: BreakdownLine & { kind: "agreed" | "ask" };
-  // Final minus posted: what closing costs over the approximate cost.
-  overPosted: number;
-  // Ceiling minus final, in dollars and as a share of the ceiling; negative over the ceiling.
-  margin: { usd: number; pct: number };
-  // Margin over headroom, 0..100 (below 0 over the ceiling); null when there is no headroom.
-  headroomSharePct: number | null;
-};
-
-// The receipt of a load's pricing, top to bottom: cost, ceiling, the negotiation, and what we kept.
-export function pricingBreakdown(input: {
-  postedRate: number;
-  maxBuy: number;
-  miles: number | null | undefined;
-  // Every recorded offer on the load, oldest first.
-  path: Pick<WallOffer, "round" | "carrierAsk" | "rateToSay" | "createdAt">[];
-  agreedRate: number | null;
-  latestAsk: number;
-}): PricingBreakdown {
-  const { postedRate, maxBuy, miles, path, agreedRate, latestAsk } = input;
-  const line = (usd: number): BreakdownLine => ({ usd, perMile: perMile(usd, miles) });
-  const headroom = maxBuy - postedRate;
-  const first = path[0];
-  const finalUsd = agreedRate ?? latestAsk;
-  // Both numbers are present here, so the margin is never null.
-  const margin = marginKept(maxBuy, finalUsd)!;
-  return {
-    posted: line(postedRate),
-    ceiling: line(maxBuy),
-    headroom,
-    openingAsk: first ? { round: first.round, usd: first.carrierAsk } : null,
-    counters: path.flatMap((offer) => (offer.rateToSay === null ? [] : [{ round: offer.round, usd: offer.rateToSay, at: offer.createdAt }])),
-    final: { kind: agreedRate !== null ? "agreed" : "ask", ...line(finalUsd) },
-    overPosted: finalUsd - postedRate,
-    margin,
-    headroomSharePct: headroom > 0 ? (margin.usd / headroom) * 100 : null,
   };
 }

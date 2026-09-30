@@ -22,13 +22,6 @@ export function formatUsd(amount: number): string {
   return usdWhole.format(amount);
 }
 
-// "+$134" or "-$50"; zero carries no sign.
-export function formatSignedUsd(amount: number): string {
-  const rounded = Math.round(amount);
-  if (rounded === 0) return usdWhole.format(0);
-  return `${rounded > 0 ? "+" : "-"}${usdWhole.format(Math.abs(rounded))}`;
-}
-
 // "$2.72/mi".
 export function formatPerMile(usdPerMile: number): string {
   return `$${usdPerMile.toFixed(2)}/mi`;
@@ -36,11 +29,6 @@ export function formatPerMile(usdPerMile: number): string {
 
 export function formatPercent(pct: number): string {
   return `${pct.toFixed(1)}%`;
-}
-
-// Driving plus required rest, "30.5 h".
-export function formatHours(hours: number): string {
-  return `${hours.toFixed(1)} h`;
 }
 
 // A trip one driver cannot make on time; solo needs no badge. Impossible says how late even a team lands.
@@ -140,7 +128,7 @@ export function callStageLabel(call: Pick<TowerCall, "stage" | "round">): string
   }
 }
 
-// A load's outcome as the timeline and the pricing card word it, with its text color.
+// A load's outcome as the load picker words it, with its text color.
 export function outcomeLabel(outcome: LoadOutcome): { text: string; tone: string } {
   switch (outcome.kind) {
     case "booked":

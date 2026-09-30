@@ -87,8 +87,8 @@ function CarrierRecord({ carrier, calls }: { carrier: TowerCarrier | null; calls
           {pricing.bookingRate !== null && <span className="font-normal text-fg-muted"> ({formatPercent(pricing.bookingRate)})</span>}
         </Fact>
         <Fact icon={LuDollarSign} label="Avg agreed $/mi">{orDash(pricing.avgAgreedPerMile, formatPerMile)}</Fact>
-        <Fact icon={LuPiggyBank} label="Avg margin kept">{orDash(pricing.avgMarginKept, formatUsd)}</Fact>
-        <Fact icon={LuRepeat} label="Avg round at agreement">{orDash(pricing.avgRoundsToAgree, (v) => `R${v.toFixed(1)}`)}</Fact>
+        <Fact icon={LuPiggyBank} label="We keep, on avg">{orDash(pricing.avgMarginKept, formatUsd)}</Fact>
+        <Fact icon={LuRepeat} label="Rounds to a deal">{orDash(pricing.avgRoundsToAgree, (v) => `${v.toFixed(1)} on avg`)}</Fact>
         <Fact icon={LuCalendarClock} label="Next pickup">{carrier?.nextTrip?.pickupAt ? formatDateTime(carrier.nextTrip.pickupAt) : "-"}</Fact>
         <Fact icon={LuLock} label="Open hold">
           {hold ? `${hold.loadId} at ${formatUsd(hold.agreedRate)}${hold.status === "confirming" ? ", confirming" : ""}` : "None"}
@@ -322,9 +322,9 @@ function humanRequest(calls: TowerCall[]): { call: TowerCall; reason: string } |
   return null;
 }
 
-// The top of the detail panel whenever a person is needed: each hold waiting on the desk and a
-// carrier asking for a person, as action cards. The voice controls act on the selected call, so a
-// request on another call offers to open it first.
+// The top of the detail panel whenever a person is needed: each hold waiting on the desk (but the
+// selected call's, which its Deal card carries) and a carrier asking for a person, as action cards.
+// The voice controls act on the selected call, so a request on another call offers to open it first.
 function NeedsYou({
   calls,
   selected,
@@ -338,7 +338,10 @@ function NeedsYou({
   now: number;
   onSelectCall: (callId: string) => void;
 }) {
-  const holds = calls.flatMap((call) => (call.hold && (call.hold.status === "held" || call.hold.status === "confirming") ? [{ call, hold: call.hold }] : []));
+  // The selected call's open hold is the action card of its Deal, further down the panel.
+  const holds = calls.flatMap((call) =>
+    call.callId !== selected?.callId && call.hold && (call.hold.status === "held" || call.hold.status === "confirming") ? [{ call, hold: call.hold }] : [],
+  );
   const request = humanRequest(calls);
   if (holds.length === 0 && request === null) return null;
   return (

@@ -110,6 +110,8 @@ export const adapterWallCall = z.object({
   risk: z.enum(callRisks),
   riskReason: z.string().nullable(),
   offers: z.array(wallOffer),
+  // Every round of every load; an older adapter sends none.
+  rounds: z.array(wallOffer.pick({ loadId: true, round: true, carrierAsk: true, decision: true, rateToSay: true, createdAt: true })).default([]),
   hold: wallHold.nullable(),
   events: z.array(wallEvent),
   interventions: z.array(wallIntervention),
