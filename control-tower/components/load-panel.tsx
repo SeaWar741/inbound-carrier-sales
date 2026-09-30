@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import type { IconType } from "react-icons";
 import { LuCalendarClock, LuContainer, LuFlag, LuMap, LuMapPin, LuMousePointerClick, LuTruck } from "react-icons/lu";
-import { DealCard, TripSection } from "@/components/deal-card";
+import { DealCard, HowItWent, TripSection } from "@/components/deal-card";
 import { EmptyState } from "@/components/empty-state";
 import { formatPickup, HoldCard, LaneText } from "@/components/hold-card";
 import { LaneMap, type LaneMapLoad } from "@/components/lane-map";
@@ -149,6 +149,7 @@ export function LoadPanel({
           <p className="mt-3 text-xs text-fg-faint">Lane not recorded for this load.</p>
         )}
       </Section>
+      <HowItWent call={selectedCall} loadId={offer.loadId} />
       {standingHold?.trip && <TripSection trip={standingHold.trip} />}
     </>
   );

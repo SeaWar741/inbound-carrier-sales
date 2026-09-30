@@ -273,9 +273,36 @@ export function TripSection({ trip }: { trip: TripSnapshot }) {
   );
 }
 
+// How the rounds on one load went, as its own rail section below the load: the deal card above says
+// where it stands, this says how it got there.
+export function HowItWent({ call, loadId }: { call: TowerCall; loadId: string }) {
+  const end = dealEnd(call, loadId);
+  const rounds = dealRounds(call.rounds.length > 0 ? call.rounds : call.offers, loadId);
+  const last = rounds.at(-1) ?? null;
+  return (
+    <Section icon={LuMessageSquare} title="How it went">
+      <div className="flex flex-col gap-1.5">
+        {rounds.length === 0 ? (
+          <p className="text-xs text-fg-faint">No offers were recorded on this call.</p>
+        ) : (
+          <>
+            {rounds[0]!.round > 1 && <p className="text-[11px] text-fg-faint">Rounds before {rounds[0]!.round} are not shown.</p>}
+            <ol className="flex flex-col gap-1.5">
+              {rounds.map((round, index) => (
+                <RoundLine key={`${round.round}-${index}`} round={round} isLast={index === rounds.length - 1} end={end} />
+              ))}
+            </ol>
+          </>
+        )}
+        <EndLine end={end} closedInRound={last?.decision === "accept"} />
+      </div>
+    </Section>
+  );
+}
+
 // Operator only: our max for the load is on screen here and nowhere the agent can reach.
-// The selected call's deal on one load, top to bottom: where it stands, the price bar, how the
-// rounds went, who earns what, and whether the carrier was told.
+// The selected call's deal on one load, top to bottom: where it stands, who earns what, the price
+// bar, and whether the carrier was told. The rounds live in HowItWent, below the load.
 export function DealCard({
   call,
   loadId,
@@ -296,7 +323,6 @@ export function DealCard({
   action?: React.ReactNode;
 }) {
   const status = dealStatus(call, loadId);
-  const end = dealEnd(call, loadId);
   const rounds = dealRounds(call.rounds.length > 0 ? call.rounds : call.offers, loadId);
   const last = rounds.at(-1) ?? null;
   const hold = call.hold?.loadId === loadId ? call.hold : null;
@@ -363,23 +389,6 @@ export function DealCard({
         ) : (
           <p className="text-xs text-fg-faint">Rates were not recorded for this load.</p>
         )}
-
-        <div className="flex flex-col gap-1.5 border-t border-line pt-3">
-          <Subhead icon={LuMessageSquare}>How it went</Subhead>
-          {rounds.length === 0 ? (
-            <p className="text-xs text-fg-faint">No offers were recorded on this call.</p>
-          ) : (
-            <>
-              {rounds[0]!.round > 1 && <p className="text-[11px] text-fg-faint">Rounds before {rounds[0]!.round} are not shown.</p>}
-              <ol className="flex flex-col gap-1.5">
-                {rounds.map((round, index) => (
-                  <RoundLine key={`${round.round}-${index}`} round={round} isLast={index === rounds.length - 1} end={end} />
-                ))}
-              </ol>
-            </>
-          )}
-          <EndLine end={end} closedInRound={last?.decision === "accept"} />
-        </div>
 
         {notice?.summary ? (
           <Line icon={LuMail} className={notice.status === "sent" ? "text-fg-muted" : "text-warn"}>
