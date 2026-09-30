@@ -143,6 +143,7 @@ export const tripEstimateBody = z.object({ callId, loadId: loadIdInput });
 export type TripEstimateBody = z.output<typeof tripEstimateBody>;
 
 // What the carrier keeps at a rate after diesel and tolls. Stored on the hold as is; never carries the max buy.
+// legalHours is the chosen crew's (solo, else team); dieselPerGal and tollShare are the inputs the estimate used.
 export const tripSnapshot = z.object({
   rate: z.number().int(),
   dieselUsd: z.number().int(),
@@ -150,7 +151,10 @@ export const tripSnapshot = z.object({
   carrierNetUsd: z.number().int(),
   feasibility: z.enum(feasibilities),
   legalEtaAt: z.iso.datetime(),
+  legalHours: z.number(),
   netPerHour: z.number().int(),
+  dieselPerGal: z.number(),
+  tollShare: z.number(),
 });
 export type TripSnapshot = z.infer<typeof tripSnapshot>;
 

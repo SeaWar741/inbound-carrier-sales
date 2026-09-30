@@ -54,7 +54,7 @@ describe("OrsClient.route", () => {
       .route(tacoma, baltimore)
       .catch((e: unknown) => e);
     expect(limited).toBeInstanceOf(OrsError);
-    expect((limited as OrsError).status).toBe(429);
+    expect((limited as OrsError).message).toBe("/v2/directions/driving-hgv: HTTP 429");
 
     const failures: Array<typeof fetch> = [
       async () => jsonResponse({ routes: [] }),

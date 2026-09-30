@@ -5,10 +5,10 @@ import type { TripEstimate } from "../src/domain/trip-estimate.ts";
 import type { LoadDetail, LoadSummary } from "../src/infra/tms/codec.ts";
 import { TmsBusinessError, TmsUnavailableError } from "../src/infra/tms/errors.ts";
 import { TmsClient } from "../src/infra/tms/tms-client.ts";
+import type { TripEstimates } from "../src/infra/trip-estimator.ts";
 import { TwinClient } from "../src/infra/twin-client.ts";
 import { loadRoutes, type LoadRouteDeps } from "../src/routes/loads.ts";
 import { offerRoutes } from "../src/routes/offers.ts";
-import type { TripEstimates } from "../src/routes/trips.ts";
 import { buildServer } from "../src/server.ts";
 import { startFakeTms, type FakeBehavior, type FakeTms } from "./fake-tms-server.ts";
 
@@ -233,7 +233,7 @@ describe("POST /v1/loads/search", () => {
     let started = 0;
     let allStarted: () => void = () => {};
     const together = new Promise<void>((resolve) => (allStarted = resolve));
-    const outcomes = [async () => ({ feasibility: "team" }) as TripEstimate, async () => Promise.reject(new Error("vendor down")), async () => null];
+    const outcomes = [async () => ({ feasibility: "team" }) as TripEstimate, async () => null, async () => ({ feasibility: "solo" }) as TripEstimate];
     const estimate = vi.fn<TripEstimates["estimate"]>(async () => {
       const outcome = outcomes[started] ?? (async () => null);
       started += 1;
@@ -246,11 +246,11 @@ describe("POST /v1/loads/search", () => {
     await target.close();
     const body = res.json();
     expect(body.status).toBe("ok");
-    // LD2's estimate failed outright; the search still pitches it, without feasibility.
+    // LD2 got no estimate; the search still pitches it, without feasibility.
     expect(body.loads.map((l: { loadId: string; feasibility: string | null }) => [l.loadId, l.feasibility])).toEqual([
       ["LD1", "team"],
       ["LD2", null],
-      ["LD3", null],
+      ["LD3", "solo"],
     ]);
     expect(estimate.mock.calls.map(([trip]) => trip.rate)).toEqual([2000, 2000, 2000]);
     expectNoMaxBuy(res.body);

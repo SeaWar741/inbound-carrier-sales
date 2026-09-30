@@ -5,7 +5,7 @@ import { dieselCacheMs } from "../src/constants.ts";
 import { estimateTrip, laneDieselPerGal, soloLegalHours, teamLegalHours } from "../src/domain/trip-estimate.ts";
 import { EiaClient } from "../src/infra/eia-client.ts";
 import { OrsClient } from "../src/infra/ors-client.ts";
-import { readZip3Centroids, TripEstimator, type TripRequest } from "../src/infra/trip-estimator.ts";
+import { TripEstimator, zip3Centroids, type TripRequest } from "../src/infra/trip-estimator.ts";
 
 const fixture = (path: string): unknown => JSON.parse(readFileSync(new URL(`./fixtures/${path}.json`, import.meta.url), "utf8"));
 const jsonResponse = (body: unknown, status = 200) =>
@@ -83,14 +83,14 @@ describe("estimateTrip", () => {
 
   it("is solo when a single driver fits the window", () => {
     const estimate = estimateTrip({ ...base, deliveryAt: new Date("2026-10-02T19:00:00Z") });
-    expect(estimate).toMatchObject({ driveHours: 20, soloHours: 31, teamHours: 21.8, feasibility: "solo" });
+    expect(estimate).toMatchObject({ legalHours: 31, feasibility: "solo" });
     expect(estimate.legalEtaAt).toEqual(new Date("2026-10-02T19:00:00Z"));
     expect(estimate.netPerHour).toBe(Math.round(1955 / 31));
   });
 
   it("is team when only a team fits the window", () => {
     const estimate = estimateTrip({ ...base, deliveryAt: new Date("2026-10-02T10:00:00Z") });
-    expect(estimate.feasibility).toBe("team");
+    expect(estimate).toMatchObject({ legalHours: 21.8, feasibility: "team" });
     expect(estimate.legalEtaAt).toEqual(new Date("2026-10-02T09:49:05.454Z"));
     expect(estimate.netPerHour).toBe(Math.round(1955 / ((20 * 24) / 22)));
   });
@@ -209,7 +209,7 @@ describe("TripEstimator", () => {
   });
 
   it("reads the control tower's ZIP3 centroids as [lng, lat]", () => {
-    const [lng, lat] = readZip3Centroids().get("984") ?? [];
+    const [lng, lat] = zip3Centroids.get("984") ?? [];
     expect(lng).toBeCloseTo(-122.4, 0);
     expect(lat).toBeCloseTo(47.2, 0);
   });

@@ -13,9 +13,9 @@ import type { Feasibility } from "../domain/trip-estimate.ts";
 import type { LoadDetail, LoadQueryFilters } from "../infra/tms/codec.ts";
 import { TmsBusinessError, TmsUnavailableError } from "../infra/tms/errors.ts";
 import type { TmsClient } from "../infra/tms/tms-client.ts";
+import { estimateLoadTrip, type TripEstimates } from "../infra/trip-estimator.ts";
 import { sql, type TwinClient } from "../infra/twin-client.ts";
 import { invalidRequestHandler } from "../plugins/invalid-request.ts";
-import { estimateLoadTrip, type TripEstimates } from "./trips.ts";
 
 export type LoadRouteDeps = { tms: Pick<TmsClient, "queryLoads" | "getLoad">; twin: TwinClient; trips: TripEstimates };
 

@@ -4,7 +4,9 @@ import type { TripEstimate } from "../src/domain/trip-estimate.ts";
 import type { LoadDetail } from "../src/infra/tms/codec.ts";
 import { TmsBusinessError, TmsUnavailableError } from "../src/infra/tms/errors.ts";
 import type { SqlStatement } from "../src/infra/twin-client.ts";
-import { tmsWallClockToDate, tripRoutes, type TripEstimates, type TripRouteDeps } from "../src/routes/trips.ts";
+import { tmsWallClockToDate } from "../src/domain/trip.ts";
+import type { TripEstimates } from "../src/infra/trip-estimator.ts";
+import { tripRoutes, type TripRouteDeps } from "../src/routes/trips.ts";
 import { buildServer } from "../src/server.ts";
 import { testConfig } from "./test-config.ts";
 
@@ -22,7 +24,7 @@ async function query<T>(statement: SqlStatement, rowSchema: z.ZodType<T>): Promi
   const verified = verifiedCalls.get(callId);
   if (verified === undefined) return [];
   const latest = offers
-    .filter((o) => o.callId === callId && o.loadId === loadId && (o.decision === "accept" || o.decision === "counter"))
+    .filter((o) => o.callId === callId && o.loadId === loadId)
     .toSorted((a, b) => b.round - a.round)[0];
   return [rowSchema.parse({ verified, rate_to_say: latest?.rateToSay == null ? null : String(latest.rateToSay) })];
 }
@@ -53,9 +55,7 @@ const estimateAt = (rate: number, feasibility: TripEstimate["feasibility"] = "so
   dieselUsd: 2573,
   tollsUsd: 109,
   carrierNetUsd: rate - 2573 - 109,
-  driveHours: 51.4,
-  soloHours: 97.4,
-  teamHours: 56.1,
+  legalHours: 97.4,
   feasibility,
   legalEtaAt: new Date("2026-10-07T20:37:00.000Z"),
   netPerHour: 50,
@@ -121,17 +121,25 @@ describe("POST /v1/trips/estimate", () => {
     });
   });
 
-  it("estimates at our latest counter or accept on this load, not a rejected ask or another load", async () => {
+  it("estimates at our latest round on this load, not an earlier one or another load's", async () => {
     offers = [
       { callId: "call-ok", loadId: "LD00879", round: 1, decision: "counter", rateToSay: 7400 },
       { callId: "call-ok", loadId: "LD00879", round: 2, decision: "counter", rateToSay: 7500 },
-      { callId: "call-ok", loadId: "LD00879", round: 3, decision: "reject", rateToSay: null },
       { callId: "call-ok", loadId: "LD00848", round: 1, decision: "accept", rateToSay: 9000 },
     ];
     const res = await post({ callId: "call-ok", loadId: "LD00879" });
     expect(res.json()).toMatchObject({ status: "ok", rate: 7500, carrierNetUsd: 7500 - 2573 - 109 });
     expect(res.json().message).toMatch(/^At \$7,500,/);
     expect(estimate.mock.calls[0]?.[0].rate).toBe(7500);
+  });
+
+  it("falls back to the posted rate when the latest round was a reject", async () => {
+    offers = [
+      { callId: "call-ok", loadId: "LD00879", round: 1, decision: "counter", rateToSay: 7500 },
+      { callId: "call-ok", loadId: "LD00879", round: 2, decision: "reject", rateToSay: null },
+    ];
+    expect((await post({ callId: "call-ok", loadId: "LD00879" })).json()).toMatchObject({ status: "ok", rate: 7600 });
+    expect(estimate.mock.calls[0]?.[0].rate).toBe(7600);
   });
 
   it("names a window that needs a team or cannot be made legally", async () => {
@@ -162,11 +170,9 @@ describe("POST /v1/trips/estimate", () => {
     expect(estimate).not.toHaveBeenCalled();
   });
 
-  it("answers estimate_unavailable when the estimator has nothing, and when it throws", async () => {
+  it("answers estimate_unavailable when the estimator has nothing", async () => {
     estimate.mockResolvedValueOnce(null);
-    expect((await post({ callId: "call-ok", loadId: "LD00879" })).json()).toMatchObject({ status: "estimate_unavailable", rate: null });
-    estimate.mockRejectedValueOnce(new Error("vendor down"));
-    expect((await post({ callId: "call-ok", loadId: "LD00879" })).json()).toMatchObject({ status: "estimate_unavailable", feasibility: null });
+    expect((await post({ callId: "call-ok", loadId: "LD00879" })).json()).toMatchObject({ status: "estimate_unavailable", rate: null, feasibility: null });
   });
 
   it("answers load_unavailable for a load that is not OPEN or not found", async () => {

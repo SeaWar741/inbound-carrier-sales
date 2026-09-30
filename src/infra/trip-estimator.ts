@@ -1,11 +1,15 @@
-import { readFileSync } from "node:fs";
+// Same table the control tower draws with, so the estimate and the map agree on where a ZIP3 is.
+import zip3CentroidsJson from "../../control-tower/lib/zip3-centroids.json" with { type: "json" };
 import type { Config } from "../config.ts";
 import { dieselCacheMs } from "../constants.ts";
+import type { TripSnapshot } from "../contract.ts";
+import { tmsWallClockToDate } from "../domain/trip.ts";
 import { estimateTrip, laneDieselPerGal, type TripEstimate } from "../domain/trip-estimate.ts";
 import { EiaClient } from "./eia-client.ts";
 import { OrsClient, type LngLat, type OrsRoute } from "./ors-client.ts";
+import type { LoadDetail } from "./tms/codec.ts";
 
-type Log = { warn: (details: object, message: string) => void };
+export type Log = { warn: (details: object, message: string) => void };
 
 export type TripEndpoint = { zip: string; state: string };
 export type TripRequest = {
@@ -17,13 +21,12 @@ export type TripRequest = {
   rate: number;
 };
 
-// Same table the control tower draws with, so the estimate and the map agree on where a ZIP3 is.
-const defaultCentroidsUrl = new URL("../../control-tower/lib/zip3-centroids.json", import.meta.url);
-
-export function readZip3Centroids(url: URL = defaultCentroidsUrl): Map<string, LngLat> {
-  const raw = JSON.parse(readFileSync(url, "utf8")) as Record<string, [number, number]>;
-  return new Map(Object.entries(raw));
-}
+// [longitude, latitude] per 3-digit ZIP prefix.
+export const zip3Centroids: ReadonlyMap<string, LngLat> = new Map(
+  Object.entries(zip3CentroidsJson).flatMap(([zip3, [lng, lat]]): [string, LngLat][] =>
+    lng === undefined || lat === undefined ? [] : [[zip3, [lng, lat]]],
+  ),
+);
 
 export type TripEstimatorOptions = {
   eia?: EiaClient;
@@ -51,7 +54,7 @@ export class TripEstimator {
     this.#now = options.now ?? Date.now;
   }
 
-  static fromConfig(config: Pick<Config, "EIA_API_KEY" | "ORS_API_KEY">, centroids = readZip3Centroids()): TripEstimator {
+  static fromConfig(config: Pick<Config, "EIA_API_KEY" | "ORS_API_KEY">, centroids = zip3Centroids): TripEstimator {
     const { EIA_API_KEY: eiaKey, ORS_API_KEY: orsKey } = config;
     if (!eiaKey || !orsKey) return new TripEstimator({ centroids });
     return new TripEstimator({ eia: new EiaClient({ apiKey: eiaKey }), ors: new OrsClient({ apiKey: orsKey }), centroids });
@@ -114,4 +117,37 @@ export class TripEstimator {
     }
     return this.#diesel.prices;
   }
+}
+
+export type TripEstimates = Pick<TripEstimator, "estimate">;
+
+// The load's own lane and TMS window, at whatever rate is on the table.
+export function estimateLoadTrip(trips: TripEstimates, load: LoadDetail, rate: number, log: Log): Promise<TripEstimate | null> {
+  return trips.estimate(
+    {
+      origin: { zip: load.origZip, state: load.origState },
+      destination: { zip: load.destZip, state: load.destState },
+      miles: load.miles,
+      pickupAt: tmsWallClockToDate(load.pickupDateTime),
+      deliveryAt: tmsWallClockToDate(load.deliveryDateTime),
+      rate,
+    },
+    log,
+  );
+}
+
+// Picks fields explicitly: this is what the hold stores and the agent route reads from.
+export function tripSnapshotFor(rate: number, estimate: TripEstimate): TripSnapshot {
+  return {
+    rate,
+    dieselUsd: estimate.dieselUsd,
+    tollsUsd: estimate.tollsUsd,
+    carrierNetUsd: estimate.carrierNetUsd,
+    feasibility: estimate.feasibility,
+    legalEtaAt: estimate.legalEtaAt.toISOString(),
+    legalHours: estimate.legalHours,
+    netPerHour: estimate.netPerHour,
+    dieselPerGal: estimate.dieselPerGal,
+    tollShare: estimate.tollShare,
+  };
 }

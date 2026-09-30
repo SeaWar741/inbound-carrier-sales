@@ -32,10 +32,10 @@ describe("EiaClient.latestDieselPrices", () => {
     expect(prices.get("R50")).toBe(7.357);
   });
 
-  it("does not trust the order EIA sends", async () => {
+  it("takes each area's first row, since the request sorts newest first", async () => {
     const rows = [
-      { period: "2026-09-21", duoarea: "NUS", value: "6.529" },
       { period: "2026-09-28", duoarea: "NUS", value: "6.382" },
+      { period: "2026-09-21", duoarea: "NUS", value: "6.529" },
     ];
     const prices = await clientWith(vi.fn<typeof fetch>(async () => jsonResponse({ response: { data: rows } }))).latestDieselPrices();
     expect(prices.get("NUS")).toBe(6.382);

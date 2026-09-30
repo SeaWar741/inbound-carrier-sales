@@ -5,9 +5,9 @@ import type { z } from "zod";
 import { resolveBooking } from "../src/domain/holds.ts";
 import type { TripEstimate } from "../src/domain/trip-estimate.ts";
 import { TmsClient } from "../src/infra/tms/tms-client.ts";
+import type { TripEstimates } from "../src/infra/trip-estimator.ts";
 import { TwinError, type SqlStatement } from "../src/infra/twin-client.ts";
 import { confirmHoldRoutes, holdRoutes, releaseHoldRoutes } from "../src/routes/holds.ts";
-import type { TripEstimates } from "../src/routes/trips.ts";
 import { buildServer } from "../src/server.ts";
 import { startFakeTms, type FakeBehavior, type FakeTms } from "./fake-tms-server.ts";
 import { testConfig } from "./test-config.ts";
@@ -255,9 +255,7 @@ describe("hold routes", () => {
         dieselUsd: 1100,
         tollsUsd: 40,
         carrierNetUsd: 1160,
-        driveHours: 19.9,
-        soloHours: 30.9,
-        teamHours: 21.7,
+        legalHours: 30.9,
         feasibility: "solo",
         legalEtaAt: new Date("2026-10-05T02:07:00.000Z"),
         netPerHour: 38,
@@ -275,13 +273,16 @@ describe("hold routes", () => {
         carrierNetUsd: 1160,
         feasibility: "solo",
         legalEtaAt: "2026-10-05T02:07:00.000Z",
+        legalHours: 30.9,
         netPerHour: 38,
+        dieselPerGal: 6.944,
+        tollShare: 0.2074,
       });
       expect(res.body).not.toMatch(/diesel|1160/i);
     });
 
-    it("places the hold with a NULL trip when the estimate fails", async () => {
-      trips.estimate.mockRejectedValue(new Error("vendor down"));
+    it("places the hold with a NULL trip when there is no estimate", async () => {
+      trips.estimate.mockResolvedValue(null);
       accept("call-a", "LD00881", 2300);
       const res = await createHold({ callId: "call-a", loadId: "LD00881", agreedRate: 2300 });
       expect(res.json()).toMatchObject({ status: "ok", holdStatus: "held" });

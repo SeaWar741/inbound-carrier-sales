@@ -21,29 +21,23 @@ const orsBaseUrl = "https://api.openrouteservice.org";
 export type OrsRoute = { distanceMi: number; durationS: number; tollShare: number };
 
 export class OrsError extends Error {
-  readonly status: number | undefined;
-
-  constructor(message: string, status?: number) {
+  constructor(message: string) {
     super(message);
     this.name = "OrsError";
-    this.status = status;
   }
 }
 
 export type OrsClientOptions = {
   apiKey: string;
-  timeoutMs?: number;
   fetch?: typeof fetch;
 };
 
 export class OrsClient {
   readonly #apiKey: string;
-  readonly #timeoutMs: number;
   readonly #fetch: typeof fetch;
 
   constructor(options: OrsClientOptions) {
     this.#apiKey = options.apiKey;
-    this.#timeoutMs = options.timeoutMs ?? tripVendorTimeoutMs;
     this.#fetch = options.fetch ?? fetch;
   }
 
@@ -56,13 +50,13 @@ export class OrsClient {
         method: "POST",
         headers: { authorization: this.#apiKey, "content-type": "application/json" },
         body: JSON.stringify({ coordinates: [from, to], extra_info: ["tollways"], units: "mi", radiuses: [-1, -1] }),
-        signal: AbortSignal.timeout(this.#timeoutMs),
+        signal: AbortSignal.timeout(tripVendorTimeoutMs),
       });
     } catch (error) {
       const reason = error instanceof Error ? error.name : "unknown error";
       throw new OrsError(`${orsPath}: request failed (${reason})`);
     }
-    if (!response.ok) throw new OrsError(`${orsPath}: HTTP ${response.status}`, response.status);
+    if (!response.ok) throw new OrsError(`${orsPath}: HTTP ${response.status}`);
     const parsed = responseSchema.safeParse(await response.json().catch(() => undefined));
     const route = parsed.success ? parsed.data.routes[0] : undefined;
     if (!route) throw new OrsError(`${orsPath}: unexpected response shape`);

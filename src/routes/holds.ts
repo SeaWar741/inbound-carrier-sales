@@ -19,10 +19,10 @@ import { dollars } from "../domain/negotiation.ts";
 import type { BookingRequest } from "../infra/tms/codec.ts";
 import { TmsBusinessError, TmsUnavailableError } from "../infra/tms/errors.ts";
 import type { TmsClient } from "../infra/tms/tms-client.ts";
+import { estimateLoadTrip, tripSnapshotFor, type Log, type TripEstimates } from "../infra/trip-estimator.ts";
 import { sql, TwinError, type TwinClient } from "../infra/twin-client.ts";
 import { autonomyModes, holdRowSchema, type HoldRow } from "../infra/twin-schemas.ts";
 import { invalidRequestHandler } from "../plugins/invalid-request.ts";
-import { estimateLoadTrip, tripSnapshotFor, type TripEstimates } from "./trips.ts";
 
 export type HoldRouteDeps = { tms: Pick<TmsClient, "getLoad" | "bookLoad">; twin: Pick<TwinClient, "query">; trips: TripEstimates };
 export type ConfirmHoldRouteDeps = { tms: Pick<TmsClient, "bookLoad">; twin: Pick<TwinClient, "query"> };
@@ -219,8 +219,6 @@ async function attemptBooking(
     throw error;
   }
 }
-
-type Log = { warn: (details: object, message: string) => void };
 
 // Books a held load once: the operator's confirm and, in autonomous mode, create_hold both come here.
 export async function confirmBooking(

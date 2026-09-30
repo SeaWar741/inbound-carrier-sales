@@ -88,5 +88,6 @@ if (import.meta.main) {
     ],
     operatorRoutes: [confirmHoldRoutes({ tms, twin }), releaseHoldRoutes({ twin }), operatorWallRoutes({ twin, tmsHealth }), operatorInboxRoutes({ twin })],
   }, { twin });
+  if (!config.EIA_API_KEY || !config.ORS_API_KEY) app.log.warn("trip estimates disabled: EIA_API_KEY/ORS_API_KEY not set");
   await app.listen({ host: "0.0.0.0", port: config.PORT });
 }

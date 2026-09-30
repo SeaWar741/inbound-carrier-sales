@@ -24,3 +24,28 @@ export function tripProgress(pickupAt: Date, etaAt: Date, now: Date): number {
   if (total <= 0) return elapsed >= 0 ? 1 : 0;
   return Math.min(1, Math.max(0, elapsed / total));
 }
+
+const deskOffsetFormat = new Intl.DateTimeFormat("en-US", { timeZone: operatorTimeZone, timeZoneName: "longOffset" });
+
+// The desk zone's UTC offset at an instant: "GMT-05:00" is -5 h, a bare "GMT" is 0.
+function deskOffsetMs(at: number): number {
+  const name = deskOffsetFormat.formatToParts(at).find((part) => part.type === "timeZoneName")?.value ?? "";
+  const match = /([+-])(\d{2}):(\d{2})$/.exec(name);
+  if (!match) return 0;
+  const [, sign, hours, minutes] = match;
+  return (sign === "-" ? -1 : 1) * (Number(hours) * 60 + Number(minutes)) * 60_000;
+}
+
+// The TMS wall clock (YYYYMMDDHHMMSS) read in the desk's zone, the same reading tripSql gives
+// pickup_at with `AT TIME ZONE`. The offset is looked up twice so a date across a DST change lands right.
+export function tmsWallClockToDate(wire: string): Date {
+  const asUtc = Date.UTC(
+    Number(wire.slice(0, 4)),
+    Number(wire.slice(4, 6)) - 1,
+    Number(wire.slice(6, 8)),
+    Number(wire.slice(8, 10)),
+    Number(wire.slice(10, 12)),
+    Number(wire.slice(12, 14)),
+  );
+  return new Date(asUtc - deskOffsetMs(asUtc - deskOffsetMs(asUtc)));
+}

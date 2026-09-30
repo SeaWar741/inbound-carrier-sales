@@ -3,8 +3,7 @@ import { tripVendorTimeoutMs } from "../constants.ts";
 
 // EIA API v2, weekly retail No 2 diesel. There is no official SDK, so this is the only raw fetch to EIA.
 
-export const dieselAreas = ["NUS", "R1X", "R1Y", "R1Z", "R20", "R30", "R40", "R50", "SCA"] as const;
-export type DieselArea = (typeof dieselAreas)[number];
+const dieselAreas = ["NUS", "R1X", "R1Y", "R1Z", "R20", "R30", "R40", "R50", "SCA"] as const;
 
 // EIA sends prices as strings ("6.382").
 const rowSchema = z.object({ period: z.string(), duoarea: z.string(), value: z.coerce.number().positive() });
@@ -24,18 +23,15 @@ export class EiaError extends Error {
 
 export type EiaClientOptions = {
   apiKey: string;
-  timeoutMs?: number;
   fetch?: typeof fetch;
 };
 
 export class EiaClient {
   readonly #apiKey: string;
-  readonly #timeoutMs: number;
   readonly #fetch: typeof fetch;
 
   constructor(options: EiaClientOptions) {
     this.#apiKey = options.apiKey;
-    this.#timeoutMs = options.timeoutMs ?? tripVendorTimeoutMs;
     this.#fetch = options.fetch ?? fetch;
   }
 
@@ -56,7 +52,7 @@ export class EiaClient {
     // Errors carry only the path: the key rides in the query string and must never be logged.
     let response: Response;
     try {
-      response = await this.#fetch(`${eiaBaseUrl}${eiaPath}?${params}`, { signal: AbortSignal.timeout(this.#timeoutMs) });
+      response = await this.#fetch(`${eiaBaseUrl}${eiaPath}?${params}`, { signal: AbortSignal.timeout(tripVendorTimeoutMs) });
     } catch (error) {
       const reason = error instanceof Error ? error.name : "unknown error";
       throw new EiaError(`${eiaPath}: request failed (${reason})`);
@@ -65,9 +61,8 @@ export class EiaClient {
     const parsed = responseSchema.safeParse(await response.json().catch(() => undefined));
     if (!parsed.success) throw new EiaError(`${eiaPath}: unexpected response shape`);
 
-    const rows = parsed.data.response.data.toSorted((a, b) => b.period.localeCompare(a.period));
     const prices = new Map<string, number>();
-    for (const row of rows) if (!prices.has(row.duoarea)) prices.set(row.duoarea, row.value);
+    for (const row of parsed.data.response.data) if (!prices.has(row.duoarea)) prices.set(row.duoarea, row.value);
     if (prices.size === 0) throw new EiaError(`${eiaPath}: no prices`);
     return prices;
   }
