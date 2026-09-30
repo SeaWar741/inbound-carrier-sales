@@ -22,23 +22,11 @@ import { autonomyModes, holdStatuses } from "../infra/twin-schemas.ts";
 
 export type OperatorRouteDeps = { twin: Pick<TwinClient, "query">; tmsHealth: Pick<TmsHealthRecorder, "snapshot"> };
 
-// Stored timestamps are session-zone wall clock; bounds are converted back to that clock so the
-// created_at comparison stays index-friendly. Nested timestamps are cast to timestamptz so the
-// JSON carries an offset. The wall and its counters come back in a single row.
-export function wallQuery(): SqlStatement {
-  return sql`WITH bounds AS (
-      SELECT date_trunc('day', now() AT TIME ZONE ${operatorTimeZone}) AS local_start
-    ), today AS (
-      SELECT c.* FROM calls c, bounds b
-      WHERE c.created_at >= (b.local_start AT TIME ZONE ${operatorTimeZone})::timestamp
-        AND c.created_at < ((b.local_start + interval '1 day') AT TIME ZONE ${operatorTimeZone})::timestamp
-    ), today_holds AS (
-      SELECT h.* FROM holds h JOIN today t ON t.call_id = h.call_id
-      WHERE h.status IN ('booked', 'booked_unconfirmed')
-    ), wall AS (
-      SELECT t.call_id, t.mc_number, t.dot_number, t.eligible, t.verified, t.otp_attempts,
-        t.otp_expires_at::timestamptz AS otp_expires_at, t.created_at::timestamptz AS created_at,
-        EXISTS (SELECT 1 FROM call_events e WHERE e.call_id = t.call_id AND e.tool = 'request_human') AS human_requested,
+// What a WallCall needs beyond the calls row, read per call from a row aliased `t`: the latest
+// round of each load, the live hold, the last events and every intervention. Nested timestamps
+// are cast to timestamptz so the JSON carries an offset. The sql tag cannot nest statements,
+// so queries splice this fragment's text between their own tagged parts.
+const callColumns = sql`EXISTS (SELECT 1 FROM call_events e WHERE e.call_id = t.call_id AND e.tool = 'request_human') AS human_requested,
         COALESCE((SELECT json_agg(o ORDER BY o.created_at) FROM (
           SELECT DISTINCT ON (load_id) load_id, round, carrier_ask, decision, rate_to_say, posted_rate, max_buy,
             origin_city, origin_state, origin_zip, destination_city, destination_state, destination_zip, equipment, miles, pickup_at,
@@ -56,8 +44,27 @@ export function wallQuery(): SqlStatement {
         COALESCE((SELECT json_agg(i ORDER BY i.created_at) FROM (
           SELECT kind, load_id, amount_usd, message, created_at::timestamptz AS created_at
           FROM interventions WHERE call_id = t.call_id
-        ) i), '[]'::json) AS interventions
-      FROM today t
+        ) i), '[]'::json) AS interventions`;
+
+// The select list of a WallCall row from a calls row aliased `t`: its own columns, then callColumns.
+export const wallCallColumns: SqlStatement = {
+  text: sql`t.call_id, t.mc_number, t.dot_number, t.eligible, t.verified, t.otp_attempts,
+        t.otp_expires_at::timestamptz AS otp_expires_at, t.created_at::timestamptz AS created_at,
+        `.text + callColumns.text,
+};
+
+// Stored timestamps are session-zone wall clock; bounds are converted back to that clock so the
+// created_at comparison stays index-friendly. The day's counters come back in a single row.
+export function wallQuery(): SqlStatement {
+  const text = sql`WITH bounds AS (
+      SELECT date_trunc('day', now() AT TIME ZONE ${operatorTimeZone}) AS local_start
+    ), today AS (
+      SELECT c.* FROM calls c, bounds b
+      WHERE c.created_at >= (b.local_start AT TIME ZONE ${operatorTimeZone})::timestamp
+        AND c.created_at < ((b.local_start + interval '1 day') AT TIME ZONE ${operatorTimeZone})::timestamp
+    ), today_holds AS (
+      SELECT h.* FROM holds h JOIN today t ON t.call_id = h.call_id
+      WHERE h.status IN ('booked', 'booked_unconfirmed')
     )
     SELECT to_char((SELECT local_start FROM bounds), 'YYYY-MM-DD') AS day,
       (SELECT count(*) FROM today) AS calls_count,
@@ -65,8 +72,8 @@ export function wallQuery(): SqlStatement {
       (SELECT count(*) FROM today WHERE NOT eligible OR (NOT verified AND otp_attempts >= ${otpMaxAttempts})) AS blocked,
       (SELECT COALESCE(sum(agreed_rate), 0) FROM today_holds) AS dollars_generated,
       (SELECT COALESCE(sum(max_buy - agreed_rate), 0) FROM today_holds) AS margin_saved,
-      COALESCE((SELECT value FROM settings WHERE key = 'autonomy'), 'human') AS autonomy,
-      COALESCE((SELECT json_agg(w ORDER BY w.created_at DESC) FROM wall w), '[]'::json) AS calls`;
+      COALESCE((SELECT value FROM settings WHERE key = 'autonomy'), 'human') AS autonomy`.text;
+  return { text };
 }
 
 // Twin returns int8 and numeric as strings, and json columns already parsed.
@@ -97,8 +104,13 @@ const offerRow = z.object({
 });
 type OfferRow = z.output<typeof offerRow>;
 
+type LaneColumns = Pick<
+  OfferRow,
+  "origin_city" | "origin_state" | "origin_zip" | "destination_city" | "destination_state" | "destination_zip" | "equipment" | "miles" | "pickup_at"
+>;
+
 // Offers stored before lanes were kept have no lane columns set.
-function laneOf(o: OfferRow): WallLane | null {
+export function laneOf(o: LaneColumns): WallLane | null {
   const { origin_city, origin_state, origin_zip, destination_city, destination_state, destination_zip, equipment, miles, pickup_at } = o;
   if (!origin_city || !origin_state || !origin_zip || !destination_city || !destination_state || !destination_zip) return null;
   if (!equipment || miles == null || !pickup_at) return null;
@@ -137,7 +149,7 @@ const interventionRow = z.object({
   created_at: timestamp,
 });
 
-const callRow = z.object({
+export const callRow = z.object({
   call_id: z.string(),
   mc_number: z.string().nullable(),
   dot_number: z.string().nullable(),
@@ -162,7 +174,6 @@ export const wallRow = z.object({
   dollars_generated: money,
   margin_saved: money,
   autonomy: z.enum(autonomyModes),
-  calls: z.array(callRow),
 });
 export type WallRow = z.output<typeof wallRow>;
 
@@ -248,7 +259,6 @@ export function operatorWallRoutes(deps: OperatorRouteDeps): FastifyPluginAsync 
             },
             tmsHealth: deps.tmsHealth.snapshot(),
             autonomy: row.autonomy,
-            calls: row.calls.map(toWallCall),
           };
           return wall;
         } catch (error) {

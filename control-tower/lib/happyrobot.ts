@@ -13,7 +13,7 @@ const signalTimeoutMs = 20_000;
 
 let client: HappyRobotClient | undefined;
 function happyRobot(): HappyRobotClient {
-  // The wall refreshes every 2 s, so a slow answer is dropped rather than retried.
+  // The inbox polls every 5 s, so a slow answer is dropped rather than retried.
   client ??= new HappyRobotClient({ apiKey: env().HAPPYROBOT_API_KEY, timeout: 5_000, maxRetries: 0 });
   return client;
 }
@@ -34,7 +34,7 @@ export type RunningRun = {
 };
 
 // A run's session never changes once it exists, so it is fetched once per run and kept for the
-// life of the server. The wall then costs two HappyRobot requests a tick however many calls are live.
+// life of the server. A poll then costs two HappyRobot requests however many calls are live.
 const sessionByRun = new Map<string, { id: string; channel: Channel | null }>();
 
 async function sessionOf(runId: string): Promise<{ id: string; channel: Channel | null } | null> {
@@ -58,7 +58,7 @@ async function sessionOf(runId: string): Promise<{ id: string; channel: Channel 
 }
 
 // Every running run of the workflow with its session. Throws when HappyRobot is unreachable.
-export async function listRunningRuns(): Promise<RunningRun[]> {
+async function listRunningRuns(): Promise<RunningRun[]> {
   const { WORKFLOW_ID } = env();
   const runs = runsPage.parse(await happyRobot().workflows.listRuns(WORKFLOW_ID, { status: "running" }));
   return Promise.all(
@@ -73,6 +73,19 @@ export async function listRunningRuns(): Promise<RunningRun[]> {
         };
       }),
   );
+}
+
+// The adapter caps the running call ids it accepts.
+const maxLive = 200;
+
+// Replaces any `live` ids on an adapter query with the running calls and answers every running run by id, or
+// undefined when HappyRobot could not answer (the query then goes without `live`).
+export async function liveRuns(query: URLSearchParams): Promise<Map<string, RunningRun> | undefined> {
+  const runs = await listRunningRuns().catch(() => undefined);
+  query.delete("live");
+  if (!runs) return undefined;
+  for (const run of runs.slice(0, maxLive)) query.append("live", run.runId);
+  return new Map(runs.map((run) => [run.runId, run]));
 }
 
 // The newest session of a run, live or ended; HappyRobot keeps its messages after the call.

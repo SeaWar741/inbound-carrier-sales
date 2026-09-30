@@ -42,6 +42,7 @@ npm run push:workflow -- inbound-carrier-sales  # the voice agent (needs ADAPTER
 Pushing the agent generates each tool's result once, which calls the adapter with blank input, so the adapter must be running at `ADAPTER_URL`.
 
 Twin tables are created with `npm run bootstrap:twin` (idempotent; also applies migrations and prints SQL latency).
+Fake demo data for the dashboard and inbox: `npm run seed:demo` (24 carriers marked `demo-` / `DM`, reseeds from scratch); `npm run seed:demo -- --teardown` removes only those rows.
 
 ## Simulated calls
 

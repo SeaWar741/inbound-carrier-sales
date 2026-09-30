@@ -1,6 +1,6 @@
 "use client";
 
-import { ChatText, Phone } from "@phosphor-icons/react";
+import { LuMessageSquareText, LuPhone } from "react-icons/lu";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityChips } from "@/components/activity-chips";
 import { InterventionBar, type SentIntervention } from "@/components/intervention-bar";
@@ -8,7 +8,7 @@ import { PulseDot } from "@/components/pulse-dot";
 import { StageRail } from "@/components/stage-rail";
 import { Transcript } from "@/components/transcript";
 import type { ErrorResponse, InterventionBody, InterventionResponse, TowerCall } from "@/lib/contracts";
-import { carrierId, carrierState, formatClock, formatElapsed } from "@/lib/format";
+import { carrierState, deskDayKey, formatClock, formatDeskWhen, formatElapsed } from "@/lib/format";
 import { useCallStream } from "@/lib/use-call-stream";
 import { useVoice } from "@/lib/use-voice";
 
@@ -91,6 +91,14 @@ function useSentInterventions(callId: string, hasSession: boolean, signalCount: 
   return { sent, whisper, authorize };
 }
 
+// When the call last did anything: its end is not recorded, so the newest event stands in for it.
+function endedLabel(call: TowerCall, now: number): string {
+  const times = [...call.events, ...call.interventions].map((item) => item.createdAt);
+  if (call.hold) times.push(call.hold.createdAt);
+  const last = times.sort().at(-1);
+  return last ? `Call ended, last activity at ${formatDeskWhen(last, deskDayKey(now))}` : "Not live";
+}
+
 export function CallDetail({
   call,
   now,
@@ -105,7 +113,7 @@ export function CallDetail({
   const voice = useVoice(call.callId, call.sessionId !== null);
   const { sent, whisper, authorize } = useSentInterventions(call.callId, call.sessionId !== null, stream.signals.length);
   const state = carrierState(call);
-  const ChannelIcon = call.channel === "text" ? ChatText : Phone;
+  const ChannelIcon = call.channel === "text" ? LuMessageSquareText : LuPhone;
   const takenOver = voice.mode === "takeover";
 
   useEffect(() => {
@@ -116,8 +124,6 @@ export function CallDetail({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <header className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-line px-3 py-2">
-        <h2 className="tabular text-sm font-semibold text-fg">{carrierId(call)}</h2>
-        {call.mcNumber && call.dotNumber && <span className="tabular text-xs text-fg-faint">DOT {call.dotNumber}</span>}
         {state && <span className={`text-xs ${state.tone}`}>{state.text}</span>}
         <span className="ml-auto flex items-center gap-3">
           {call.channel && (
@@ -147,7 +153,15 @@ export function CallDetail({
         <Transcript streamId={call.callId} stream={stream} interventions={call.interventions} sent={sent} />
       </div>
 
-      <InterventionBar call={call} voice={voice} onWhisper={whisper} onAuthorize={authorize} />
+      {/* Once the call is over a quiet "Call ended" line replaces the bar; an open listen or takeover
+          keeps its controls even if the call drops, so it can be stopped. */}
+      {call.live || voice.mode !== "idle" ? (
+        <InterventionBar call={call} voice={voice} onWhisper={whisper} onAuthorize={authorize} />
+      ) : (
+        <p role="status" className="shrink-0 border-t border-line px-3 py-3 text-xs text-fg-muted">
+          {endedLabel(call, now)}
+        </p>
+      )}
     </div>
   );
 }

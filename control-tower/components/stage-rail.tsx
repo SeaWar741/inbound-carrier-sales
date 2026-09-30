@@ -1,6 +1,6 @@
 "use client";
 
-import { Check } from "@phosphor-icons/react";
+import { LuCheck } from "react-icons/lu";
 import { finalRound, type CallStage, type TowerCall } from "@/lib/contracts";
 
 const steps = ["Verify", "Code", "Search", "Negotiate", "Hold", "Booked"] as const;
@@ -84,7 +84,7 @@ export function StageRail({ call }: { call: TowerCall }) {
           <li key={step} aria-current={isCurrent ? "step" : undefined} className="flex min-w-0 flex-col gap-1.5">
             <span className={`h-0.5 rounded-full ${bar}`} />
             <span className={`flex items-center gap-1.5 text-xs font-medium ${label}`}>
-              {done && <Check size={11} weight="bold" aria-label="Done" className="shrink-0" />}
+              {done && <LuCheck size={11} aria-label="Done" className="shrink-0" />}
               <span className="truncate">{step}</span>
               {step === "Negotiate" && (
                 <RoundDots

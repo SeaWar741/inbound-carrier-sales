@@ -87,7 +87,8 @@ describe("POST /v1/carriers/verify", () => {
     });
     expect(res.body).not.toContain("dispatch@example-carrier.com");
     expect(res.body).not.toContain("5555550142");
-    expect(lastSql()).toContain("VALUES (E'call-1', E'80806', E'135797', TRUE, FALSE)");
+    expect(lastSql()).toContain("VALUES (E'call-1', E'80806', E'135797', TRUE, FALSE, E'J B HUNT TRANSPORT INC')");
+    expect(lastSql()).toContain("carrier_name = EXCLUDED.carrier_name");
     expect(lastSql()).toContain("ON CONFLICT (call_id) DO UPDATE");
   });
 
@@ -124,7 +125,7 @@ describe("POST /v1/carriers/verify", () => {
       dotNumber: null,
       mcNumber: "135797",
     });
-    expect(lastSql()).toContain("VALUES (E'call-4', NULL, E'135797', FALSE, FALSE)");
+    expect(lastSql()).toContain("VALUES (E'call-4', NULL, E'135797', FALSE, FALSE, NULL)");
   });
 
   it("sends an unknown MC or DOT to review", async () => {
@@ -169,7 +170,7 @@ describe("POST /v1/carriers/verify", () => {
       maskedContact: {},
       riskFlags: [],
     });
-    expect(lastSql()).toContain("VALUES (E'call-10', E'80806', E'135797', TRUE, FALSE)");
+    expect(lastSql()).toContain("VALUES (E'call-10', E'80806', E'135797', TRUE, FALSE, E'J B HUNT TRANSPORT INC')");
   });
 
   it("answers verification_unavailable when the Twin write fails", async () => {

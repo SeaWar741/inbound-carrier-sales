@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, Broadcast } from "@phosphor-icons/react";
+import { LuArrowRight, LuRadioTower } from "react-icons/lu";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
@@ -29,7 +29,7 @@ export default function LoginPage() {
       <form onSubmit={submit} className="w-full max-w-sm">
         <div className="mb-10 flex items-center gap-3">
           <span className="grid size-9 place-items-center rounded-full bg-accent-soft text-accent">
-            <Broadcast size={18} weight="bold" />
+            <LuRadioTower size={18} />
           </span>
           <div>
             <h1 className="text-lg font-semibold tracking-tight">Control Tower</h1>
@@ -57,7 +57,7 @@ export default function LoginPage() {
           className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-full bg-accent px-4 py-2.5 text-sm font-medium text-white transition active:scale-[0.98] disabled:opacity-40"
         >
           {pending ? "Checking" : "Enter"}
-          <ArrowRight size={16} weight="bold" />
+          <LuArrowRight size={16} />
         </button>
       </form>
     </main>

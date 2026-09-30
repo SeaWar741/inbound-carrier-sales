@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, CheckCircle, LockSimple, Warning } from "@phosphor-icons/react";
+import { LuArrowRight, LuCircleCheck, LuLock, LuTriangleAlert } from "react-icons/lu";
 import { useEffect, useRef, useState } from "react";
 import type { ConfirmHoldResponse, ReleaseHoldResponse, TowerCall, WallLane } from "@/lib/contracts";
 import { carrierId, formatUsd } from "@/lib/format";
@@ -56,7 +56,7 @@ export function LaneText({ lane, className = "" }: { lane: WallLane; className?:
   return (
     <span className={`inline-flex items-center gap-1 ${className}`}>
       {lane.origin.city}, {lane.origin.state}
-      <ArrowRight size={11} className="shrink-0 text-fg-faint" aria-label="to" />
+      <LuArrowRight size={11} className="shrink-0 text-fg-faint" aria-label="to" />
       {lane.destination.city}, {lane.destination.state}
     </span>
   );
@@ -145,7 +145,7 @@ export function HoldCard({ call, hold }: { call: TowerCall; hold: Hold }) {
     <div className="flex flex-col gap-2 px-3 py-3">
       <div className="flex items-center justify-between">
         <h3 className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-fg-faint">
-          <LockSimple size={12} weight="bold" aria-hidden />
+          <LuLock size={12} aria-hidden />
           Hold
         </h3>
         <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium leading-none ${chip.tone}`}>{chip.text}</span>
@@ -181,7 +181,7 @@ export function HoldCard({ call, hold }: { call: TowerCall; hold: Hold }) {
 
       {(status === "booked" || status === "booked_unconfirmed") && (
         <p className={`flex items-center gap-1.5 text-xs ${status === "booked" ? "text-ok" : "text-warn"}`}>
-          <CheckCircle size={14} weight="bold" aria-hidden />
+          <LuCircleCheck size={14} aria-hidden />
           {status === "booked" ? "Booked" : "Booked, TMS confirmation pending"}
           {bookingRef && (
             <span>
@@ -204,7 +204,7 @@ export function HoldCard({ call, hold }: { call: TowerCall; hold: Hold }) {
             disabled={!actionable}
             aria-live="polite"
             className={`flex-1 rounded-[var(--radius-panel)] px-3 py-2 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
-              armed ? "bg-ok text-bg" : "bg-accent text-white hover:bg-accent/90"
+              armed ? "bg-ok text-white" : "bg-accent text-white hover:bg-accent/90"
             }`}
           >
             {pending === "confirm" ? (
@@ -231,7 +231,7 @@ export function HoldCard({ call, hold }: { call: TowerCall; hold: Hold }) {
 
       {error && (
         <p role="alert" className="flex items-start gap-1.5 text-xs text-risk">
-          <Warning size={14} weight="bold" className="mt-px shrink-0" aria-hidden />
+          <LuTriangleAlert size={14} className="mt-px shrink-0" aria-hidden />
           {error}
         </p>
       )}

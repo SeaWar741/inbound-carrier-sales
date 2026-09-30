@@ -16,6 +16,7 @@ import { healthRoutes } from "./routes/health.ts";
 import { confirmHoldRoutes, holdRoutes, releaseHoldRoutes } from "./routes/holds.ts";
 import { loadRoutes } from "./routes/loads.ts";
 import { offerRoutes } from "./routes/offers.ts";
+import { operatorInboxRoutes } from "./routes/operator-inbox.ts";
 import { operatorWallRoutes } from "./routes/operator.ts";
 import { otpRoutes } from "./routes/otp.ts";
 
@@ -81,7 +82,7 @@ if (import.meta.main) {
       holdRoutes({ tms, twin }),
       handoffRoutes({ twin }),
     ],
-    operatorRoutes: [confirmHoldRoutes({ tms, twin }), releaseHoldRoutes({ twin }), operatorWallRoutes({ twin, tmsHealth })],
+    operatorRoutes: [confirmHoldRoutes({ tms, twin }), releaseHoldRoutes({ twin }), operatorWallRoutes({ twin, tmsHealth }), operatorInboxRoutes({ twin })],
   }, { twin });
   await app.listen({ host: "0.0.0.0", port: config.PORT });
 }

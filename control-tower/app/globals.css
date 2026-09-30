@@ -1,25 +1,51 @@
 @import "tailwindcss";
 
-/* Ops room theme, locked dark. One accent (electric blue) means selection and "the AI is acting";
-   green, amber and red are only ever state. A light theme is a second block of these variables. */
+/* Light theme. One accent (blue) means selection and "the AI is acting";
+   green, amber and red are only ever state.
+
+   Color values come from the light :root of Beautiful UI foundation.css
+   (https://beautifului.dev), mapped onto this app's token names:
+   page -> bg, surface -> panel, hover -> panel-raised, ink ramp -> fg,
+   *-tint -> *-soft, green/orange/red -> ok/warn/risk.
+
+   MIT License
+
+   Copyright (c) 2026 Shane Levine
+
+   Permission is hereby granted, free of charge, to any person obtaining a copy
+   of this software and associated documentation files (the "Software"), to deal
+   in the Software without restriction, including without limitation the rights
+   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+   copies of the Software, and to permit persons to whom the Software is
+   furnished to do so, subject to the following conditions:
+
+   The above copyright notice and this permission notice shall be included in all
+   copies or substantial portions of the Software.
+
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+   SOFTWARE. */
 :root {
-  --bg: #09090b;
-  --panel: #111114;
-  --panel-raised: #17171b;
-  --line: #232329;
-  --line-strong: #2e2e36;
-  --fg: #ececef;
-  --fg-muted: #9a9aa6;
-  --fg-faint: #62626c;
-  --accent: #4f8cff;
-  --accent-soft: rgb(79 140 255 / 0.14);
-  --ok: #34c77b;
-  --ok-soft: rgb(52 199 123 / 0.14);
-  --warn: #f2b33d;
-  --warn-soft: rgb(242 179 61 / 0.14);
-  --risk: #f0524f;
-  --risk-soft: rgb(240 82 79 / 0.14);
-  color-scheme: dark;
+  --bg: oklch(0.985 0.001 286.376);
+  --panel: oklch(1 0 0);
+  --panel-raised: oklch(0.97 0.002 247.839);
+  --line: oklch(0.946 0.003 264.542);
+  --line-strong: oklch(0.912 0.005 258.326);
+  --fg: oklch(0.247 0.006 258.361);
+  --fg-muted: oklch(0.506 0.01 264.477);
+  --fg-faint: oklch(0.695 0.009 264.505);
+  --accent: oklch(0.626 0.205 254.947);
+  --accent-soft: oklch(0.96 0.019 252.878);
+  --ok: oklch(0.603 0.155 150.883);
+  --ok-soft: oklch(0.958 0.017 159.118);
+  --warn: oklch(0.689 0.179 49.902);
+  --warn-soft: oklch(0.964 0.021 67.581);
+  --risk: oklch(0.621 0.192 23.042);
+  --risk-soft: oklch(0.956 0.017 17.462);
 }
 
 @theme inline {
@@ -48,6 +74,8 @@ html,
 body {
   background: var(--bg);
   color: var(--fg);
+  /* Panes scroll inside themselves; the window never does. */
+  overflow: hidden;
 }
 
 body {
@@ -66,5 +94,150 @@ body {
   *::after {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+/* Lane map: truck markers and the lane popover. */
+.lane-truck[data-interactive="true"] {
+  cursor: pointer;
+}
+
+.lane-truck:focus-visible {
+  outline: none;
+}
+
+.lane-truck:focus-visible .lane-truck__pill {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Only while a poll moves the truck; lifted afterwards so panning stays locked to the map. */
+.lane-truck.is-gliding {
+  transition:
+    transform 900ms cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 0.2s;
+}
+
+.lane-truck__pill {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 9999px;
+  border: 1px solid var(--line-strong);
+  background: var(--panel);
+  color: var(--fg-muted);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.08);
+  transition:
+    transform 150ms ease-out,
+    opacity 150ms ease-out,
+    box-shadow 150ms ease-out;
+}
+
+.lane-truck__pill svg {
+  width: 11px;
+  height: 11px;
+}
+
+.lane-truck[data-west="true"] .lane-truck__pill svg {
+  transform: scaleX(-1);
+}
+
+.lane-truck[data-status="in_transit"] .lane-truck__pill {
+  width: 24px;
+  height: 24px;
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.lane-truck[data-status="in_transit"] .lane-truck__pill svg {
+  width: 13px;
+  height: 13px;
+}
+
+.lane-truck[data-status="arrived"] .lane-truck__pill {
+  border-color: color-mix(in oklch, var(--ok) 35%, transparent);
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.lane-truck[data-interactive="true"]:hover .lane-truck__pill {
+  transform: scale(1.1);
+}
+
+.lane-truck[data-selected="true"] .lane-truck__pill {
+  transform: scale(1.15);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 22%, transparent);
+}
+
+.lane-truck[data-dim="true"] .lane-truck__pill {
+  opacity: 0.5;
+}
+
+/* A live truck breathes: a ring that widens and fades. */
+.lane-truck[data-status="in_transit"] .lane-truck__pill::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  border: 2px solid var(--accent);
+  pointer-events: none;
+  animation: lane-truck-pulse 2.4s ease-out infinite;
+}
+
+.lane-truck[data-dim="true"] .lane-truck__pill::after {
+  display: none;
+}
+
+@keyframes lane-truck-pulse {
+  from {
+    transform: scale(1);
+    opacity: 0.45;
+  }
+  to {
+    transform: scale(1.9);
+    opacity: 0;
+  }
+}
+
+.lane-popup .maplibregl-popup-content {
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-panel);
+  background: var(--panel);
+  box-shadow: 0 8px 24px -12px rgb(0 0 0 / 0.18);
+  animation: lane-popup-in 140ms ease-out;
+}
+
+.lane-popup[class*="maplibregl-popup-anchor"] .maplibregl-popup-content {
+  border-radius: var(--radius-panel);
+}
+
+.lane-popup .maplibregl-popup-tip {
+  display: none;
+}
+
+@keyframes lane-popup-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lane-truck.is-gliding {
+    transition: none;
+  }
+  .lane-truck__pill::after {
+    display: none;
+  }
+  .lane-popup .maplibregl-popup-content {
+    animation: none;
   }
 }

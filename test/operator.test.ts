@@ -3,11 +3,11 @@ import type { z } from "zod";
 import { operatorWallResponse } from "../src/contract.ts";
 import { TmsHealthRecorder } from "../src/infra/tms/tms-health.ts";
 import { TwinError, type SqlStatement } from "../src/infra/twin-client.ts";
-import { operatorWallRoutes } from "../src/routes/operator.ts";
+import { callRow, operatorWallRoutes, toWallCall } from "../src/routes/operator.ts";
 import { buildServer } from "../src/server.ts";
 import { testConfig } from "./test-config.ts";
 
-// Shaped like Twin's answer: int8 and sums as strings, json columns parsed, nested timestamps with an offset.
+// Shaped like Twin's answer: int8 and sums as strings.
 const wallRow = {
   day: "2026-09-29",
   calls_count: "2",
@@ -16,92 +16,94 @@ const wallRow = {
   dollars_generated: "2300",
   margin_saved: "200",
   autonomy: "human",
-  calls: [
-    {
-      call_id: "call-b",
-      mc_number: "123456",
-      dot_number: "7654321",
-      eligible: true,
-      verified: true,
-      otp_attempts: 1,
-      otp_expires_at: "2026-09-29T15:05:00.12345+00:00",
-      created_at: "2026-09-29T15:00:00+00:00",
-      human_requested: false,
-      offers: [
-        {
-          load_id: "LD00881",
-          round: 2,
-          carrier_ask: 2300,
-          decision: "accept",
-          rate_to_say: 2300,
-          posted_rate: 2100,
-          max_buy: 2500,
-          origin_city: "Savannah",
-          origin_state: "GA",
-          origin_zip: "31401",
-          destination_city: "Wichita",
-          destination_state: "KS",
-          destination_zip: "67202",
-          equipment: "DRY_VAN",
-          miles: "997",
-          pickup_at: "20261003141300",
-          created_at: "2026-09-29T15:08:00+00:00",
-        },
-        {
-          load_id: "LD00848",
-          round: 1,
-          carrier_ask: 7000,
-          decision: "counter",
-          rate_to_say: 6886,
-          posted_rate: 6886,
-          max_buy: 7684,
-          origin_city: null,
-          origin_state: null,
-          origin_zip: null,
-          destination_city: null,
-          destination_state: null,
-          destination_zip: null,
-          equipment: null,
-          miles: null,
-          pickup_at: null,
-          created_at: "2026-09-29T15:02:00+00:00",
-        },
-      ],
-      hold: {
-        hold_id: "7b0c2a5e-8a39-4b8e-9d7e-0f3f2d1c4b5a",
+};
+
+// Call rows as Twin nests them in json: nested timestamps with an offset.
+const callRows = [
+  {
+    call_id: "call-b",
+    mc_number: "123456",
+    dot_number: "7654321",
+    eligible: true,
+    verified: true,
+    otp_attempts: 1,
+    otp_expires_at: "2026-09-29T15:05:00.12345+00:00",
+    created_at: "2026-09-29T15:00:00+00:00",
+    human_requested: false,
+    offers: [
+      {
         load_id: "LD00881",
-        status: "booked",
-        agreed_rate: 2300,
+        round: 2,
+        carrier_ask: 2300,
+        decision: "accept",
+        rate_to_say: 2300,
         posted_rate: 2100,
         max_buy: 2500,
-        booking_ref: "BR-1",
-        created_at: "2026-09-29T15:09:00+00:00",
+        origin_city: "Savannah",
+        origin_state: "GA",
+        origin_zip: "31401",
+        destination_city: "Wichita",
+        destination_state: "KS",
+        destination_zip: "67202",
+        equipment: "DRY_VAN",
+        miles: "997",
+        pickup_at: "20261003141300",
+        created_at: "2026-09-29T15:08:00+00:00",
       },
-      events: [
-        { tool: "verify_carrier", summary: "MC 123456 verified", status: "ok", created_at: "2026-09-29T15:00:01+00:00" },
-        { tool: "create_hold", summary: null, status: "ok", created_at: "2026-09-29T15:09:00+00:00" },
-      ],
-      interventions: [
-        { kind: "authorization", load_id: "LD00881", amount_usd: "50", message: "Authorize +$50", created_at: "2026-09-29T15:07:00+00:00" },
-      ],
+      {
+        load_id: "LD00848",
+        round: 1,
+        carrier_ask: 7000,
+        decision: "counter",
+        rate_to_say: 6886,
+        posted_rate: 6886,
+        max_buy: 7684,
+        origin_city: null,
+        origin_state: null,
+        origin_zip: null,
+        destination_city: null,
+        destination_state: null,
+        destination_zip: null,
+        equipment: null,
+        miles: null,
+        pickup_at: null,
+        created_at: "2026-09-29T15:02:00+00:00",
+      },
+    ],
+    hold: {
+      hold_id: "7b0c2a5e-8a39-4b8e-9d7e-0f3f2d1c4b5a",
+      load_id: "LD00881",
+      status: "booked",
+      agreed_rate: 2300,
+      posted_rate: 2100,
+      max_buy: 2500,
+      booking_ref: "BR-1",
+      created_at: "2026-09-29T15:09:00+00:00",
     },
-    {
-      call_id: "call-a",
-      mc_number: null,
-      dot_number: "111",
-      eligible: false,
-      verified: false,
-      otp_attempts: 0,
-      otp_expires_at: null,
-      created_at: "2026-09-29T14:00:00+00:00",
-      human_requested: false,
-      offers: [],
-      hold: null,
-      events: [{ tool: "verify_carrier", summary: null, status: "not_eligible", created_at: "2026-09-29T14:00:01+00:00" }],
-      interventions: [],
-    },
-  ],
-};
+    events: [
+      { tool: "verify_carrier", summary: "MC 123456 verified", status: "ok", created_at: "2026-09-29T15:00:01+00:00" },
+      { tool: "create_hold", summary: null, status: "ok", created_at: "2026-09-29T15:09:00+00:00" },
+    ],
+    interventions: [
+      { kind: "authorization", load_id: "LD00881", amount_usd: "50", message: "Authorize +$50", created_at: "2026-09-29T15:07:00+00:00" },
+    ],
+  },
+  {
+    call_id: "call-a",
+    mc_number: null,
+    dot_number: "111",
+    eligible: false,
+    verified: false,
+    otp_attempts: 0,
+    otp_expires_at: null,
+    created_at: "2026-09-29T14:00:00+00:00",
+    human_requested: false,
+    offers: [],
+    hold: null,
+    events: [{ tool: "verify_carrier", summary: null, status: "not_eligible", created_at: "2026-09-29T14:00:01+00:00" }],
+    interventions: [],
+  },
+];
 
 const statements: string[] = [];
 let failTwin = false;
@@ -132,7 +134,7 @@ describe("GET /v1/operator/wall", () => {
     expect((await getWall()).statusCode).toBe(401);
   });
 
-  it("returns the wall parsed from one Twin row", async () => {
+  it("returns the day's counters parsed from one Twin row", async () => {
     statements.length = 0;
     const res = await getWall(testConfig.OPERATOR_API_KEY);
     expect(res.statusCode).toBe(200);
@@ -152,11 +154,29 @@ describe("GET /v1/operator/wall", () => {
       latencyP50Ms: 250,
       latencyP95Ms: 300,
     });
-    expect(wall.calls.map((c) => [c.callId, c.stage, c.risk])).toEqual([
+    expect(statements[0]).not.toContain("json_agg");
+  });
+
+  it("answers 503 when Twin fails", async () => {
+    failTwin = true;
+    try {
+      const res = await getWall(testConfig.OPERATOR_API_KEY);
+      expect(res.statusCode).toBe(503);
+      expect(res.json()).toMatchObject({ status: "service_unavailable" });
+    } finally {
+      failTwin = false;
+    }
+  });
+});
+
+describe("toWallCall", () => {
+  it("maps call rows to wall calls with their stage, risk, lanes and interventions", () => {
+    const calls = callRows.map((row) => toWallCall(callRow.parse(row)));
+    expect(calls.map((c) => [c.callId, c.stage, c.risk])).toEqual([
       ["call-b", "booked", "green"],
       ["call-a", "ended", "red"],
     ]);
-    const [booked] = wall.calls;
+    const [booked] = calls;
     const lane = {
       origin: { city: "Savannah", state: "GA", zip: "31401" },
       destination: { city: "Wichita", state: "KS", zip: "67202" },
@@ -176,21 +196,9 @@ describe("GET /v1/operator/wall", () => {
       hold: { status: "booked", agreedRate: 2300, maxBuy: 2500, bookingRef: "BR-1", lane, createdAt: "2026-09-29T15:09:00.000Z" },
     });
     expect(booked?.events.map((e) => e.tool)).toEqual(["verify_carrier", "create_hold"]);
-    expect(statements[0]).toContain("origin_city, origin_state, origin_zip, destination_city, destination_state, destination_zip, equipment, miles, pickup_at");
     expect(booked?.interventions).toEqual([
       { kind: "authorization", loadId: "LD00881", amountUsd: 50, message: "Authorize +$50", createdAt: "2026-09-29T15:07:00.000Z" },
     ]);
-  });
-
-  it("answers 503 when Twin fails", async () => {
-    failTwin = true;
-    try {
-      const res = await getWall(testConfig.OPERATOR_API_KEY);
-      expect(res.statusCode).toBe(503);
-      expect(res.json()).toMatchObject({ status: "service_unavailable" });
-    } finally {
-      failTwin = false;
-    }
   });
 });
 
