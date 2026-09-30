@@ -100,6 +100,9 @@ export const migrations = [
   "ALTER TABLE calls ADD COLUMN IF NOT EXISTS carrier_name text",
   // Diesel, tolls, net and legal ETA at the agreed rate, as estimated when the hold was placed; NULL when no estimate was made.
   "ALTER TABLE holds ADD COLUMN IF NOT EXISTS trip jsonb",
+  // Where this call's code went, so the hold notice reaches the contact that passed verification.
+  "ALTER TABLE calls ADD COLUMN IF NOT EXISTS otp_channel text",
+  "ALTER TABLE calls ADD COLUMN IF NOT EXISTS otp_destination text",
 ] as const;
 
 export const autonomyModes = ["human", "autonomous"] as const;

@@ -16,6 +16,7 @@ import {
 } from "../contract.ts";
 import { resolveBooking, type BookingAttempt } from "../domain/holds.ts";
 import { dollars } from "../domain/negotiation.ts";
+import type { CarrierMessage, OtpDeliveryClient } from "../infra/otp-delivery-client.ts";
 import type { BookingRequest } from "../infra/tms/codec.ts";
 import { TmsBusinessError, TmsUnavailableError } from "../infra/tms/errors.ts";
 import type { TmsClient } from "../infra/tms/tms-client.ts";
@@ -24,9 +25,10 @@ import { sql, TwinError, type TwinClient } from "../infra/twin-client.ts";
 import { autonomyModes, holdRowSchema, type HoldRow } from "../infra/twin-schemas.ts";
 import { invalidRequestHandler } from "../plugins/invalid-request.ts";
 
-export type HoldRouteDeps = { tms: Pick<TmsClient, "getLoad" | "bookLoad">; twin: Pick<TwinClient, "query">; trips: TripEstimates };
-export type ConfirmHoldRouteDeps = { tms: Pick<TmsClient, "bookLoad">; twin: Pick<TwinClient, "query"> };
-export type ReleaseHoldRouteDeps = { twin: Pick<TwinClient, "query"> };
+type NoticeDeps = { twin: Pick<TwinClient, "query">; delivery: Pick<OtpDeliveryClient, "send"> };
+export type HoldRouteDeps = NoticeDeps & { tms: Pick<TmsClient, "getLoad" | "bookLoad">; trips: TripEstimates };
+export type ConfirmHoldRouteDeps = NoticeDeps & { tms: Pick<TmsClient, "bookLoad"> };
+export type ReleaseHoldRouteDeps = NoticeDeps;
 
 const isUniqueViolation = (error: unknown) => error instanceof TwinError && error.isUniqueViolation;
 
@@ -69,6 +71,69 @@ const bookedNow = (hold: HoldRow): CreateHoldResponse => ({
   holdId: hold.holdId,
   holdStatus: hold.status,
 });
+
+const noticeRow = z.object({
+  otp_channel: z.enum(["email", "sms"]).nullable(),
+  otp_destination: z.string().nullable(),
+  origin_city: z.string().nullable(),
+  origin_state: z.string().nullable(),
+  destination_city: z.string().nullable(),
+  destination_state: z.string().nullable(),
+  pickup_at: z.string().nullable(),
+});
+type NoticeRow = z.output<typeof noticeRow>;
+
+// Offers store the TMS wall clock (YYYYMMDDHHMMSS); it is shown as written, with no timezone invented.
+const readablePickup = (wire: string) =>
+  new Date(Date.UTC(+wire.slice(0, 4), +wire.slice(4, 6) - 1, +wire.slice(6, 8), +wire.slice(8, 10), +wire.slice(10, 12))).toLocaleString(
+    "en-US",
+    { timeZone: "UTC", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" },
+  );
+
+function holdNotice(hold: HoldRow, row: NoticeRow): CarrierMessage {
+  const lane =
+    row.origin_city && row.destination_city
+      ? ` ${row.origin_city}, ${row.origin_state} to ${row.destination_city}, ${row.destination_state}`
+      : "";
+  if (hold.status === "booked") {
+    const pickup = row.pickup_at ? ` Pickup ${readablePickup(row.pickup_at)}.` : "";
+    return { subject: `Load ${hold.loadId} confirmed`, body: `${hold.loadId}${lane} confirmed at ${dollars(hold.agreedRate)}.${pickup}` };
+  }
+  return { subject: `Load ${hold.loadId} released`, body: `${hold.loadId}${lane} was released. Call us anytime for other loads.` };
+}
+
+// Tells the carrier how their hold ended, on the channel and contact that passed verification.
+// Only the request that made the transition calls it, so a replayed confirm never sends twice.
+// Never awaited: the outcome lands in call_events for the tower instead of slowing the answer.
+function noticeCarrier(deps: NoticeDeps, hold: HoldRow, log: Log): void {
+  void (async () => {
+    let status = "failed";
+    let summary = `Hold notice for ${hold.loadId} failed`;
+    try {
+      const [row] = await deps.twin.query(
+        sql`SELECT c.otp_channel, c.otp_destination, o.origin_city, o.origin_state, o.destination_city, o.destination_state, o.pickup_at
+            FROM calls c LEFT JOIN LATERAL (
+              SELECT * FROM offers WHERE call_id = c.call_id AND load_id = ${hold.loadId} ORDER BY round DESC LIMIT 1
+            ) o ON TRUE
+            WHERE c.call_id = ${hold.callId}`,
+        noticeRow,
+      );
+      if (!row?.otp_channel || !row.otp_destination) {
+        summary = `Hold notice for ${hold.loadId} not sent: no verified contact`;
+      } else {
+        const notice = holdNotice(hold, row);
+        await deps.delivery.send(row.otp_channel, row.otp_destination, notice);
+        status = "sent";
+        summary = `${notice.subject}: carrier notified by ${row.otp_channel}`;
+      }
+    } catch (error) {
+      log.warn({ err: error, holdId: hold.holdId }, "hold notice failed");
+    }
+    await deps.twin
+      .query(sql`INSERT INTO call_events (call_id, tool, summary, status) VALUES (${hold.callId}, 'hold_notice', ${summary}, ${status})`, z.unknown())
+      .catch((error: unknown) => log.warn({ err: error, holdId: hold.holdId }, "hold notice event not recorded"));
+  })();
+}
 
 // Autonomous mode books the new hold at once through the operator's own confirm path. Anything
 // short of a clean booking leaves the hold for a rep, so the carrier is never told more than is true.
@@ -268,6 +333,8 @@ export async function confirmBooking(
       holdRowSchema,
     );
     if (!resolved) throw new Error("hold left 'confirming' before the booking outcome was stored");
+    // booked_unconfirmed waits for a human to check the TMS; held means nothing changed for the carrier.
+    if (resolved.status === "booked" || resolved.status === "released") noticeCarrier(deps, resolved, log);
     return resultFor(resolved);
   } catch (error) {
     // A hold left in 'confirming' is never booked twice; an operator checks it by hand.
@@ -333,6 +400,7 @@ export function releaseHoldRoutes(deps: ReleaseHoldRouteDeps): FastifyPluginAsyn
             holdRowSchema,
           );
           if (released) {
+            noticeCarrier(deps, released, request.log);
             return {
               ...holdFields(released),
               status: "released" as const,

@@ -5,6 +5,7 @@ import type { z } from "zod";
 import { resolveBooking } from "../src/domain/holds.ts";
 import type { TripEstimate } from "../src/domain/trip-estimate.ts";
 import { TmsClient } from "../src/infra/tms/tms-client.ts";
+import type { CarrierMessage } from "../src/infra/otp-delivery-client.ts";
 import type { TripEstimates } from "../src/infra/trip-estimator.ts";
 import { TwinError, type SqlStatement } from "../src/infra/twin-client.ts";
 import { confirmHoldRoutes, holdRoutes, releaseHoldRoutes } from "../src/routes/holds.ts";
@@ -85,6 +86,8 @@ function fakeTwin() {
   const calls = new Map<string, Call>();
   const offers: Offer[] = [];
   const holds: Hold[] = [];
+  const contacts = new Map<string, { channel: "email" | "sms"; destination: string }>();
+  const events: { callId: string; tool: string; summary: string; status: string }[] = [];
   const query = async <T>(statement: SqlStatement, rowSchema: z.ZodType<T>): Promise<T[]> => {
     // Lets concurrent requests interleave between statements, as they would over HTTP.
     await yieldTurn();
@@ -152,12 +155,32 @@ function fakeTwin() {
         Object.assign(hold, { status, booking_ref: nullable(ref), release_reason: nullable(reason), idempotency_key: nullable(key) });
         rows.push(hold);
       }
+    } else if (sql.startsWith("SELECT c.otp_channel")) {
+      const callId = text(/c\.call_id = E'([^']*)'\s*$/, sql);
+      const loadId = text(/load_id = E'([^']*)'/, sql);
+      const contact = contacts.get(callId);
+      const offered = offers.some((o) => o.callId === callId && o.loadId === loadId);
+      if (calls.has(callId)) {
+        rows.push({
+          otp_channel: contact?.channel ?? null,
+          otp_destination: contact?.destination ?? null,
+          origin_city: offered ? "Dayton" : null,
+          origin_state: offered ? "OH" : null,
+          destination_city: offered ? "Nashville" : null,
+          destination_state: offered ? "TN" : null,
+          pickup_at: offered ? "20261001143200" : null,
+        });
+      }
+    } else if (sql.startsWith("INSERT INTO call_events")) {
+      const [, callId = "", tool = "", summary = "", status = ""] =
+        /VALUES \(E'([^']*)', '(\w+)', E'([^']*)', E'([^']*)'\)/.exec(sql) ?? [];
+      events.push({ callId, tool, summary, status });
     } else {
       throw new TwinError(`unexpected SQL: ${sql}`);
     }
     return rows.map((row) => rowSchema.parse({ ...row }));
   };
-  return { twin: { query }, calls, offers, holds, settings };
+  return { twin: { query }, calls, offers, holds, settings, contacts, events };
 }
 
 const agentKey = testConfig.AGENT_API_KEY;
@@ -169,6 +192,7 @@ describe("hold routes", () => {
   let app: ReturnType<typeof buildServer>;
   // No vendor keys in tests: the estimator answers null unless a test sets an estimate.
   let trips: { estimate: ReturnType<typeof vi.fn<TripEstimates["estimate"]>> };
+  let delivery: { send: ReturnType<typeof vi.fn<(channel: "email" | "sms", to: string, message: CarrierMessage) => Promise<string>>> };
 
   async function start(script: FakeBehavior[] = []) {
     fake = await startFakeTms({ token: testConfig.TMS_TOKEN, script });
@@ -180,13 +204,14 @@ describe("hold routes", () => {
       backoffBaseMs: 1,
     });
     app = buildServer(testConfig, {
-      agentRoutes: [holdRoutes({ tms, twin: state.twin, trips })],
-      operatorRoutes: [confirmHoldRoutes({ tms, twin: state.twin }), releaseHoldRoutes({ twin: state.twin })],
+      agentRoutes: [holdRoutes({ tms, twin: state.twin, trips, delivery })],
+      operatorRoutes: [confirmHoldRoutes({ tms, twin: state.twin, delivery }), releaseHoldRoutes({ twin: state.twin, delivery })],
     });
   }
 
   beforeEach(() => {
     trips = { estimate: vi.fn<TripEstimates["estimate"]>(async () => null) };
+    delivery = { send: vi.fn(async () => "run-1") };
     state = fakeTwin();
     state.calls.set("call-a", { verified: true, mcNumber: "123456" });
     state.calls.set("call-b", { verified: true, mcNumber: "654321" });
@@ -590,5 +615,74 @@ describe("hold routes", () => {
       expect(res.statusCode).toBe(401);
       expect(state.holds[0]).toMatchObject({ status: "held" });
     });
+  });
+  describe("hold notice to the carrier", () => {
+    beforeEach(() => start());
+
+    // The notice is never awaited by the route, so tests wait for its call_events row.
+    const noticeEvents = async (count: number) => {
+      await vi.waitFor(() => expect(state.events.filter((e) => e.tool === "hold_notice")).toHaveLength(count));
+      return state.events.filter((e) => e.tool === "hold_notice");
+    };
+    const settle = async () => {
+      for (let i = 0; i < 20; i += 1) await yieldTurn();
+    };
+
+    it("tells the verified contact once when the hold is booked, and never on a replay", async () => {
+      state.contacts.set("call-a", { channel: "email", destination: "demo@example.com" });
+      const holdId = await heldLoad();
+      await confirm(holdId, "key-1");
+      expect(await noticeEvents(1)).toEqual([
+        { callId: "call-a", tool: "hold_notice", summary: "Load LD00881 confirmed: carrier notified by email", status: "sent" },
+      ]);
+      expect(delivery.send).toHaveBeenCalledExactlyOnceWith("email", "demo@example.com", {
+        subject: "Load LD00881 confirmed",
+        body: "LD00881 Dayton, OH to Nashville, TN confirmed at $2,300. Pickup Oct 1, 2:32 PM.",
+      });
+
+      await confirm(holdId, "key-1");
+      await confirm(holdId, "key-2");
+      await settle();
+      expect(delivery.send).toHaveBeenCalledTimes(1);
+    });
+
+    it("tells the carrier once when an operator releases the hold", async () => {
+      state.contacts.set("call-a", { channel: "sms", destination: "+15555550142" });
+      const holdId = await heldLoad();
+      await release(holdId);
+      await release(holdId);
+      await noticeEvents(1);
+      await settle();
+      expect(delivery.send).toHaveBeenCalledExactlyOnceWith("sms", "+15555550142", {
+        subject: "Load LD00881 released",
+        body: "LD00881 Dayton, OH to Nashville, TN was released. Call us anytime for other loads.",
+      });
+    });
+
+    it("logs a failed notice when the call has no verified contact", async () => {
+      const holdId = await heldLoad();
+      await release(holdId);
+      expect(await noticeEvents(1)).toMatchObject([{ status: "failed", summary: "Hold notice for LD00881 not sent: no verified contact" }]);
+      expect(delivery.send).not.toHaveBeenCalled();
+    });
+
+    it("logs a failed notice when delivery fails, and the release still answers", async () => {
+      state.contacts.set("call-a", { channel: "email", destination: "demo@example.com" });
+      delivery.send.mockRejectedValue(new Error("boom"));
+      const holdId = await heldLoad();
+      expect((await release(holdId)).json()).toMatchObject({ status: "released" });
+      expect(await noticeEvents(1)).toMatchObject([{ status: "failed", summary: "Hold notice for LD00881 failed" }]);
+    });
+  });
+
+  it("sends no notice while a booking is unconfirmed", async () => {
+    await start(["silence", { errorCode: "ALREADY_BOOKED", message: "Load already booked" }]);
+    state.contacts.set("call-a", { channel: "email", destination: "demo@example.com" });
+    const holdId = randomUUID();
+    state.holds.push(seeded({ hold_id: holdId }));
+    expect((await confirm(holdId, "key-1")).json()).toMatchObject({ status: "booked_unconfirmed" });
+    for (let i = 0; i < 20; i += 1) await yieldTurn();
+    expect(delivery.send).not.toHaveBeenCalled();
+    expect(state.events).toEqual([]);
   });
 });
