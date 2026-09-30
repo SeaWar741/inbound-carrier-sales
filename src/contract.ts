@@ -554,6 +554,16 @@ export type OperatorCarrierCallsResponse = z.infer<typeof operatorCarrierCallsRe
 
 export const networkViews = ["all", "new", "at_risk", "top", "growth"] as const;
 export const carrierRelationships = ["new", "at_risk", "active"] as const;
+export const networkSorts = ["mc", "carrier", "lastCall", "calls", "bookings"] as const;
+export const demandSorts = ["lane", "equipment", "unmet", "thisWeek", "carriers"] as const;
+export const pageSizes = [10, 25, 50] as const;
+
+const sortDir = z.enum(["asc", "desc"]).default("desc");
+const pageSize = z.coerce
+  .number()
+  .int()
+  .refine((size) => (pageSizes as readonly number[]).includes(size), { message: "pageSize must be 10, 25 or 50" })
+  .default(25);
 
 // The inbox window (30 days by default, long enough to see a carrier's pattern), the bar filters and a view.
 export const operatorNetworkQuery = withDayRange(
@@ -562,7 +572,9 @@ export const operatorNetworkQuery = withDayRange(
     view: z.enum(networkViews).default("all"),
     // MC, DOT or carrier name.
     q: optionalField(z.string().trim().max(64)),
-    key: optionalField(z.string().trim().max(128)),
+    sort: z.enum(networkSorts).default("lastCall"),
+    dir: sortDir,
+    pageSize,
   }),
 );
 export type OperatorNetworkQuery = z.output<typeof operatorNetworkQuery>;
@@ -578,7 +590,9 @@ const networkCarrier = z.object({
   relationship: z.enum(carrierRelationships),
   // Independent of the relationship and of each other.
   top: z.boolean(),
-  // The carrier searched or negotiated a lane (origin state and equipment) the board has open now.
+  // One of the carrier's lanes is open: the board has an open load on that exact origin, destination
+  // and equipment (a search's Any matches every value), or on its origin and equipment when the carrier
+  // booked that exact lane at least twice.
   growth: z.boolean(),
   facts: z.object({
     lifetimeCalls: z.number().int(),
@@ -616,6 +630,12 @@ export const operatorNetworkResponse = z.object({
   page: z.number().int(),
   pageSize: z.number().int(),
   counts: z.object({ all: z.number().int(), new: z.number().int(), atRisk: z.number().int(), top: z.number().int(), growth: z.number().int() }),
+  // Over the filtered carriers, not the view: carriers with a call in the window, their bookings and negotiated loads.
+  kpis: z.object({ called: z.number().int(), booked: z.number().int(), negotiated: z.number().int() }),
+  // Distinct listed carriers per open lane and per origin state with one, without the filters or the
+  // view, so the side panel keeps its shape while the list narrows. A null equipment is a search for any.
+  openLanes: z.array(z.object({ originState: z.string(), equipment: z.string().nullable(), carriers: z.number().int() })),
+  openOrigins: z.array(z.object({ originState: z.string(), carriers: z.number().int() })),
   // False when the TMS board could not be read; growth is then false for every carrier.
   boardAvailable: z.boolean(),
 });
@@ -623,10 +643,13 @@ export type OperatorNetworkResponse = z.infer<typeof operatorNetworkResponse>;
 
 // The unmet demand radar reads the last 4 desk (Chicago) weeks, this one included; the bar filters narrow the rows.
 export const operatorDemandQuery = operatorCarriersFields.pick({ equipment: true, origin: true, page: true }).extend({
-  // One lane exactly, as ORIGIN|DESTINATION|EQUIPMENT with an empty part for Any (TX||REEFER).
-  lane: optionalField(z.string().trim().regex(/^[A-Z]{2}\|([A-Z]{2})?\|([A-Z_]+)?$/)),
-  // Only the asks of one carrier, by carrier key.
-  carrier: optionalField(z.string().trim().min(1).max(128)),
+  // An origin or destination state, or an MC or carrier name among the lane's asks; it keeps rows, never changes their counts.
+  q: optionalField(z.string().trim().max(64)),
+  // The next move: source keeps lanes with searches that found nothing, rate those with offers that did not book.
+  next: optionalField(z.enum(["source", "rate"])),
+  sort: z.enum(demandSorts).default("unmet"),
+  dir: sortDir,
+  pageSize,
 });
 export type OperatorDemandQuery = z.output<typeof operatorDemandQuery>;
 
@@ -654,7 +677,15 @@ export const operatorDemandResponse = z.object({
   rows: z.array(demandLane),
   total: z.number().int(),
   // Across every row the filters keep, not only this page.
-  totals: z.object({ noMatch: z.number().int(), offeredNoBooking: z.number().int(), carriers: z.number().int() }),
+  totals: z.object({
+    noMatch: z.number().int(),
+    offeredNoBooking: z.number().int(),
+    carriers: z.number().int(),
+    thisWeek: z.number().int(),
+    previousWeek: z.number().int(),
+  }),
+  // Unmet asks per origin state over every lane, without the filters.
+  origins: z.array(z.object({ originState: z.string(), unmet: z.number().int() })),
   page: z.number().int(),
   pageSize: z.number().int(),
 });

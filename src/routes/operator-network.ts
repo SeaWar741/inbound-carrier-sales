@@ -34,7 +34,11 @@ import { carrierKey, containsPattern, windowCondition } from "./operator-inbox.t
 
 export type OperatorNetworkDeps = { twin: Pick<TwinClient, "query">; tms: Pick<TmsClient, "queryLoads"> };
 
-// The board's open lanes as `STATE|EQUIPMENT`, one LOAD_QUERY per equipment type. Null when any
+// A lane the board has open only by origin and equipment is growth when the carrier booked that exact
+// lane this many times: a repeat lane, not a one-off.
+const growthMinLaneBookings = 2;
+
+// The board's open lanes as `ORIGIN|DESTINATION|EQUIPMENT`, one LOAD_QUERY per equipment type. Null when any
 // query fails: a partial board would tag growth on some lanes and silently not on others.
 export async function openLanes(tms: Pick<TmsClient, "queryLoads">, log: Pick<FastifyBaseLogger, "warn">): Promise<Set<string> | null> {
   try {
@@ -43,12 +47,33 @@ export async function openLanes(tms: Pick<TmsClient, "queryLoads">, log: Pick<Fa
     );
     // LOAD_QUERY has no status filter, so a full answer may have left open loads out.
     if (boards.some((board) => board.length === openLanesPerEquipment)) log.warn("open lanes may be partial: an equipment type filled the TMS cap");
-    return new Set(boards.flat().filter((load) => load.status === "OPEN").map((load) => `${load.origState}|${load.equipmentType}`));
+    return new Set(boards.flat().filter((load) => load.status === "OPEN").map((load) => `${load.origState}|${load.destState}|${load.equipmentType}`));
   } catch (error) {
     log.warn({ err: error }, "open lanes unavailable, growth tags skipped");
     return null;
   }
 }
+
+type SortKey = { column: string; nullable?: boolean };
+
+// The chosen keys in the chosen direction, then the stable tie breakers not already chosen. Columns
+// come from the whitelist maps below, never from the request.
+function orderBy(keys: readonly SortKey[], dir: "asc" | "desc", ties: readonly string[]): string {
+  const direction = dir === "asc" ? "ASC" : "DESC";
+  const chosen = keys.map((key) => `${key.column} ${direction}${key.nullable ? " NULLS LAST" : ""}`);
+  const rest = ties.filter((tie) => !keys.some((key) => tie.split(" ")[0] === key.column));
+  return [...chosen, ...rest].join(", ");
+}
+
+// MC numbers are digit strings of different lengths, so they are padded to sort as numbers.
+const networkSorts: Record<OperatorNetworkQuery["sort"], readonly SortKey[]> = {
+  mc: [{ column: "lpad(f.mc_number, 12, '0')", nullable: true }],
+  carrier: [{ column: "f.carrier_name", nullable: true }],
+  lastCall: [{ column: "f.last_call_at" }],
+  calls: [{ column: "f.calls" }],
+  bookings: [{ column: "f.bookings" }],
+};
+const networkTies = ["f.last_call_at DESC", "f.carrier_key"];
 
 const views: Record<OperatorNetworkQuery["view"], string> = {
   all: "TRUE",
@@ -63,10 +88,15 @@ const views: Record<OperatorNetworkQuery["view"], string> = {
 // the TypeScript side never re-decides them. A carrier is listed when it called inside the window, or
 // is at risk: going quiet is what puts it there, so the window must not hide it;
 // its observed lanes are the lanes of its searches and negotiated loads inside the window. `filtered`
-// applies the bar filters, the counts group it by view, and the total and page add the chosen view.
+// applies the bar filters, the counts and KPIs group it by view, and the total and page add the chosen
+// view; the open lane panel reads `listed`, before the filters.
 export function networkQuery(params: OperatorNetworkQuery, lanes: ReadonlySet<string> | null): SqlStatement {
-  const pairs = [...(lanes ?? [])];
-  const pairStates = [...new Set(pairs.map((pair) => pair.slice(0, pair.indexOf("|"))))];
+  const triples = [...(lanes ?? [])].map((lane) => lane.split("|") as [string, string, string]);
+  const unique = (values: string[]) => [...new Set(values)];
+  const tripleKeys = triples.map(([origin, destination, equipment]) => `${origin}|${destination}|${equipment}`);
+  const pairs = unique(triples.map(([origin, , equipment]) => `${origin}|${equipment}`));
+  const routes = unique(triples.map(([origin, destination]) => `${origin}|${destination}`));
+  const states = unique(triples.map(([origin]) => origin));
   const recentBound = sql`(now() - ${segmentRecentDays} * interval '1 day')::timestamp`.text;
   const priorBound = sql`(now() - 2 * ${segmentRecentDays} * interval '1 day')::timestamp`.text;
 
@@ -77,13 +107,11 @@ export function networkQuery(params: OperatorNetworkQuery, lanes: ReadonlySet<st
   if (laneFilters.length > 0) {
     filters.push(`EXISTS (SELECT 1 FROM lanes l WHERE l.carrier_key = c.carrier_key AND ${laneFilters.join(" AND ")})`);
   }
-  // One carrier by key, so a selection that paged or polled out of view still has its row.
-  if (params.key) filters.push(sql`c.carrier_key = ${params.key}`.text);
   if (params.q) {
     const pattern = containsPattern(params.q);
     filters.push(sql`(c.mc_number ILIKE ${pattern} OR c.dot_number ILIKE ${pattern} OR c.carrier_name ILIKE ${pattern})`.text);
   }
-  const offset = (params.page - 1) * inboxPageSize;
+  const offset = (params.page - 1) * params.pageSize;
 
   const text =
     `WITH keyed AS (
@@ -113,18 +141,34 @@ export function networkQuery(params: OperatorNetworkQuery, lanes: ReadonlySet<st
     ), negotiated AS (
       SELECT k.carrier_key, count(DISTINCT o.load_id) AS loads_negotiated
       FROM keyed k JOIN offers o ON o.call_id = k.call_id WHERE k.in_window GROUP BY k.carrier_key
+    ), booked_lanes AS (
+      -- Lifetime bookings per carrier and exact lane; an offer row per round, so holds count once.
+      SELECT k.carrier_key, o.origin_state, o.destination_state, o.equipment, count(DISTINCT h.hold_id) AS bookings
+      FROM keyed k
+      JOIN holds h ON h.call_id = k.call_id AND h.status IN ('booked', 'booked_unconfirmed')
+      JOIN offers o ON o.call_id = h.call_id AND o.load_id = h.load_id
+      GROUP BY k.carrier_key, o.origin_state, o.destination_state, o.equipment
     ), lanes AS (
-      -- A lane is open when the board has an open load from its origin state on its equipment; a search
-      -- without equipment asked for any, so it matches the state on every open equipment.
-      SELECT r.*, COALESCE((r.origin_state || '|' || r.equipment) IN (` + sql`${pairs}`.text + `)
-        OR (r.equipment IS NULL AND r.origin_state IN (` + sql`${pairStates}`.text + `)), FALSE) AS open
+      -- A lane is open when the board has an open load on its exact origin, destination and equipment;
+      -- a search's NULL destination or equipment asked for any, so only that part matches every value.
+      -- It is open too when the board has its origin and equipment and the carrier booked this exact
+      -- lane repeatedly: a carrier that keeps running GA to KS on a dry van is worth a call about any GA dry van.
+      SELECT r.carrier_key, r.call_id, r.origin_state, r.destination_state, r.equipment, COALESCE(
+        (r.origin_state || '|' || r.destination_state || '|' || r.equipment) IN (` + sql`${tripleKeys}`.text + `)
+        OR (r.search AND r.destination_state IS NULL AND (r.origin_state || '|' || r.equipment) IN (` + sql`${pairs}`.text + `))
+        OR (r.search AND r.equipment IS NULL AND (r.origin_state || '|' || r.destination_state) IN (` + sql`${routes}`.text + `))
+        OR (r.search AND r.destination_state IS NULL AND r.equipment IS NULL AND r.origin_state IN (` + sql`${states}`.text + `))
+        OR ((r.origin_state || '|' || r.equipment) IN (` + sql`${pairs}`.text + `) AND EXISTS (
+          SELECT 1 FROM booked_lanes b WHERE b.carrier_key = r.carrier_key AND b.origin_state = r.origin_state
+            AND b.destination_state = r.destination_state AND b.equipment = r.equipment
+            AND b.bookings >= ` + sql`${growthMinLaneBookings}`.text + `)), FALSE) AS open
       FROM (
-        SELECT k.carrier_key, k.call_id, ls.origin_state, ls.destination_state, ls.equipment
+        SELECT k.carrier_key, k.call_id, ls.origin_state, ls.destination_state, ls.equipment, TRUE AS search
         FROM keyed k JOIN load_searches ls ON ls.call_id = k.call_id WHERE k.in_window
         UNION ALL
         -- One lane per negotiated load on a call, however many rounds it took. Offers made before the
         -- lane was stored have none; unlike a search, their NULL equipment does not mean any.
-        SELECT DISTINCT ON (o.call_id, o.load_id) k.carrier_key, k.call_id, o.origin_state, o.destination_state, o.equipment
+        SELECT DISTINCT ON (o.call_id, o.load_id) k.carrier_key, k.call_id, o.origin_state, o.destination_state, o.equipment, FALSE
         FROM keyed k JOIN offers o ON o.call_id = k.call_id WHERE k.in_window AND o.equipment IS NOT NULL
       ) r
     ), classified AS (
@@ -137,12 +181,13 @@ export function networkQuery(params: OperatorNetworkQuery, lanes: ReadonlySet<st
         (f.bookings >= ` + sql`${segmentTopMinBookings}`.text + ` AND f.bookings >= ` + sql`${segmentTopMinRate}`.text + ` * f.negotiable_calls) AS top,
         EXISTS (SELECT 1 FROM lanes l WHERE l.carrier_key = f.carrier_key AND l.open) AS growth
       FROM facts f LEFT JOIN negotiated n ON n.carrier_key = f.carrier_key
+    ), listed AS (
+      SELECT c.* FROM classified c WHERE c.calls > 0 OR c.relationship = 'at_risk'
     ), filtered AS (
-      SELECT c.* FROM classified c
-      WHERE (c.calls > 0 OR c.relationship = 'at_risk')
-        AND ` + (filters.length > 0 ? filters.join("\n        AND ") : "TRUE") + `
+      SELECT c.* FROM listed c
+      WHERE ` + (filters.length > 0 ? filters.join("\n        AND ") : "TRUE") + `
     ), ordered AS (
-      SELECT f.*, row_number() OVER (ORDER BY f.last_call_at DESC, f.carrier_key) AS ord
+      SELECT f.*, row_number() OVER (ORDER BY ` + orderBy(networkSorts[params.sort], params.dir, networkTies) + `) AS ord
       FROM filtered f WHERE ` + views[params.view] + `
     )
     SELECT (SELECT count(*) FROM ordered) AS total,
@@ -151,6 +196,19 @@ export function networkQuery(params: OperatorNetworkQuery, lanes: ReadonlySet<st
       (SELECT count(*) FROM filtered WHERE relationship = 'at_risk') AS at_risk_count,
       (SELECT count(*) FROM filtered WHERE top) AS top_count,
       (SELECT count(*) FROM filtered WHERE growth) AS growth_count,
+      (SELECT count(*) FROM filtered WHERE calls > 0) AS called_kpi,
+      (SELECT COALESCE(sum(bookings), 0) FROM filtered) AS booked_kpi,
+      (SELECT COALESCE(sum(loads_negotiated), 0) FROM filtered) AS negotiated_kpi,
+      COALESCE((SELECT json_agg(o ORDER BY o.carriers DESC, o.origin_state, o.equipment NULLS LAST) FROM (
+        SELECT l.origin_state, l.equipment, count(DISTINCT l.carrier_key) AS carriers
+        FROM lanes l JOIN listed c ON c.carrier_key = l.carrier_key
+        WHERE l.open GROUP BY l.origin_state, l.equipment
+      ) o), '[]'::json) AS open_lanes,
+      COALESCE((SELECT json_agg(o ORDER BY o.carriers DESC, o.origin_state) FROM (
+        SELECT l.origin_state, count(DISTINCT l.carrier_key) AS carriers
+        FROM lanes l JOIN listed c ON c.carrier_key = l.carrier_key
+        WHERE l.open GROUP BY l.origin_state
+      ) o), '[]'::json) AS open_origins,
       COALESCE((SELECT json_agg(r ORDER BY r.ord) FROM (
         SELECT p.ord, p.carrier_key, p.mc_number, p.dot_number, p.carrier_name, p.eligible, p.relationship, p.top, p.growth,
           p.lifetime_calls, p.lifetime_bookings, p.last_call_at::timestamptz AS last_call_at, p.calls_recent, p.calls_prior,
@@ -168,7 +226,7 @@ export function networkQuery(params: OperatorNetworkQuery, lanes: ReadonlySet<st
             LIMIT 5
           ) t
         ) pl ON TRUE
-        WHERE p.ord > ` + sql`${offset}`.text + ` AND p.ord <= ` + sql`${offset + inboxPageSize}`.text + `
+        WHERE p.ord > ` + sql`${offset}`.text + ` AND p.ord <= ` + sql`${offset + params.pageSize}`.text + `
       ) r), '[]'::json) AS rows`;
   return { text };
 }
@@ -214,6 +272,11 @@ export const networkResult = z.object({
   at_risk_count: count,
   top_count: count,
   growth_count: count,
+  called_kpi: count,
+  booked_kpi: count,
+  negotiated_kpi: count,
+  open_lanes: z.array(z.object({ origin_state: z.string(), equipment: z.string().nullable(), carriers: count })),
+  open_origins: z.array(z.object({ origin_state: z.string(), carriers: count })),
   rows: z.array(networkRow),
 });
 
@@ -292,25 +355,35 @@ function demandCtes(): string {
   );
 }
 
-// One round trip: the page of lanes and the total. Lanes are the asks grouped by
-// (origin, destination, equipment); the week columns split the unmet asks by desk week.
+const demandSorts: Record<OperatorDemandQuery["sort"], readonly SortKey[]> = {
+  lane: [{ column: "g.origin_state" }, { column: "g.destination_state", nullable: true }],
+  equipment: [{ column: "g.equipment", nullable: true }],
+  unmet: [{ column: "g.unmet" }],
+  thisWeek: [{ column: "g.this_week" }],
+  carriers: [{ column: "g.carriers" }],
+};
+const demandTies = ["g.unmet DESC", "g.searches DESC", "g.origin_state", "g.destination_state NULLS LAST", "g.equipment NULLS LAST"];
+
+// One round trip: the page of lanes, the total, the totals and the unmet asks per origin. Lanes are
+// the asks grouped by (origin, destination, equipment); the week columns split the unmet asks by desk
+// week. The bar filters keep or drop whole rows, so a row's counts are always all of its asks.
 export function demandQuery(params: OperatorDemandQuery): SqlStatement {
-  // The same filters on a grouped row (g) and on a single ask (a), for the carriers total.
-  const filtersOn = (alias: "g" | "a") => {
-    const list: string[] = [];
-    if (params.equipment.length > 0) list.push(`${alias}.` + sql`equipment IN (${params.equipment})`.text);
-    if (params.origin) list.push(`${alias}.` + sql`origin_state = ${params.origin}`.text);
-    if (params.lane) {
-      const [origin, destination, equipment] = params.lane.split("|");
-      list.push(`${alias}.` + sql`origin_state = ${origin ?? ""}`.text);
-      list.push(destination ? `${alias}.` + sql`destination_state = ${destination}`.text : `${alias}.destination_state IS NULL`);
-      list.push(equipment ? `${alias}.` + sql`equipment = ${equipment}`.text : `${alias}.equipment IS NULL`);
-    }
-    return list.length > 0 ? list.join("\n        AND ") : "TRUE";
-  };
-  // A carrier narrows the asks before they are grouped, so every count on a row is its own.
-  const byCarrier = params.carrier ? sql`a.carrier_key = ${params.carrier}`.text : "TRUE";
-  const offset = (params.page - 1) * inboxPageSize;
+  const filters: string[] = [];
+  if (params.equipment.length > 0) filters.push(sql`g.equipment IN (${params.equipment})`.text);
+  if (params.origin) filters.push(sql`g.origin_state = ${params.origin}`.text);
+  if (params.q) {
+    const pattern = containsPattern(params.q);
+    const state = params.q.toUpperCase();
+    filters.push(
+      sql`(g.origin_state = ${state} OR g.destination_state = ${state} OR EXISTS (
+        SELECT 1 FROM asks q WHERE q.origin_state = g.origin_state
+          AND q.destination_state IS NOT DISTINCT FROM g.destination_state AND q.equipment IS NOT DISTINCT FROM g.equipment
+          AND (q.mc_number ILIKE ${pattern} OR q.carrier_name ILIKE ${pattern})))`.text,
+    );
+  }
+  if (params.next === "source") filters.push("g.no_match > 0");
+  if (params.next === "rate") filters.push("g.offered_no_booking > 0");
+  const offset = (params.page - 1) * params.pageSize;
 
   const text =
     demandCtes() +
@@ -322,34 +395,36 @@ export function demandQuery(params: OperatorDemandQuery): SqlStatement {
         COALESCE(sum(a.unmet) FILTER (WHERE a.created_at >= w.previous_start AND a.created_at < w.this_start), 0) AS previous_week,
         count(DISTINCT a.carrier_key) AS carriers
       FROM asks a, weeks w
-      WHERE ` +
-    byCarrier +
-    `
       GROUP BY a.origin_state, a.destination_state, a.equipment
     ), ordered AS (
       SELECT g.*, row_number() OVER (
-        ORDER BY g.unmet DESC, g.searches DESC, g.origin_state, g.destination_state NULLS LAST, g.equipment NULLS LAST
+        ORDER BY ` +
+    orderBy(demandSorts[params.sort], params.dir, demandTies) +
+    `
       ) AS ord
       FROM grouped g
       WHERE ` +
-    filtersOn("g") +
+    (filters.length > 0 ? filters.join("\n        AND ") : "TRUE") +
     `
     )
     SELECT (SELECT count(*) FROM ordered) AS total,
       (SELECT COALESCE(sum(no_match), 0) FROM ordered) AS no_match_total,
       (SELECT COALESCE(sum(offered_no_booking), 0) FROM ordered) AS offered_no_booking_total,
-      (SELECT count(DISTINCT a.carrier_key) FROM asks a WHERE ` +
-    filtersOn("a") +
-    ` AND ` +
-    byCarrier +
-    `) AS carriers_total,
+      (SELECT COALESCE(sum(this_week), 0) FROM ordered) AS this_week_total,
+      (SELECT COALESCE(sum(previous_week), 0) FROM ordered) AS previous_week_total,
+      -- Distinct carriers across the kept rows, not the sum of each row's carriers.
+      (SELECT count(DISTINCT a.carrier_key) FROM asks a JOIN ordered g ON g.origin_state = a.origin_state
+        AND g.destination_state IS NOT DISTINCT FROM a.destination_state AND g.equipment IS NOT DISTINCT FROM a.equipment) AS carriers_total,
+      COALESCE((SELECT json_agg(o ORDER BY o.unmet DESC, o.origin_state) FROM (
+        SELECT g.origin_state, sum(g.unmet) AS unmet FROM grouped g GROUP BY g.origin_state
+      ) o), '[]'::json) AS origins,
       COALESCE((SELECT json_agg(r ORDER BY r.ord) FROM (
         SELECT p.ord, p.origin_state, p.destination_state, p.equipment, p.searches, p.no_match, p.offered_no_booking,
           p.this_week, p.previous_week, p.carriers
         FROM ordered p WHERE p.ord > ` +
     sql`${offset}`.text +
     ` AND p.ord <= ` +
-    sql`${offset + inboxPageSize}`.text +
+    sql`${offset + params.pageSize}`.text +
     `
       ) r), '[]'::json) AS rows`;
   return { text };
@@ -410,6 +485,9 @@ export const demandResult = z.object({
   no_match_total: count,
   offered_no_booking_total: count,
   carriers_total: count,
+  this_week_total: count,
+  previous_week_total: count,
+  origins: z.array(z.object({ origin_state: z.string(), unmet: count })),
   rows: z.array(demandRow),
 });
 
@@ -463,8 +541,11 @@ export function operatorNetworkRoutes(deps: OperatorNetworkDeps): FastifyPluginA
             rows: row.rows.map(toNetworkCarrier),
             total: row.total,
             page: params.page,
-            pageSize: inboxPageSize,
+            pageSize: params.pageSize,
             counts: { all: row.all_count, new: row.new_count, atRisk: row.at_risk_count, top: row.top_count, growth: row.growth_count },
+            kpis: { called: row.called_kpi, booked: row.booked_kpi, negotiated: row.negotiated_kpi },
+            openLanes: row.open_lanes.map((lane) => ({ originState: lane.origin_state, equipment: lane.equipment, carriers: lane.carriers })),
+            openOrigins: row.open_origins.map((origin) => ({ originState: origin.origin_state, carriers: origin.carriers })),
             boardAvailable: lanes !== null,
           };
         } catch (error) {
@@ -487,8 +568,15 @@ export function operatorNetworkRoutes(deps: OperatorNetworkDeps): FastifyPluginA
             rows: row.rows.map(toDemandLane),
             total: row.total,
             page: params.page,
-            pageSize: inboxPageSize,
-            totals: { noMatch: row.no_match_total, offeredNoBooking: row.offered_no_booking_total, carriers: row.carriers_total },
+            pageSize: params.pageSize,
+            totals: {
+              noMatch: row.no_match_total,
+              offeredNoBooking: row.offered_no_booking_total,
+              carriers: row.carriers_total,
+              thisWeek: row.this_week_total,
+              previousWeek: row.previous_week_total,
+            },
+            origins: row.origins.map((origin) => ({ originState: origin.origin_state, unmet: origin.unmet })),
           };
         } catch (error) {
           request.log.warn({ err: error }, "operator demand unavailable");

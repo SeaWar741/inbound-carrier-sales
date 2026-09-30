@@ -67,7 +67,26 @@ const newRow = {
 };
 
 // One row: counts as strings (count(*) is int8), the page as parsed json.
-const networkRow = { total: "2", all_count: "2", new_count: "1", at_risk_count: "1", top_count: "1", growth_count: "1", rows: [atRiskTopRow, newRow] };
+const networkRow = {
+  total: "2",
+  all_count: "2",
+  new_count: "1",
+  at_risk_count: "1",
+  top_count: "1",
+  growth_count: "1",
+  called_kpi: "2",
+  booked_kpi: "2",
+  negotiated_kpi: "3",
+  open_lanes: [
+    { origin_state: "GA", equipment: "DRY_VAN", carriers: "1" },
+    { origin_state: "TX", equipment: null, carriers: "1" },
+  ],
+  open_origins: [
+    { origin_state: "GA", carriers: "1" },
+    { origin_state: "TX", carriers: "1" },
+  ],
+  rows: [atRiskTopRow, newRow],
+};
 
 const statements: string[] = [];
 let failTwin = false;
@@ -120,6 +139,10 @@ describe("GET /v1/operator/network", () => {
     ["an unknown since", "?since=1y"],
     ["from without to", "?from=2026-09-01"],
     ["page 0", "?page=0"],
+    ["an unknown sort", "?sort=name"],
+    ["an unknown dir", "?dir=up"],
+    ["a page size off the list", "?pageSize=30"],
+    ["a fractional page size", "?pageSize=10.5"],
   ])("rejects %s", async (_, query) => {
     statements.length = 0;
     expect((await getNetwork(query)).statusCode).toBe(400);
@@ -134,6 +157,15 @@ describe("GET /v1/operator/network", () => {
     const body = operatorNetworkResponse.parse(res.json());
     expect(body).toMatchObject({ status: "ok", total: 2, page: 1, pageSize: 25, boardAvailable: true });
     expect(body.counts).toEqual({ all: 2, new: 1, atRisk: 1, top: 1, growth: 1 });
+    expect(body.kpis).toEqual({ called: 2, booked: 2, negotiated: 3 });
+    expect(body.openLanes).toEqual([
+      { originState: "GA", equipment: "DRY_VAN", carriers: 1 },
+      { originState: "TX", equipment: null, carriers: 1 },
+    ]);
+    expect(body.openOrigins).toEqual([
+      { originState: "GA", carriers: 1 },
+      { originState: "TX", carriers: 1 },
+    ]);
     expect(body.rows[0]).toEqual({
       key: "mc:123456",
       mcNumber: "123456",
@@ -200,9 +232,31 @@ describe("GET /v1/operator/network", () => {
     expect(text).toContain("LIMIT 5");
   });
 
-  it("narrows to one carrier by key, escaped", () => {
-    const text = networkQuery(operatorNetworkQuery.parse({ key: "mc:9'1" }), new Set()).text;
-    expect(text).toContain("c.carrier_key = E'mc:9''1'");
+  it.each([
+    ["mc", "asc", "ORDER BY lpad(f.mc_number, 12, '0') ASC NULLS LAST, f.last_call_at DESC, f.carrier_key)"],
+    ["carrier", "desc", "ORDER BY f.carrier_name DESC NULLS LAST, f.last_call_at DESC, f.carrier_key)"],
+    ["lastCall", "asc", "ORDER BY f.last_call_at ASC, f.carrier_key)"],
+    ["calls", "desc", "ORDER BY f.calls DESC, f.last_call_at DESC, f.carrier_key)"],
+    ["bookings", "asc", "ORDER BY f.bookings ASC, f.last_call_at DESC, f.carrier_key)"],
+  ])("orders by %s %s from the whitelist, then the stable tie breakers", (sort, dir, order) => {
+    expect(networkQuery(operatorNetworkQuery.parse({ sort, dir }), new Set()).text).toContain(order);
+  });
+
+  it("pages by the chosen page size and echoes it", async () => {
+    expect(networkQuery(operatorNetworkQuery.parse({ page: "3", pageSize: "10" }), new Set()).text).toContain("p.ord > 20 AND p.ord <= 30");
+    expect(networkQuery(operatorNetworkQuery.parse({ page: "2", pageSize: "50" }), new Set()).text).toContain("p.ord > 50 AND p.ord <= 100");
+    const res = await getNetwork("?pageSize=10");
+    expect(operatorNetworkResponse.parse(res.json()).pageSize).toBe(10);
+  });
+
+  it("reads KPIs over the filtered carriers and the open lane panel over the listed ones, before the filters", () => {
+    const text = networkQuery(operatorNetworkQuery.parse({ origin: "GA", view: "top" }), new Set()).text;
+    expect(text).toContain("(SELECT count(*) FROM filtered WHERE calls > 0) AS called_kpi");
+    expect(text).toContain("(SELECT COALESCE(sum(bookings), 0) FROM filtered) AS booked_kpi");
+    expect(text).toContain("(SELECT COALESCE(sum(loads_negotiated), 0) FROM filtered) AS negotiated_kpi");
+    expect(text).toContain("listed AS (\n      SELECT c.* FROM classified c WHERE c.calls > 0 OR c.relationship = 'at_risk'");
+    expect(text).toContain("FROM lanes l JOIN listed c ON c.carrier_key = l.carrier_key\n        WHERE l.open GROUP BY l.origin_state, l.equipment");
+    expect(text).toContain("WHERE l.open GROUP BY l.origin_state\n");
   });
 
   it("renders the bar filters as escaped SQL in filtered", () => {
@@ -223,15 +277,28 @@ describe("GET /v1/operator/network", () => {
       expect(tms.queryLoads.mock.calls.map(([filters]) => filters)).toContainEqual({ equipmentType: "FLATBED", maxResults: 50 });
       expect((await getNetwork("?view=growth", undefined, cachedApp)).statusCode).toBe(200);
       expect(tms.queryLoads).toHaveBeenCalledTimes(5);
-      // Booked loads are not open lanes; a search without equipment matches the state alone.
+      // Booked loads are not open lanes. Exact lanes match the triples; a search's Any matches only its own part.
       for (const text of statements) {
-        expect(text).toContain("(r.origin_state || '|' || r.equipment) IN (E'GA|DRY_VAN', E'TX|REEFER')");
-        expect(text).toContain("OR (r.equipment IS NULL AND r.origin_state IN (E'GA', E'TX'))");
-        expect(text).not.toContain("OH|DRY_VAN");
+        expect(text).toContain("(r.origin_state || '|' || r.destination_state || '|' || r.equipment) IN (E'GA|KS|DRY_VAN', E'TX|KS|REEFER')");
+        expect(text).toContain("OR (r.search AND r.destination_state IS NULL AND (r.origin_state || '|' || r.equipment) IN (E'GA|DRY_VAN', E'TX|REEFER'))");
+        expect(text).toContain("OR (r.search AND r.equipment IS NULL AND (r.origin_state || '|' || r.destination_state) IN (E'GA|KS', E'TX|KS'))");
+        expect(text).toContain("OR (r.search AND r.destination_state IS NULL AND r.equipment IS NULL AND r.origin_state IN (E'GA', E'TX'))");
+        expect(text).not.toContain("OH|");
       }
     } finally {
       await cachedApp.close();
     }
+  });
+
+  it("tags growth on an open origin and equipment only for a lane the carrier booked at least twice", () => {
+    const text = networkQuery(operatorNetworkQuery.parse({}), new Set(["GA|KS|DRY_VAN"])).text;
+    expect(text).toContain("OR ((r.origin_state || '|' || r.equipment) IN (E'GA|DRY_VAN') AND EXISTS (");
+    expect(text).toContain("AND b.destination_state = r.destination_state AND b.equipment = r.equipment\n            AND b.bookings >= 2))");
+    expect(text).toContain("count(DISTINCT h.hold_id) AS bookings");
+    expect(text).toContain("JOIN holds h ON h.call_id = k.call_id AND h.status IN ('booked', 'booked_unconfirmed')");
+    expect(text).toContain("JOIN offers o ON o.call_id = h.call_id AND o.load_id = h.load_id");
+    // A carrier is growth when any of its lanes is open.
+    expect(text).toContain("EXISTS (SELECT 1 FROM lanes l WHERE l.carrier_key = f.carrier_key AND l.open) AS growth");
   });
 
   it("answers without growth when the board cannot be read", async () => {
@@ -240,6 +307,7 @@ describe("GET /v1/operator/network", () => {
     expect(res.statusCode).toBe(200);
     expect(operatorNetworkResponse.parse(res.json()).boardAvailable).toBe(false);
     const [text] = statements;
+    expect(text).toContain("(r.origin_state || '|' || r.destination_state || '|' || r.equipment) IN (NULL)");
     expect(text).toContain("(r.origin_state || '|' || r.equipment) IN (NULL)");
     expect(text).toContain("r.origin_state IN (NULL)");
     expect(text).not.toContain("|DRY_VAN'");
@@ -267,6 +335,12 @@ const demandRow = {
   no_match_total: "4",
   offered_no_booking_total: "3",
   carriers_total: "3",
+  this_week_total: "3",
+  previous_week_total: "3",
+  origins: [
+    { origin_state: "TX", unmet: "5" },
+    { origin_state: "GA", unmet: "2" },
+  ],
   rows: [
     {
       ord: 1,
@@ -322,7 +396,17 @@ describe("GET /v1/operator/demand", () => {
     expect(res.statusCode).toBe(200);
     expect(statements).toHaveLength(1);
     const body = operatorDemandResponse.parse(res.json());
-    expect(body).toMatchObject({ status: "ok", total: 2, page: 1, pageSize: 25, totals: { noMatch: 4, offeredNoBooking: 3, carriers: 3 } });
+    expect(body).toMatchObject({
+      status: "ok",
+      total: 2,
+      page: 1,
+      pageSize: 25,
+      totals: { noMatch: 4, offeredNoBooking: 3, carriers: 3, thisWeek: 3, previousWeek: 3 },
+    });
+    expect(body.origins).toEqual([
+      { originState: "TX", unmet: 5 },
+      { originState: "GA", unmet: 2 },
+    ]);
     expect(body.rows[0]).toEqual({
       originState: "TX",
       destinationState: null,
@@ -363,13 +447,55 @@ describe("GET /v1/operator/demand", () => {
     expect(text).toContain("count(DISTINCT a.carrier_key) AS carriers");
   });
 
-  it("narrows to one exact lane, Any as IS NULL, and to one carrier's asks before grouping", () => {
-    const text = demandQuery(operatorDemandQuery.parse({ lane: "TX||REEFER", carrier: "mc:9'1" })).text;
-    expect(text).toContain("g.origin_state = E'TX'");
-    expect(text).toContain("g.destination_state IS NULL");
-    expect(text).toContain("g.equipment = E'REEFER'");
-    expect(text).toContain("WHERE a.carrier_key = E'mc:9''1'\n      GROUP BY");
-    expect(operatorDemandQuery.safeParse({ lane: "TX|GA" }).success).toBe(false);
+  it.each([
+    ["an unknown sort", "?sort=searches"],
+    ["an unknown dir", "?dir=up"],
+    ["a page size off the list", "?pageSize=100"],
+    ["an unknown next move", "?next=call"],
+  ])("rejects %s", async (_, query) => {
+    statements.length = 0;
+    expect((await getDemand(query)).statusCode).toBe(400);
+    expect(statements).toHaveLength(0);
+  });
+
+  it("keeps a lane by its states or by an MC or name among its asks, escaped, without touching its counts", () => {
+    const text = demandQuery(operatorDemandQuery.parse({ q: " tx'%" })).text;
+    expect(text).toContain("(g.origin_state = E'TX''%' OR g.destination_state = E'TX''%' OR EXISTS (");
+    expect(text).toContain("AND q.destination_state IS NOT DISTINCT FROM g.destination_state AND q.equipment IS NOT DISTINCT FROM g.equipment");
+    expect(text).toContain("(q.mc_number ILIKE E'%tx''\\\\%%' OR q.carrier_name ILIKE E'%tx''\\\\%%')");
+    // q filters the grouped rows, so it never reaches the asks that are summed.
+    const grouped = text.slice(text.indexOf("grouped AS ("), text.indexOf("ordered AS ("));
+    expect(grouped).not.toContain("ILIKE");
+  });
+
+  it("keeps the rows of the next move: source needs no-match searches, rate needs offers without a booking", () => {
+    expect(demandQuery(operatorDemandQuery.parse({ next: "source" })).text).toContain("WHERE g.no_match > 0\n");
+    expect(demandQuery(operatorDemandQuery.parse({ next: "rate", origin: "ga" })).text).toContain(
+      "WHERE g.origin_state = E'GA'\n        AND g.offered_no_booking > 0\n",
+    );
+  });
+
+  it("sums the week totals over the kept rows and the origins over every row", () => {
+    const text = demandQuery(operatorDemandQuery.parse({ origin: "ga" })).text;
+    expect(text).toContain("(SELECT COALESCE(sum(this_week), 0) FROM ordered) AS this_week_total");
+    expect(text).toContain("(SELECT COALESCE(sum(previous_week), 0) FROM ordered) AS previous_week_total");
+    expect(text).toContain("SELECT g.origin_state, sum(g.unmet) AS unmet FROM grouped g GROUP BY g.origin_state");
+  });
+
+  it.each([
+    ["lane", "asc", "ORDER BY g.origin_state ASC, g.destination_state ASC NULLS LAST, g.unmet DESC, g.searches DESC, g.equipment NULLS LAST"],
+    ["equipment", "desc", "ORDER BY g.equipment DESC NULLS LAST, g.unmet DESC, g.searches DESC, g.origin_state, g.destination_state NULLS LAST"],
+    ["unmet", "asc", "ORDER BY g.unmet ASC, g.searches DESC, g.origin_state, g.destination_state NULLS LAST, g.equipment NULLS LAST"],
+    ["thisWeek", "desc", "ORDER BY g.this_week DESC, g.unmet DESC, g.searches DESC, g.origin_state"],
+    ["carriers", "asc", "ORDER BY g.carriers ASC, g.unmet DESC, g.searches DESC, g.origin_state"],
+  ])("orders by %s %s from the whitelist, then the stable tie breakers", (sort, dir, order) => {
+    expect(demandQuery(operatorDemandQuery.parse({ sort, dir })).text).toContain(order);
+  });
+
+  it("pages by the chosen page size and echoes it", async () => {
+    expect(demandQuery(operatorDemandQuery.parse({ page: "2", pageSize: "10" })).text).toContain("p.ord > 10 AND p.ord <= 20");
+    const res = await getDemand("?pageSize=50");
+    expect(operatorDemandResponse.parse(res.json()).pageSize).toBe(50);
   });
 
   it("orders by unmet then searches then lane, and pages", () => {
@@ -384,9 +510,9 @@ describe("GET /v1/operator/demand", () => {
   it("renders the equipment and origin filters as escaped SQL", () => {
     const text = demandQuery(operatorDemandQuery.parse({ equipment: ["reefer", "dry van"], origin: "tx" })).text;
     expect(text).toContain("WHERE g.equipment IN (E'REEFER', E'DRY_VAN')");
-    // The carriers total counts asks under the same filters, not the page.
-    expect(text).toContain("FROM asks a WHERE a.equipment IN (E'REEFER', E'DRY_VAN')");
     expect(text).toContain("AND g.origin_state = E'TX'");
+    // The carriers total counts the asks of every kept row, not the page.
+    expect(text).toContain("(SELECT count(DISTINCT a.carrier_key) FROM asks a JOIN ordered g ON g.origin_state = a.origin_state");
   });
 
   it("answers 503 when Twin fails", async () => {
