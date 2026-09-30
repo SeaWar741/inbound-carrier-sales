@@ -303,6 +303,53 @@ export const adapterNetworkResponse = z.object({
 });
 export type TowerNetwork = z.infer<typeof adapterNetworkResponse>;
 
+// One lane carriers asked for in the last 4 desk weeks; a null destination or equipment is the "Any"
+// the carrier asked for.
+const demandLane = z.object({
+  originState: z.string(),
+  destinationState: z.string().nullable(),
+  equipment: z.string().nullable(),
+  searches: z.number().int(),
+  // Searches that returned no load.
+  noMatch: z.number().int(),
+  // Loads offered on a call that never got a hold on that call.
+  offeredNoBooking: z.number().int(),
+  // noMatch + offeredNoBooking, over the 4 weeks and in this and the previous desk week.
+  unmet: z.number().int(),
+  thisWeek: z.number().int(),
+  previousWeek: z.number().int(),
+  // Distinct carriers behind the searches and offers.
+  carriers: z.number().int(),
+});
+export type DemandLane = z.infer<typeof demandLane>;
+
+export const adapterDemandResponse = z.object({
+  status: z.literal("ok"),
+  rows: z.array(demandLane),
+  total: z.number().int(),
+  page: z.number().int(),
+  pageSize: z.number().int(),
+});
+export type TowerDemand = z.infer<typeof adapterDemandResponse>;
+
+const demandCarrier = z.object({
+  key: z.string(),
+  mcNumber: z.string().nullable(),
+  carrierName: z.string().nullable(),
+  // The carrier's searches plus offered loads without a booking on the row's lane.
+  asks: z.number().int(),
+});
+export type DemandCarrier = z.infer<typeof demandCarrier>;
+
+export const adapterDemandCarriersResponse = z.object({
+  status: z.literal("ok"),
+  rows: z.array(demandCarrier),
+  total: z.number().int(),
+  page: z.number().int(),
+  pageSize: z.number().int(),
+});
+export type TowerDemandCarriers = z.infer<typeof adapterDemandCarriersResponse>;
+
 export type ErrorResponse = { status: string; message: string };
 
 // Request bodies the browser sends to the tower.

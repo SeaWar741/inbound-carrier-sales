@@ -3,6 +3,8 @@ import { z } from "zod";
 import {
   adapterCarrierCallsResponse,
   adapterCarriersResponse,
+  adapterDemandCarriersResponse,
+  adapterDemandResponse,
   adapterLoadsResponse,
   adapterNetworkResponse,
   adapterWallResponse,
@@ -14,6 +16,8 @@ import {
   type AutonomyMode,
   type ConfirmHoldResponse,
   type ErrorResponse,
+  type TowerDemand,
+  type TowerDemandCarriers,
   type ReleaseHoldResponse,
   type TowerLoads,
   type TowerNetwork,
@@ -96,6 +100,20 @@ export async function getCarrierCalls(key: string, query: URLSearchParams): Prom
 // query carries the carriers page's view and filters as the adapter reads them (view, since, ..., page).
 export async function getNetwork(query: URLSearchParams): Promise<AdapterResult<TowerNetwork>> {
   return read(`/v1/operator/network?${query.toString()}`, adapterNetworkResponse, "The carrier network is unavailable right now. Retry shortly.");
+}
+
+// query carries the demand page's filters as the adapter reads them (equipment, origin, page).
+export async function getDemand(query: URLSearchParams): Promise<AdapterResult<TowerDemand>> {
+  return read(`/v1/operator/demand?${query.toString()}`, adapterDemandResponse, "The demand data is unavailable right now. Retry shortly.");
+}
+
+// query names one demand row (origin, and destination and equipment unless the row is "Any") and a page.
+export async function getDemandCarriers(query: URLSearchParams): Promise<AdapterResult<TowerDemandCarriers>> {
+  return read(
+    `/v1/operator/demand/carriers?${query.toString()}`,
+    adapterDemandCarriersResponse,
+    "The demand data is unavailable right now. Retry shortly.",
+  );
 }
 
 export type InterventionRecord =
