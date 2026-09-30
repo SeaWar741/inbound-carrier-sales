@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import type { IconType } from "react-icons";
 import { LuCalendarClock, LuContainer, LuFlag, LuMap, LuMapPin, LuMousePointerClick, LuTruck } from "react-icons/lu";
-import { DealCard } from "@/components/deal-card";
+import { DealCard, TripSection } from "@/components/deal-card";
 import { EmptyState } from "@/components/empty-state";
 import { formatPickup, HoldCard, LaneText } from "@/components/hold-card";
 import { LaneMap, type LaneMapLoad } from "@/components/lane-map";
@@ -98,6 +98,7 @@ export function LoadPanel({
             action={openHoldCard}
           />
         )}
+        {hold && hold.status !== "released" && hold.trip && <TripSection trip={hold.trip} />}
         <EmptyState className="py-10" icon={<LuTruck size={20} />} title="No load on the table yet" hint="The lane and pricing appear with the first offer" />
       </>
     );
@@ -148,6 +149,7 @@ export function LoadPanel({
           <p className="mt-3 text-xs text-fg-faint">Lane not recorded for this load.</p>
         )}
       </Section>
+      {standingHold?.trip && <TripSection trip={standingHold.trip} />}
     </>
   );
 }

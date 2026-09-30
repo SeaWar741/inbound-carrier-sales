@@ -240,40 +240,42 @@ function WhoEarnsWhat({ ours, carrier }: { ours: EarningsRow | null; carrier: Ea
 }
 
 // The held load's trip: diesel, tolls and whether it arrives on time. Estimates snapshotted when the
-// hold was placed; what the carrier keeps from them is in "Who earns what".
-function Trip({ trip }: { trip: TripSnapshot }) {
+// hold was placed; what the carrier keeps from them is in "Who earns what". It sits in the rail
+// between the load and the carrier record, since it describes the load, not the negotiation.
+export function TripSection({ trip }: { trip: TripSnapshot }) {
   const arrival = arrivalText(trip);
   return (
-    <div className="flex flex-col gap-1.5 border-t border-line pt-3">
-      <Subhead icon={LuTruck}>Trip</Subhead>
-      <div className="flex flex-wrap gap-x-4 gap-y-1.5">
-        <Line icon={LuFuel}>
-          Diesel <span className="tabular">~{formatUsd(trip.dieselUsd)}</span>
+    <Section icon={LuFuel} title="Trip estimate">
+      <div className="flex flex-col gap-1.5">
+        <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+          <Line icon={LuFuel}>
+            Diesel <span className="tabular">~{formatUsd(trip.dieselUsd)}</span>
+          </Line>
+          {trip.tollShare === null ? (
+            <Line icon={LuRoute} className="text-fg-muted">
+              Tolls not counted
+            </Line>
+          ) : (
+            <Line icon={LuRoute}>
+              Tolls <span className="tabular">~{formatUsd(trip.tollsUsd)}</span>
+            </Line>
+          )}
+        </div>
+        <Line icon={LuClock} className={toneText[arrival.tone]}>
+          {arrival.text}
+          <span className="tabular mt-0.5 block text-[11px] text-fg-faint">
+            {trip.deliveryAt && <>Delivery {formatDateTime(trip.deliveryAt)} · </>}
+            legal arrival {formatDateTime(trip.legalEtaAt)}
+          </span>
         </Line>
-        {trip.tollShare === null ? (
-          <Line icon={LuRoute} className="text-fg-muted">
-            Tolls not counted
-          </Line>
-        ) : (
-          <Line icon={LuRoute}>
-            Tolls <span className="tabular">~{formatUsd(trip.tollsUsd)}</span>
-          </Line>
-        )}
       </div>
-      <Line icon={LuClock} className={toneText[arrival.tone]}>
-        {arrival.text}
-        <span className="tabular mt-0.5 block text-[11px] text-fg-faint">
-          {trip.deliveryAt && <>Delivery {formatDateTime(trip.deliveryAt)} · </>}
-          legal arrival {formatDateTime(trip.legalEtaAt)}
-        </span>
-      </Line>
-    </div>
+    </Section>
   );
 }
 
 // Operator only: our max for the load is on screen here and nowhere the agent can reach.
 // The selected call's deal on one load, top to bottom: where it stands, the price bar, how the
-// rounds went, who earns what, the trip, and whether the carrier was told.
+// rounds went, who earns what, and whether the carrier was told.
 export function DealCard({
   call,
   loadId,
@@ -378,8 +380,6 @@ export function DealCard({
           )}
           <EndLine end={end} closedInRound={last?.decision === "accept"} />
         </div>
-
-        {trip && <Trip trip={trip} />}
 
         {notice?.summary ? (
           <Line icon={LuMail} className={notice.status === "sent" ? "text-fg-muted" : "text-warn"}>
