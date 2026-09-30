@@ -73,7 +73,7 @@ function CarrierRecord({ carrier, calls }: { carrier: TowerCarrier | null; calls
           {pricing.bookingRate !== null && <span className="font-normal text-fg-muted"> ({formatPercent(pricing.bookingRate)})</span>}
         </Fact>
         <Fact icon={LuDollarSign} label="Avg agreed $/mi">{orDash(pricing.avgAgreedPerMile, formatPerMile)}</Fact>
-        <Fact icon={LuPiggyBank} label="We keep, on avg">{orDash(pricing.avgMarginKept, formatUsd)}</Fact>
+        <Fact icon={LuPiggyBank} label="Under our max, avg">{orDash(pricing.avgMarginKept, formatUsd)}</Fact>
         <Fact icon={LuRepeat} label="Rounds to a deal">{orDash(pricing.avgRoundsToAgree, (v) => `${v.toFixed(1)} on avg`)}</Fact>
         <Fact icon={LuCalendarClock} label="Next pickup">{carrier?.nextTrip?.pickupAt ? formatDateTime(carrier.nextTrip.pickupAt) : "-"}</Fact>
         <Fact icon={LuLock} label="Open hold">

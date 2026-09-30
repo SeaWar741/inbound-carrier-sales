@@ -57,19 +57,20 @@ export function arrivalText(trip: Pick<TripSnapshot, "feasibility" | "lateHours"
   }
 }
 
-// One row of "Who earns what": "We earn $25 · 2%" over a muted line that shows the subtraction.
+// One row of "Who earns what": "Under our max $25 · 2%" over a muted line that shows the subtraction.
 export type EarningsRow = { lead: string; amount: string; pct: string; note: string; loss: boolean };
 
 const pctText = (pct: number) => `${Math.round(Math.abs(pct))}%`;
 
-// What we make on the load: our max minus the rate, as a share of our max. At an agreed rate the
-// note shows that subtraction; while negotiating it is our latest offer, and says so.
+// Our side of the load: how far the rate sits under our max, as a share of it. It is headroom, not
+// margin (the shipper's rate is unknown), so it never says "earn". At an agreed rate the note shows
+// that subtraction; while negotiating it is our latest offer, and says so.
 export function ourEarnings(maxBuy: number | null, rate: number | null, basis: "agreed" | "offer"): EarningsRow | null {
   const kept = marginKept(maxBuy, rate);
   if (!kept || maxBuy === null || rate === null) return null;
   const loss = kept.usd < 0;
   return {
-    lead: loss ? "We lose" : "We earn",
+    lead: loss ? "Over our max by" : "Under our max",
     amount: formatUsd(Math.abs(kept.usd)),
     pct: pctText(kept.pct),
     note: basis === "agreed" ? `Our max ${formatUsd(maxBuy)} − agreed ${formatUsd(rate)}` : `At our offer of ${formatUsd(rate)} · our max ${formatUsd(maxBuy)}`,

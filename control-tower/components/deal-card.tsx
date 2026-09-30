@@ -222,7 +222,7 @@ function EarnsLine({ icon: Icon, row }: { icon: IconType; row: EarningsRow }) {
   );
 }
 
-// Our margin and the carrier's, side by side, so the deal reads as good or bad for both at a glance.
+// Our headroom under the max and the carrier's take, side by side, so the deal reads at a glance.
 function WhoEarnsWhat({ ours, carrier }: { ours: EarningsRow | null; carrier: EarningsRow | null }) {
   return (
     <div className="flex flex-col gap-2 border-t border-line pt-3">
