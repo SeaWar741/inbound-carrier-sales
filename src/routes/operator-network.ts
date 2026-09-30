@@ -3,15 +3,24 @@ import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import {
   carrierRelationships,
+  operatorDemandCarriersQuery,
+  operatorDemandCarriersResponse,
+  operatorDemandQuery,
+  operatorDemandResponse,
   operatorNetworkQuery,
   operatorNetworkResponse,
   operatorWallUnavailableResponse,
+  type DemandCarrier,
+  type DemandLane,
   type NetworkCarrier,
+  type OperatorDemandCarriersQuery,
+  type OperatorDemandQuery,
   type OperatorNetworkQuery,
 } from "../contract.ts";
 import {
   inboxPageSize,
   openLanesCacheMs,
+  operatorTimeZone,
   segmentNewMaxCalls,
   segmentRecentDays,
   segmentTopMinBookings,
@@ -220,6 +229,168 @@ function toNetworkCarrier(row: NetworkRow): NetworkCarrier {
   };
 }
 
+// The CTEs up to `asks`: one row per unmet or searched ask in the last 4 desk weeks, this one
+// included. Stored timestamps are session-zone wall clock, so the desk week starts are converted
+// back to that clock like wallQuery and created_at is compared against them. A search counts once
+// on the lane it asked for (NULL destination or equipment means any); an offered load counts once
+// per call on its load's lane when that call got no hold on it. Offers made before the lane was
+// stored have NULL equipment that means unknown, not any, so they are left out. Asks without an
+// origin state (a zip-only search) have no row to land in.
+function demandCtes(): string {
+  const liveHold = `h.status IN ('held', 'confirming', 'booked', 'booked_unconfirmed')`;
+  return (
+    sql`WITH bounds AS (
+      SELECT date_trunc('week', now() AT TIME ZONE ${operatorTimeZone}) AS week_start
+    ), weeks AS (
+      SELECT ((b.week_start - interval '21 days') AT TIME ZONE ${operatorTimeZone})::timestamp AS window_start,
+        ((b.week_start - interval '7 days') AT TIME ZONE ${operatorTimeZone})::timestamp AS previous_start,
+        (b.week_start AT TIME ZONE ${operatorTimeZone})::timestamp AS this_start
+      FROM bounds b
+    ), offered AS (
+      SELECT DISTINCT ON (o.call_id, o.load_id) o.call_id, o.load_id, o.origin_state, o.destination_state, o.equipment, o.created_at
+      FROM offers o, weeks w
+      WHERE o.created_at >= w.window_start AND o.equipment IS NOT NULL AND o.origin_state IS NOT NULL
+      ORDER BY o.call_id, o.load_id, o.created_at DESC
+    ), raw_asks AS (
+      SELECT ls.call_id, ls.origin_state, ls.destination_state, ls.equipment, ls.created_at,
+        1 AS searches, CASE WHEN ls.results = 0 THEN 1 ELSE 0 END AS no_match, 0 AS offered_no_booking
+      FROM load_searches ls, weeks w
+      WHERE ls.created_at >= w.window_start AND ls.origin_state IS NOT NULL
+      UNION ALL
+      SELECT o.call_id, o.origin_state, o.destination_state, o.equipment, o.created_at, 0, 0, 1
+      FROM offered o
+      WHERE NOT EXISTS (SELECT 1 FROM holds h WHERE h.call_id = o.call_id AND h.load_id = o.load_id AND `.text +
+    liveHold +
+    `)
+    ), asks AS (
+      SELECT a.*, a.no_match + a.offered_no_booking AS unmet, c.mc_number, c.carrier_name,
+        CASE WHEN c.call_id IS NOT NULL THEN ` +
+    carrierKey("c") +
+    ` END AS carrier_key
+      FROM raw_asks a LEFT JOIN calls c ON c.call_id = a.call_id
+    )`
+  );
+}
+
+// One round trip: the page of lanes and the total. Lanes are the asks grouped by
+// (origin, destination, equipment); the week columns split the unmet asks by desk week.
+export function demandQuery(params: OperatorDemandQuery): SqlStatement {
+  const filters: string[] = [];
+  if (params.equipment.length > 0) filters.push(sql`g.equipment IN (${params.equipment})`.text);
+  if (params.origin) filters.push(sql`g.origin_state = ${params.origin}`.text);
+  const offset = (params.page - 1) * inboxPageSize;
+
+  const text =
+    demandCtes() +
+    `, grouped AS (
+      SELECT a.origin_state, a.destination_state, a.equipment,
+        sum(a.searches) AS searches, sum(a.no_match) AS no_match, sum(a.offered_no_booking) AS offered_no_booking,
+        sum(a.unmet) AS unmet,
+        COALESCE(sum(a.unmet) FILTER (WHERE a.created_at >= w.this_start), 0) AS this_week,
+        COALESCE(sum(a.unmet) FILTER (WHERE a.created_at >= w.previous_start AND a.created_at < w.this_start), 0) AS previous_week,
+        count(DISTINCT a.carrier_key) AS carriers
+      FROM asks a, weeks w
+      GROUP BY a.origin_state, a.destination_state, a.equipment
+    ), ordered AS (
+      SELECT g.*, row_number() OVER (
+        ORDER BY g.unmet DESC, g.searches DESC, g.origin_state, g.destination_state NULLS LAST, g.equipment NULLS LAST
+      ) AS ord
+      FROM grouped g
+      WHERE (g.unmet > 0 OR g.searches > 0)
+        AND ` +
+    (filters.length > 0 ? filters.join("\n        AND ") : "TRUE") +
+    `
+    )
+    SELECT (SELECT count(*) FROM ordered) AS total,
+      COALESCE((SELECT json_agg(r ORDER BY r.ord) FROM (
+        SELECT p.ord, p.origin_state, p.destination_state, p.equipment, p.searches, p.no_match, p.offered_no_booking,
+          p.unmet, p.this_week, p.previous_week, p.carriers
+        FROM ordered p WHERE p.ord > ` +
+    sql`${offset}`.text +
+    ` AND p.ord <= ` +
+    sql`${offset + inboxPageSize}`.text +
+    `
+      ) r), '[]'::json) AS rows`;
+  return { text };
+}
+
+// The carriers behind one radar row, matched exactly: a left out destination or equipment is the
+// "Any" row (IS NULL), not a wildcard. Asks without a calls row have no carrier and are skipped.
+export function demandCarriersQuery(params: OperatorDemandCarriersQuery): SqlStatement {
+  const lane = [
+    sql`a.origin_state = ${params.origin}`.text,
+    params.destination === undefined ? "a.destination_state IS NULL" : sql`a.destination_state = ${params.destination}`.text,
+    params.equipment === undefined ? "a.equipment IS NULL" : sql`a.equipment = ${params.equipment}`.text,
+  ];
+  const offset = (params.page - 1) * inboxPageSize;
+
+  const text =
+    demandCtes() +
+    `, grouped AS (
+      SELECT a.carrier_key, sum(a.searches + a.offered_no_booking) AS asks,
+        (array_agg(a.mc_number ORDER BY a.created_at DESC) FILTER (WHERE a.mc_number IS NOT NULL))[1] AS mc_number,
+        (array_agg(a.carrier_name ORDER BY a.created_at DESC) FILTER (WHERE a.carrier_name IS NOT NULL))[1] AS carrier_name
+      FROM asks a
+      WHERE a.carrier_key IS NOT NULL AND ` +
+    lane.join(" AND ") +
+    `
+      GROUP BY a.carrier_key
+    ), ordered AS (
+      SELECT g.*, row_number() OVER (ORDER BY g.asks DESC, g.carrier_key) AS ord
+      FROM grouped g WHERE g.asks > 0
+    )
+    SELECT (SELECT count(*) FROM ordered) AS total,
+      COALESCE((SELECT json_agg(r ORDER BY r.ord) FROM (
+        SELECT p.ord, p.carrier_key, p.mc_number, p.carrier_name, p.asks
+        FROM ordered p WHERE p.ord > ` +
+    sql`${offset}`.text +
+    ` AND p.ord <= ` +
+    sql`${offset + inboxPageSize}`.text +
+    `
+      ) r), '[]'::json) AS rows`;
+  return { text };
+}
+
+const demandRow = z.object({
+  origin_state: z.string(),
+  destination_state: z.string().nullable(),
+  equipment: z.string().nullable(),
+  searches: count,
+  no_match: count,
+  offered_no_booking: count,
+  unmet: count,
+  this_week: count,
+  previous_week: count,
+  carriers: count,
+});
+
+// Twin returns count(*) and sum(int) as strings and the json column already parsed.
+export const demandResult = z.object({ total: count, rows: z.array(demandRow) });
+
+const toDemandLane = (row: z.output<typeof demandRow>): DemandLane => ({
+  originState: row.origin_state,
+  destinationState: row.destination_state,
+  equipment: row.equipment,
+  searches: row.searches,
+  noMatch: row.no_match,
+  offeredNoBooking: row.offered_no_booking,
+  unmet: row.unmet,
+  thisWeek: row.this_week,
+  previousWeek: row.previous_week,
+  carriers: row.carriers,
+});
+
+const demandCarrierRow = z.object({ carrier_key: z.string(), mc_number: z.string().nullable(), carrier_name: z.string().nullable(), asks: count });
+
+export const demandCarriersResult = z.object({ total: count, rows: z.array(demandCarrierRow) });
+
+const toDemandCarrier = (row: z.output<typeof demandCarrierRow>): DemandCarrier => ({
+  key: row.carrier_key,
+  mcNumber: row.mc_number,
+  carrierName: row.carrier_name,
+  asks: row.asks,
+});
+
 export function operatorNetworkRoutes(deps: OperatorNetworkDeps): FastifyPluginAsync {
   return async (plugin) => {
     const app = plugin.withTypeProvider<ZodTypeProvider>();
@@ -255,6 +426,43 @@ export function operatorNetworkRoutes(deps: OperatorNetworkDeps): FastifyPluginA
         } catch (error) {
           request.log.warn({ err: error }, "operator network unavailable");
           return reply.code(503).send({ status: "service_unavailable", message: "The carrier data is unavailable right now. Retry shortly." });
+        }
+      },
+    );
+
+    app.get(
+      "/operator/demand",
+      { schema: { querystring: operatorDemandQuery, response: { 200: operatorDemandResponse, 503: operatorWallUnavailableResponse } } },
+      async (request, reply) => {
+        const params = request.query;
+        try {
+          const [row] = await deps.twin.query(demandQuery(params), demandResult);
+          if (!row) throw new Error("demand query returned no row");
+          return { status: "ok" as const, rows: row.rows.map(toDemandLane), total: row.total, page: params.page, pageSize: inboxPageSize };
+        } catch (error) {
+          request.log.warn({ err: error }, "operator demand unavailable");
+          return reply.code(503).send({ status: "service_unavailable", message: "The demand data is unavailable right now. Retry shortly." });
+        }
+      },
+    );
+
+    app.get(
+      "/operator/demand/carriers",
+      {
+        schema: {
+          querystring: operatorDemandCarriersQuery,
+          response: { 200: operatorDemandCarriersResponse, 503: operatorWallUnavailableResponse },
+        },
+      },
+      async (request, reply) => {
+        const params = request.query;
+        try {
+          const [row] = await deps.twin.query(demandCarriersQuery(params), demandCarriersResult);
+          if (!row) throw new Error("demand carriers query returned no row");
+          return { status: "ok" as const, rows: row.rows.map(toDemandCarrier), total: row.total, page: params.page, pageSize: inboxPageSize };
+        } catch (error) {
+          request.log.warn({ err: error }, "operator demand carriers unavailable");
+          return reply.code(503).send({ status: "service_unavailable", message: "The demand data is unavailable right now. Retry shortly." });
         }
       },
     );

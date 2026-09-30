@@ -1,10 +1,17 @@
-import { afterAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { z } from "zod";
-import { operatorNetworkQuery, operatorNetworkResponse } from "../src/contract.ts";
+import {
+  operatorDemandCarriersQuery,
+  operatorDemandCarriersResponse,
+  operatorDemandQuery,
+  operatorDemandResponse,
+  operatorNetworkQuery,
+  operatorNetworkResponse,
+} from "../src/contract.ts";
 import type { LoadQueryFilters, LoadSummary } from "../src/infra/tms/codec.ts";
 import { TmsUnavailableError } from "../src/infra/tms/errors.ts";
 import { TwinError, type SqlStatement } from "../src/infra/twin-client.ts";
-import { networkQuery, operatorNetworkRoutes } from "../src/routes/operator-network.ts";
+import { demandCarriersQuery, demandQuery, networkQuery, operatorNetworkRoutes } from "../src/routes/operator-network.ts";
 import { buildServer } from "../src/server.ts";
 import { testConfig } from "./test-config.ts";
 
@@ -64,11 +71,13 @@ const networkRow = { total: "2", all_count: "2", new_count: "1", at_risk_count: 
 
 const statements: string[] = [];
 let failTwin = false;
+// The one row Twin answers; the demand tests swap in their own.
+let twinRow: unknown = networkRow;
 const twin = {
   query: async <T>(statement: SqlStatement, rowSchema: z.ZodType<T>): Promise<T[]> => {
     statements.push(statement.text);
     if (failTwin) throw new TwinError("connection reset");
-    return [rowSchema.parse(networkRow)];
+    return [rowSchema.parse(twinRow)];
   },
 };
 
@@ -243,5 +252,186 @@ describe("GET /v1/operator/network", () => {
     } finally {
       failTwin = false;
     }
+  });
+});
+
+// Radar rows as Twin nests them: sums and counts as strings, like int8.
+const demandRow = {
+  total: "2",
+  rows: [
+    {
+      ord: 1,
+      origin_state: "TX",
+      destination_state: null,
+      equipment: null,
+      searches: "5",
+      no_match: "4",
+      offered_no_booking: "1",
+      unmet: "5",
+      this_week: "3",
+      previous_week: "1",
+      carriers: "2",
+    },
+    {
+      ord: 2,
+      origin_state: "GA",
+      destination_state: "KS",
+      equipment: "DRY_VAN",
+      searches: "0",
+      no_match: "0",
+      offered_no_booking: "2",
+      unmet: "2",
+      this_week: "0",
+      previous_week: "2",
+      carriers: "1",
+    },
+  ],
+};
+
+const demandCarriersRow = {
+  total: "1",
+  rows: [{ ord: 1, carrier_key: "mc:123456", mc_number: "123456", carrier_name: "ACME TRUCKING LLC", asks: "4" }],
+};
+
+const getDemand = (path: string, key: string = testConfig.OPERATOR_API_KEY) =>
+  app.inject({ method: "GET", url: `/v1/operator/demand${path}`, headers: { "x-api-key": key } });
+
+describe("GET /v1/operator/demand", () => {
+  beforeEach(() => {
+    twinRow = demandRow;
+  });
+  afterEach(() => {
+    twinRow = networkRow;
+  });
+
+  it("rejects the agent key", async () => {
+    expect((await getDemand("", testConfig.AGENT_API_KEY)).statusCode).toBe(401);
+    expect((await getDemand("/carriers?origin=TX", testConfig.AGENT_API_KEY)).statusCode).toBe(401);
+  });
+
+  it("returns the page of lanes from one Twin row, with no booked or money field", async () => {
+    statements.length = 0;
+    const res = await getDemand("?page=1");
+    expect(res.statusCode).toBe(200);
+    expect(statements).toHaveLength(1);
+    const body = operatorDemandResponse.parse(res.json());
+    expect(body).toMatchObject({ status: "ok", total: 2, page: 1, pageSize: 25 });
+    expect(body.rows[0]).toEqual({
+      originState: "TX",
+      destinationState: null,
+      equipment: null,
+      searches: 5,
+      noMatch: 4,
+      offeredNoBooking: 1,
+      unmet: 5,
+      thisWeek: 3,
+      previousWeek: 1,
+      carriers: 2,
+    });
+    for (const row of res.json().rows) {
+      expect(Object.keys(row).filter((field) => /book(ed)?$|rate|usd|buy/i.test(field))).toEqual([]);
+    }
+    expect(statements[0]).not.toMatch(/AS booked\b|agreed_rate|max_buy|carrier_ask/);
+  });
+
+  it("buckets weeks on the desk calendar, converted back to the stored clock", () => {
+    const text = demandQuery(operatorDemandQuery.parse({})).text;
+    expect(text).toContain("date_trunc('week', now() AT TIME ZONE E'America/Chicago') AS week_start");
+    expect(text).toContain("((b.week_start - interval '21 days') AT TIME ZONE E'America/Chicago')::timestamp AS window_start");
+    expect(text).toContain("((b.week_start - interval '7 days') AT TIME ZONE E'America/Chicago')::timestamp AS previous_start");
+    expect(text).toContain("(b.week_start AT TIME ZONE E'America/Chicago')::timestamp AS this_start");
+    expect(text).toContain("sum(a.unmet) FILTER (WHERE a.created_at >= w.this_start)");
+    expect(text).toContain("FILTER (WHERE a.created_at >= w.previous_start AND a.created_at < w.this_start)");
+    expect(text).toContain("ls.created_at >= w.window_start");
+    expect(text).toContain("o.created_at >= w.window_start");
+  });
+
+  it("counts an offered load only when its call got no live hold on it, and skips offers without a stored lane", () => {
+    const text = demandQuery(operatorDemandQuery.parse({})).text;
+    expect(text).toContain(
+      "NOT EXISTS (SELECT 1 FROM holds h WHERE h.call_id = o.call_id AND h.load_id = o.load_id AND h.status IN ('held', 'confirming', 'booked', 'booked_unconfirmed'))",
+    );
+    expect(text).toContain("DISTINCT ON (o.call_id, o.load_id)");
+    expect(text).toContain("o.equipment IS NOT NULL");
+    expect(text).toContain("CASE WHEN ls.results = 0 THEN 1 ELSE 0 END AS no_match");
+    expect(text).toContain("count(DISTINCT a.carrier_key) AS carriers");
+  });
+
+  it("orders by unmet then searches then lane, keeps only lanes with demand, and pages", () => {
+    const text = demandQuery(operatorDemandQuery.parse({ page: "3" })).text;
+    expect(text).toContain(
+      "ORDER BY g.unmet DESC, g.searches DESC, g.origin_state, g.destination_state NULLS LAST, g.equipment NULLS LAST",
+    );
+    expect(text).toContain("WHERE (g.unmet > 0 OR g.searches > 0)");
+    expect(text).toContain("GROUP BY a.origin_state, a.destination_state, a.equipment");
+    expect(text).toContain("p.ord > 50 AND p.ord <= 75");
+  });
+
+  it("renders the equipment and origin filters as escaped SQL", () => {
+    const text = demandQuery(operatorDemandQuery.parse({ equipment: ["reefer", "dry van"], origin: "tx" })).text;
+    expect(text).toContain("AND g.equipment IN (E'REEFER', E'DRY_VAN')");
+    expect(text).toContain("AND g.origin_state = E'TX'");
+  });
+
+  it("answers 503 when Twin fails", async () => {
+    failTwin = true;
+    try {
+      for (const path of ["", "/carriers?origin=TX"]) {
+        const res = await getDemand(path);
+        expect(res.statusCode).toBe(503);
+        expect(res.json()).toMatchObject({ status: "service_unavailable" });
+      }
+    } finally {
+      failTwin = false;
+    }
+  });
+});
+
+describe("GET /v1/operator/demand/carriers", () => {
+  beforeEach(() => {
+    twinRow = demandCarriersRow;
+  });
+  afterEach(() => {
+    twinRow = networkRow;
+  });
+
+  it.each([
+    ["no origin", ""],
+    ["an unknown equipment", "?origin=TX&equipment=boat"],
+    ["page 0", "?origin=TX&page=0"],
+  ])("rejects %s", async (_, query) => {
+    statements.length = 0;
+    expect((await getDemand(`/carriers${query}`)).statusCode).toBe(400);
+    expect(statements).toHaveLength(0);
+  });
+
+  it("returns the carriers behind the row, paged", async () => {
+    statements.length = 0;
+    const res = await getDemand("/carriers?origin=tx&page=2");
+    expect(res.statusCode).toBe(200);
+    const body = operatorDemandCarriersResponse.parse(res.json());
+    expect(body).toEqual({
+      status: "ok",
+      rows: [{ key: "mc:123456", mcNumber: "123456", carrierName: "ACME TRUCKING LLC", asks: 4 }],
+      total: 1,
+      page: 2,
+      pageSize: 25,
+    });
+    expect(statements[0]).toContain("p.ord > 25 AND p.ord <= 50");
+  });
+
+  it("matches the Any row with IS NULL, not as a wildcard", () => {
+    const text = demandCarriersQuery(operatorDemandCarriersQuery.parse({ origin: "TX" })).text;
+    expect(text).toContain("a.origin_state = E'TX' AND a.destination_state IS NULL AND a.equipment IS NULL");
+    const exact = demandCarriersQuery(operatorDemandCarriersQuery.parse({ origin: "GA", destination: "ks", equipment: "dry van" })).text;
+    expect(exact).toContain("a.origin_state = E'GA' AND a.destination_state = E'KS' AND a.equipment = E'DRY_VAN'");
+    expect(exact).not.toContain("IS NULL AND a.equipment");
+  });
+
+  it("counts asks as searches plus offered loads without a booking, ordered by asks then key", () => {
+    const text = demandCarriersQuery(operatorDemandCarriersQuery.parse({ origin: "TX" })).text;
+    expect(text).toContain("sum(a.searches + a.offered_no_booking) AS asks");
+    expect(text).toContain("row_number() OVER (ORDER BY g.asks DESC, g.carrier_key)");
+    expect(text).toContain("date_trunc('week', now() AT TIME ZONE E'America/Chicago')");
   });
 });

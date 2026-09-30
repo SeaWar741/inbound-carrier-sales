@@ -617,3 +617,63 @@ export const operatorNetworkResponse = z.object({
   boardAvailable: z.boolean(),
 });
 export type OperatorNetworkResponse = z.infer<typeof operatorNetworkResponse>;
+
+// The unmet demand radar reads the last 4 desk (Chicago) weeks, this one included; the bar filters narrow the rows.
+export const operatorDemandQuery = operatorCarriersFields.pick({ equipment: true, origin: true, page: true });
+export type OperatorDemandQuery = z.output<typeof operatorDemandQuery>;
+
+// One lane carriers asked for; a null destination or equipment is the "Any" the carrier asked for.
+// No search is linked to the booking it led to and no carrier rejection is stored, so neither is counted.
+const demandLane = z.object({
+  originState: z.string(),
+  destinationState: z.string().nullable(),
+  equipment: z.string().nullable(),
+  searches: z.number().int(),
+  // Searches that returned no load.
+  noMatch: z.number().int(),
+  // Loads negotiated on a call that never got a hold (held, confirming or booked) on that call.
+  offeredNoBooking: z.number().int(),
+  // noMatch + offeredNoBooking, over the 4 weeks and in this and the previous desk week.
+  unmet: z.number().int(),
+  thisWeek: z.number().int(),
+  previousWeek: z.number().int(),
+  // Distinct carriers behind the searches and offers.
+  carriers: z.number().int(),
+});
+export type DemandLane = z.infer<typeof demandLane>;
+
+export const operatorDemandResponse = z.object({
+  status: z.literal("ok"),
+  rows: z.array(demandLane),
+  total: z.number().int(),
+  page: z.number().int(),
+  pageSize: z.number().int(),
+});
+export type OperatorDemandResponse = z.infer<typeof operatorDemandResponse>;
+
+// One radar row: destination and equipment left out select the "Any" row, not every row.
+export const operatorDemandCarriersQuery = z.object({
+  origin: stateInput,
+  destination: optionalField(stateInput),
+  equipment: optionalField(equipmentInput),
+  page: operatorCarriersFields.shape.page,
+});
+export type OperatorDemandCarriersQuery = z.output<typeof operatorDemandCarriersQuery>;
+
+const demandCarrier = z.object({
+  key: z.string(),
+  mcNumber: z.string().nullable(),
+  carrierName: z.string().nullable(),
+  // The carrier's searches plus offered loads without a booking on the row's lane.
+  asks: z.number().int(),
+});
+export type DemandCarrier = z.infer<typeof demandCarrier>;
+
+export const operatorDemandCarriersResponse = z.object({
+  status: z.literal("ok"),
+  rows: z.array(demandCarrier),
+  total: z.number().int(),
+  page: z.number().int(),
+  pageSize: z.number().int(),
+});
+export type OperatorDemandCarriersResponse = z.infer<typeof operatorDemandCarriersResponse>;
