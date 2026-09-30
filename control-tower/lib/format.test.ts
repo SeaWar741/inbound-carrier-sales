@@ -4,6 +4,7 @@ import type { TowerCall } from "./contracts.ts";
 import {
   callSummary,
   carrierName,
+  feasibilityBadge,
   formatDeskWhen,
   formatPerMile,
   formatSignedUsd,
@@ -29,6 +30,21 @@ describe("toolLabel", () => {
     assert.equal(toolLabel("_hangup"), "Call ended by agent");
     assert.equal(toolLabel("transfer_call"), "Transfer call");
     assert.equal(toolLabel("_"), "_");
+  });
+
+  it("words the trip estimate and the carrier's hold notice, and a failed notice as failed", () => {
+    assert.equal(toolLabel("get_trip_estimate"), "Estimated trip");
+    assert.equal(toolLabel("hold_notice", "sent"), "Notified carrier");
+    assert.equal(toolLabel("hold_notice", "failed"), "Carrier not notified");
+    assert.equal(toolLabel("create_hold", "failed"), "Placed hold failed");
+  });
+});
+
+describe("feasibilityBadge", () => {
+  it("badges team and impossible trips, never solo", () => {
+    assert.equal(feasibilityBadge("solo"), null);
+    assert.equal(feasibilityBadge("team")?.text, "Team");
+    assert.equal(feasibilityBadge("impossible")?.text, "Can't make it");
   });
 });
 
@@ -107,6 +123,7 @@ describe("callSummary", () => {
     maxBuy: 7900,
     bookingRef: null,
     lane: null,
+    trip: null,
     createdAt: "2026-09-29T12:00:00.000Z",
   });
 

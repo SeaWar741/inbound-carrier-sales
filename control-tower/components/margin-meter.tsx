@@ -1,10 +1,21 @@
 "use client";
 
-import { LuChevronLeft, LuChevronRight, LuReceipt } from "react-icons/lu";
+import { LuChevronLeft, LuChevronRight, LuReceipt, LuRoute } from "react-icons/lu";
 import { motion, useReducedMotion } from "motion/react";
+import { Badge } from "@/components/inbox/stage-pill";
 import { Section } from "@/components/section";
-import { finalRound, type WallOffer } from "@/lib/contracts";
-import { formatClock, formatPercent, formatPerMile, formatSignedUsd, formatUsd, outcomeLabel } from "@/lib/format";
+import { finalRound, type TripSnapshot, type WallOffer } from "@/lib/contracts";
+import {
+  feasibilityBadge,
+  formatClock,
+  formatDateTime,
+  formatHours,
+  formatPercent,
+  formatPerMile,
+  formatSignedUsd,
+  formatUsd,
+  outcomeLabel,
+} from "@/lib/format";
 import { pricingBreakdown, type LoadOutcome } from "@/lib/pricing";
 
 // Position on a min-to-max scale as a percentage, clamped to the track.
@@ -35,7 +46,7 @@ function Line({
   total = false,
   hint,
 }: {
-  label: string;
+  label: React.ReactNode;
   value: string;
   tone?: string;
   note?: string | null;
@@ -51,6 +62,42 @@ function Line({
       </dt>
       <dd className={`tabular text-right ${tone}`}>{value}</dd>
       <dd className="tabular truncate text-right text-[11px] font-normal text-fg-faint">{note}</dd>
+    </div>
+  );
+}
+
+// What the carrier keeps on the held load once diesel and tolls are paid, and when it can legally
+// deliver. Estimates snapshotted when the hold was placed, laid out on the receipt's grid.
+function TripBlock({ trip, miles }: { trip: TripSnapshot; miles: number | null }) {
+  const badge = feasibilityBadge(trip.feasibility);
+  return (
+    <div className="flex flex-col gap-2 border-t border-line pt-3">
+      <h4 className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-fg-faint">
+        <LuRoute size={12} aria-hidden />
+        Trip
+      </h4>
+      <dl className="flex flex-col gap-1.5 text-xs">
+        <Line label="Diesel (est.)" hint="Fuel for the route at the lane's diesel price" value={formatUsd(trip.dieselUsd)} note={`$${trip.dieselPerGal.toFixed(2)}/gal`} />
+        <Line label="Tolls (est.)" hint="Tolls on the route" value={formatUsd(trip.tollsUsd)} note={`${Math.round(trip.tollShare * 100)}% toll`} />
+        <Line
+          label="Carrier net"
+          hint="Agreed rate minus diesel and tolls"
+          value={formatUsd(trip.carrierNetUsd)}
+          tone={trip.carrierNetUsd < 0 ? "text-risk" : "text-fg"}
+          note={miles ? formatPerMile(trip.carrierNetUsd / miles) : null}
+        />
+        <Line
+          label={
+            <span className="flex items-center gap-1.5">
+              Legal ETA
+              {badge && <Badge tone={badge.tone}>{badge.text}</Badge>}
+            </span>
+          }
+          hint="Earliest delivery within hours-of-service rules"
+          value={formatDateTime(trip.legalEtaAt)}
+        />
+        <Line label="Net per hour" hint="Carrier net over driving and required rest" value={`${formatUsd(trip.netPerHour)}/h`} note={formatHours(trip.legalHours)} />
+      </dl>
     </div>
   );
 }
@@ -116,6 +163,7 @@ export function MarginMeter({
   offer,
   authorizedUsd,
   agreedRate,
+  trip,
   path,
   outcome,
 }: {
@@ -124,6 +172,8 @@ export function MarginMeter({
   authorizedUsd: number;
   // Set while the load is held or booked on this call.
   agreedRate: number | null;
+  // The trip estimate of that hold, when it has one.
+  trip: TripSnapshot | null;
   // Every recorded offer on this load with this carrier, oldest first.
   path: WallOffer[];
   outcome: LoadOutcome;
@@ -259,6 +309,8 @@ export function MarginMeter({
             tone={receipt.headroomSharePct !== null && receipt.headroomSharePct < 0 ? "text-risk" : "text-fg"}
           />
         </dl>
+
+        {trip && <TripBlock trip={trip} miles={miles} />}
 
         {path.length > 0 && <NegotiationPath path={path} postedRate={postedRate} maxBuy={maxBuy} outcome={outcome} />}
       </div>

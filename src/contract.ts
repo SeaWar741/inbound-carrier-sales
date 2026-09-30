@@ -349,6 +349,8 @@ const wallHold = z.object({
   bookingRef: z.string().nullable(),
   // From the latest offer of the same call on this load.
   lane: wallLane.nullable(),
+  // The estimate snapshotted when the hold was placed; null on holds without one.
+  trip: tripSnapshot.nullable(),
   createdAt: z.iso.datetime(),
 });
 

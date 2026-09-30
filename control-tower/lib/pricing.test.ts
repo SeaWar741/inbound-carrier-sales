@@ -34,6 +34,7 @@ const call = (offers: WallOffer[], hold: { loadId: string; status: "held" | "con
     postedRate: 2000,
     maxBuy: 2200,
     lane: lane(1000),
+    trip: null,
     ...hold,
   },
 });

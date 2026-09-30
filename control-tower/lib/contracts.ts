@@ -33,6 +33,26 @@ const wallLane = z.object({
 });
 export type WallLane = z.infer<typeof wallLane>;
 
+export const feasibilities = ["solo", "team", "impossible"] as const;
+export type Feasibility = (typeof feasibilities)[number];
+
+// The hold's trip estimate: what the carrier keeps at the agreed rate after diesel and tolls, and
+// the legal (HOS) ETA. Null for holds placed before estimates, and when an older adapter omits it.
+const tripSnapshot = z.object({
+  rate: z.number().int(),
+  dieselUsd: z.number().int(),
+  tollsUsd: z.number().int(),
+  carrierNetUsd: z.number().int(),
+  feasibility: z.enum(feasibilities),
+  legalEtaAt: z.iso.datetime(),
+  legalHours: z.number(),
+  netPerHour: z.number().int(),
+  dieselPerGal: z.number(),
+  // 0..1: the share of the route on toll roads.
+  tollShare: z.number(),
+});
+export type TripSnapshot = z.infer<typeof tripSnapshot>;
+
 const wallOffer = z.object({
   loadId: z.string(),
   round: z.number().int(),
@@ -55,6 +75,7 @@ const wallHold = z.object({
   maxBuy: z.number().nullable(),
   bookingRef: z.string().nullable(),
   lane: wallLane.nullable().default(null),
+  trip: tripSnapshot.nullable().default(null),
   createdAt: z.iso.datetime(),
 });
 

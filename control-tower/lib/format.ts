@@ -1,4 +1,4 @@
-import type { CarrierStage, TowerCall } from "./contracts";
+import type { CarrierStage, Feasibility, TowerCall } from "./contracts";
 import type { LoadOutcome } from "./pricing";
 
 // Display helpers for money, durations and times. The desk runs on Chicago time.
@@ -36,6 +36,23 @@ export function formatPerMile(usdPerMile: number): string {
 
 export function formatPercent(pct: number): string {
   return `${pct.toFixed(1)}%`;
+}
+
+// Driving plus required rest, "30.5 h".
+export function formatHours(hours: number): string {
+  return `${hours.toFixed(1)} h`;
+}
+
+// A trip the carrier cannot drive solo inside the load's window; solo needs no badge.
+export function feasibilityBadge(feasibility: Feasibility): { text: string; tone: string } | null {
+  switch (feasibility) {
+    case "solo":
+      return null;
+    case "team":
+      return { text: "Team", tone: "bg-tone-amber-soft text-tone-amber" };
+    case "impossible":
+      return { text: "Can't make it", tone: "bg-tone-red-soft text-tone-red" };
+  }
 }
 
 export function deskDayKey(iso: string | number): string {
@@ -153,11 +170,20 @@ const toolLabels: Record<string, string> = {
   create_hold: "Placed hold",
   request_human: "Asked for a human",
   hangup: "Call ended by agent",
+  get_trip_estimate: "Estimated trip",
+  hold_notice: "Notified carrier",
+};
+
+// The same tools when their event is recorded with status "failed".
+const failedToolLabels: Record<string, string> = {
+  hold_notice: "Carrier not notified",
 };
 
 // An agent tool call as the transcript words it; an unknown tool reads as its name in words.
-export function toolLabel(name: string): string {
+// A failed event of a tool without its own failed wording reads as its label plus "failed".
+export function toolLabel(name: string, status?: string | null): string {
   const key = toolKey(name);
+  if (status === "failed") return failedToolLabels[key] ?? `${toolLabel(name)} failed`;
   const known = toolLabels[key];
   if (known) return known;
   const words = key.replaceAll("_", " ").trim();

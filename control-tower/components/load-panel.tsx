@@ -84,7 +84,8 @@ export function LoadPanel({
         .reduce((sum, i) => sum + (i.amountUsd ?? 0), 0)
     : 0;
   const path = useMemo(() => (loadId ? negotiationPath(history, loadId) : []), [history, loadId]);
-  const agreedRate = hold && hold.status !== "released" && hold.loadId === offer?.loadId ? hold.agreedRate : null;
+  const standingHold = hold && hold.status !== "released" && hold.loadId === offer?.loadId ? hold : null;
+  const agreedRate = standingHold?.agreedRate ?? null;
   const trip = nextTrip && loadId !== null && latestBookedLoad(history) === loadId ? nextTrip : null;
 
   // An open hold is drawn by the action card at the top of the panel.
@@ -138,6 +139,7 @@ export function LoadPanel({
         offer={offer}
         authorizedUsd={authorizedUsd}
         agreedRate={agreedRate}
+        trip={standingHold?.trip ?? null}
         path={path}
         outcome={loadOutcome(history, offer.loadId)}
       />

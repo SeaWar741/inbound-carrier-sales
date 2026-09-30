@@ -10,6 +10,7 @@ import {
   operatorWallUnavailableResponse,
   setAutonomyBody,
   setAutonomyResponse,
+  tripSnapshot,
   type OperatorWallResponse,
   type WallCall,
   type WallLane,
@@ -34,7 +35,7 @@ const callColumns = sql`EXISTS (SELECT 1 FROM call_events e WHERE e.call_id = t.
           FROM offers WHERE call_id = t.call_id ORDER BY load_id, round DESC
         ) o), '[]'::json) AS offers,
         (SELECT row_to_json(h) FROM (
-          SELECT hold_id, load_id, status, agreed_rate, posted_rate, max_buy, booking_ref, created_at::timestamptz AS created_at
+          SELECT hold_id, load_id, status, agreed_rate, posted_rate, max_buy, booking_ref, trip, created_at::timestamptz AS created_at
           FROM holds WHERE call_id = t.call_id ORDER BY (status <> 'released') DESC, created_at DESC LIMIT 1
         ) h) AS hold,
         COALESCE((SELECT json_agg(e ORDER BY e.created_at) FROM (
@@ -131,6 +132,8 @@ const holdRow = z.object({
   posted_rate: optionalMoney,
   max_buy: optionalMoney,
   booking_ref: z.string().nullable(),
+  // Holds placed before trip estimates, or without one, store none.
+  trip: tripSnapshot.nullable(),
   created_at: timestamp,
 });
 
@@ -222,6 +225,7 @@ export function toWallCall(row: CallRow): WallCall {
       maxBuy: row.hold.max_buy,
       bookingRef: row.hold.booking_ref,
       lane: holdLane,
+      trip: row.hold.trip,
       createdAt: row.hold.created_at.toISOString(),
     },
     events: row.events.map((e) => ({ tool: e.tool, summary: e.summary, status: e.status, createdAt: e.created_at.toISOString() })),
