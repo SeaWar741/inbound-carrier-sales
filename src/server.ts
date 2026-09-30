@@ -78,7 +78,7 @@ if (import.meta.main) {
   const trips = TripEstimator.fromConfig(config);
   const app = buildServer(config, {
     agentRoutes: [
-      carrierRoutes({ fmcsa, census, twin }),
+      carrierRoutes({ config, fmcsa, census, twin }),
       otpRoutes({ config, census, delivery, twin }),
       loadRoutes({ tms, twin, trips }),
       offerRoutes({ tms, twin }),
