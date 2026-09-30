@@ -1,11 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { setImmediate as yieldTurn } from "node:timers/promises";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { z } from "zod";
 import { resolveBooking } from "../src/domain/holds.ts";
+import type { TripEstimate } from "../src/domain/trip-estimate.ts";
 import { TmsClient } from "../src/infra/tms/tms-client.ts";
 import { TwinError, type SqlStatement } from "../src/infra/twin-client.ts";
 import { confirmHoldRoutes, holdRoutes, releaseHoldRoutes } from "../src/routes/holds.ts";
+import type { TripEstimates } from "../src/routes/trips.ts";
 import { buildServer } from "../src/server.ts";
 import { startFakeTms, type FakeBehavior, type FakeTms } from "./fake-tms-server.ts";
 import { testConfig } from "./test-config.ts";
@@ -56,6 +58,7 @@ type Hold = {
   updated_at: string;
   posted_rate?: string;
   max_buy?: string;
+  trip?: unknown;
 };
 
 const unique = (name: string) => new TwinError(`duplicate key value violates unique constraint "${name}"`);
@@ -104,8 +107,8 @@ function fakeTwin() {
       const loadId = text(/load_id = E'([^']*)'/, sql);
       rows.push(...holds.filter((h) => h.load_id === loadId && h.status !== "released"));
     } else if (sql.startsWith("INSERT INTO holds")) {
-      const [, callId = "", loadId = "", mc, rate = "", postedRate, maxBuy] =
-        /VALUES \(E'([^']*)', E'([^']*)', (NULL|E'[^']*'), (\d+), (\d+), (\d+)\)/.exec(sql) ?? [];
+      const [, callId = "", loadId = "", mc, rate = "", postedRate, maxBuy, trip] =
+        /VALUES \(E'([^']*)', E'([^']*)', (NULL|E'[^']*'), (\d+), (\d+), (\d+), (NULL|E'[^']*')::jsonb\)/.exec(sql) ?? [];
       if (holds.some((h) => h.load_id === loadId && h.status !== "released")) throw unique("holds_one_active_per_load");
       const hold = seeded({
         hold_id: randomUUID(),
@@ -115,6 +118,7 @@ function fakeTwin() {
         agreed_rate: rate,
         ...(postedRate !== undefined && { posted_rate: postedRate }),
         ...(maxBuy !== undefined && { max_buy: maxBuy }),
+        trip: trip === undefined || trip === "NULL" ? null : JSON.parse(nullable(trip) ?? "null"),
       });
       holds.push(hold);
       rows.push(hold);
@@ -163,6 +167,8 @@ describe("hold routes", () => {
   let state: ReturnType<typeof fakeTwin>;
   let fake: FakeTms;
   let app: ReturnType<typeof buildServer>;
+  // No vendor keys in tests: the estimator answers null unless a test sets an estimate.
+  let trips: { estimate: ReturnType<typeof vi.fn<TripEstimates["estimate"]>> };
 
   async function start(script: FakeBehavior[] = []) {
     fake = await startFakeTms({ token: testConfig.TMS_TOKEN, script });
@@ -174,12 +180,13 @@ describe("hold routes", () => {
       backoffBaseMs: 1,
     });
     app = buildServer(testConfig, {
-      agentRoutes: [holdRoutes({ tms, twin: state.twin })],
+      agentRoutes: [holdRoutes({ tms, twin: state.twin, trips })],
       operatorRoutes: [confirmHoldRoutes({ tms, twin: state.twin }), releaseHoldRoutes({ twin: state.twin })],
     });
   }
 
   beforeEach(() => {
+    trips = { estimate: vi.fn<TripEstimates["estimate"]>(async () => null) };
     state = fakeTwin();
     state.calls.set("call-a", { verified: true, mcNumber: "123456" });
     state.calls.set("call-b", { verified: true, mcNumber: "654321" });
@@ -241,6 +248,45 @@ describe("hold routes", () => {
       expect(state.holds[0]).toMatchObject({ posted_rate: "2093", max_buy: "2538" });
       expect(res.body).not.toMatch(/max_?buy|2538/i);
       expect(bookRequests()).toEqual([]);
+    });
+
+    it("stores the trip at the agreed rate with the hold, and never speaks it", async () => {
+      trips.estimate.mockResolvedValue({
+        dieselUsd: 1100,
+        tollsUsd: 40,
+        carrierNetUsd: 1160,
+        driveHours: 19.9,
+        soloHours: 30.9,
+        teamHours: 21.7,
+        feasibility: "solo",
+        legalEtaAt: new Date("2026-10-05T02:07:00.000Z"),
+        netPerHour: 38,
+        dieselPerGal: 6.944,
+        tollShare: 0.2074,
+      } satisfies TripEstimate);
+      accept("call-a", "LD00881", 2300);
+      const res = await createHold({ callId: "call-a", loadId: "LD00881", agreedRate: 2300 });
+      expect(res.json()).toMatchObject({ status: "ok", holdStatus: "held" });
+      expect(trips.estimate.mock.calls[0]?.[0]).toMatchObject({ rate: 2300, miles: 997, origin: { zip: "31401", state: "GA" } });
+      expect(state.holds[0]?.trip).toEqual({
+        rate: 2300,
+        dieselUsd: 1100,
+        tollsUsd: 40,
+        carrierNetUsd: 1160,
+        feasibility: "solo",
+        legalEtaAt: "2026-10-05T02:07:00.000Z",
+        netPerHour: 38,
+      });
+      expect(res.body).not.toMatch(/diesel|1160/i);
+    });
+
+    it("places the hold with a NULL trip when the estimate fails", async () => {
+      trips.estimate.mockRejectedValue(new Error("vendor down"));
+      accept("call-a", "LD00881", 2300);
+      const res = await createHold({ callId: "call-a", loadId: "LD00881", agreedRate: 2300 });
+      expect(res.json()).toMatchObject({ status: "ok", holdStatus: "held" });
+      expect(state.holds).toHaveLength(1);
+      expect(state.holds[0]?.trip).toBeNull();
     });
 
     it("requires a verified call", async () => {

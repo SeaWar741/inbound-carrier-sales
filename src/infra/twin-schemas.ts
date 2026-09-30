@@ -98,6 +98,8 @@ export const migrations = [
   "CREATE INDEX IF NOT EXISTS interventions_by_call ON interventions (call_id, created_at)",
   // The FMCSA name at verification, so the inbox can name a carrier without calling FMCSA again.
   "ALTER TABLE calls ADD COLUMN IF NOT EXISTS carrier_name text",
+  // Diesel, tolls, net and legal ETA at the agreed rate, as estimated when the hold was placed; NULL when no estimate was made.
+  "ALTER TABLE holds ADD COLUMN IF NOT EXISTS trip jsonb",
 ] as const;
 
 export const autonomyModes = ["human", "autonomous"] as const;

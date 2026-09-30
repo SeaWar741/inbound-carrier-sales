@@ -9,20 +9,22 @@ import {
   type SearchLoadsBody,
   type SearchLoadsResponse,
 } from "../contract.ts";
+import type { Feasibility } from "../domain/trip-estimate.ts";
 import type { LoadDetail, LoadQueryFilters } from "../infra/tms/codec.ts";
 import { TmsBusinessError, TmsUnavailableError } from "../infra/tms/errors.ts";
 import type { TmsClient } from "../infra/tms/tms-client.ts";
 import { sql, type TwinClient } from "../infra/twin-client.ts";
 import { invalidRequestHandler } from "../plugins/invalid-request.ts";
+import { estimateLoadTrip, type TripEstimates } from "./trips.ts";
 
-export type LoadRouteDeps = { tms: Pick<TmsClient, "queryLoads" | "getLoad">; twin: TwinClient };
+export type LoadRouteDeps = { tms: Pick<TmsClient, "queryLoads" | "getLoad">; twin: TwinClient; trips: TripEstimates };
 
 const messages = {
   notVerified: "I need to verify your carrier before I can go over loads with you.",
   noLoads: "I don't have any open loads on that lane right now.",
   tmsUnavailable: "I can't reach our load board right now. Please give me a moment and try again.",
   serviceUnavailable: "I'm having trouble on my end right now. Please give me a moment and try again.",
-  invalid: "I need at least a pickup city, state or zip and an equipment type to search for loads.",
+  invalid: "I need at least a pickup city, state or zip to search for loads.",
 } as const;
 
 const found = (count: number) => (count === 1 ? "I found one open load that fits." : `I found ${count} open loads that fit.`);
@@ -69,7 +71,7 @@ function toFilters(body: SearchLoadsBody): LoadQueryFilters {
 }
 
 // Picks fields explicitly so the max buy on LoadDetail can never reach a response.
-function toPitchedLoad(load: LoadDetail): PitchedLoad {
+function toPitchedLoad(load: LoadDetail, feasibility: Feasibility | null): PitchedLoad {
   return {
     loadId: load.loadId,
     origin: `${load.origCity}, ${load.origState} ${load.origZip}`,
@@ -84,6 +86,7 @@ function toPitchedLoad(load: LoadDetail): PitchedLoad {
     pieces: load.pieces,
     dims: load.dims,
     notes: load.notes,
+    feasibility,
   };
 }
 
@@ -124,7 +127,10 @@ export function loadRoutes(deps: LoadRouteDeps): FastifyPluginAsync {
               }),
             ),
           );
-          const loads = details.filter((load): load is LoadDetail => typeof load === "object" && isOpen(load.status)).map(toPitchedLoad);
+          const pitched = details.filter((load): load is LoadDetail => typeof load === "object" && isOpen(load.status));
+          // At the posted rate, since nothing is negotiated yet; a failed estimate only leaves feasibility null.
+          const estimates = await Promise.all(pitched.map((load) => estimateLoadTrip(deps.trips, load, load.rate, request.log)));
+          const loads = pitched.map((load, i) => toPitchedLoad(load, estimates[i]?.feasibility ?? null));
           const noneRead = details.every((load) => typeof load !== "object");
           if (noneRead && details.includes("unavailable")) {
             return noLoads("tms_unavailable", messages.tmsUnavailable);

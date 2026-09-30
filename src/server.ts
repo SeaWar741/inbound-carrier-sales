@@ -7,6 +7,7 @@ import { FmcsaClient } from "./infra/fmcsa-client.ts";
 import { OtpDeliveryClient } from "./infra/otp-delivery-client.ts";
 import { TmsClient } from "./infra/tms/tms-client.ts";
 import { TmsHealthRecorder } from "./infra/tms/tms-health.ts";
+import { TripEstimator } from "./infra/trip-estimator.ts";
 import { TwinClient } from "./infra/twin-client.ts";
 import { requireApiKey } from "./plugins/auth.ts";
 import { recordCallEvents, type CallEventDeps } from "./plugins/call-events.ts";
@@ -19,6 +20,7 @@ import { offerRoutes } from "./routes/offers.ts";
 import { operatorInboxRoutes } from "./routes/operator-inbox.ts";
 import { operatorWallRoutes } from "./routes/operator.ts";
 import { otpRoutes } from "./routes/otp.ts";
+import { tripRoutes } from "./routes/trips.ts";
 
 export type RouteSets = {
   agentRoutes: FastifyPluginAsync[];
@@ -73,13 +75,15 @@ if (import.meta.main) {
     token: config.TMS_TOKEN,
     onExchange: (exchange) => tmsHealth.record(exchange),
   });
+  const trips = TripEstimator.fromConfig(config);
   const app = buildServer(config, {
     agentRoutes: [
       carrierRoutes({ fmcsa, census, twin }),
       otpRoutes({ config, census, delivery, twin }),
-      loadRoutes({ tms, twin }),
+      loadRoutes({ tms, twin, trips }),
       offerRoutes({ tms, twin }),
-      holdRoutes({ tms, twin }),
+      tripRoutes({ tms, twin, trips }),
+      holdRoutes({ tms, twin, trips }),
       handoffRoutes({ twin }),
     ],
     operatorRoutes: [confirmHoldRoutes({ tms, twin }), releaseHoldRoutes({ twin }), operatorWallRoutes({ twin, tmsHealth }), operatorInboxRoutes({ twin })],

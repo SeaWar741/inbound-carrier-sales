@@ -2,6 +2,7 @@ import { z } from "zod";
 import { maxAuthorizationUsd, otpDigits } from "./constants.ts";
 import { callRisks, callStages } from "./domain/call-stage.ts";
 import { tripStatuses } from "./domain/trip.ts";
+import { feasibilities } from "./domain/trip-estimate.ts";
 import { cityInput, equipmentInput, loadIdInput, stateInput, zipInput } from "./infra/tms/codec.ts";
 import { autonomyModes, holdStatuses } from "./infra/twin-schemas.ts";
 
@@ -52,6 +53,13 @@ export type VerifyCarrierResponse = z.infer<typeof verifyCarrierResponse>;
 
 const callId = z.string().trim().min(1).max(128);
 
+// "Any", "anything" or "all" means no equipment filter, the same as leaving it blank.
+const anyEquipment = /^\s*(any|anything|all)\s*$/i;
+const optionalEquipment = z.preprocess(
+  (value) => (typeof value === "string" && anyEquipment.test(value) ? undefined : blankToUndefined(value)),
+  equipmentInput.optional(),
+);
+
 // Flat fields because each is one tool parameter; the route reads origin/destination objects.
 // The TMS codec's own inputs, so a bad filter is a 200 invalid_request, not a thrown error.
 export const searchLoadsBody = z
@@ -63,7 +71,7 @@ export const searchLoadsBody = z
     destinationCity: optionalField(cityInput),
     destinationState: optionalField(stateInput),
     destinationZip: optionalField(zipInput),
-    equipmentType: equipmentInput,
+    equipmentType: optionalEquipment,
     pickupDate: optionalField(z.iso.date()),
   })
   .refine((b) => b.originCity !== undefined || b.originState !== undefined || b.originZip !== undefined, {
@@ -94,6 +102,8 @@ export const pitchedLoad = z.object({
   pieces: z.number(),
   dims: z.string(),
   notes: z.string(),
+  // Whether one driver can legally make the window at the posted rate; null when no estimate was made.
+  feasibility: z.enum(feasibilities).nullable(),
 });
 export type PitchedLoad = z.infer<typeof pitchedLoad>;
 
@@ -128,6 +138,42 @@ export const evaluateOfferResponse = z.object({
   isFinalRound: z.boolean(),
 });
 export type EvaluateOfferResponse = z.infer<typeof evaluateOfferResponse>;
+
+export const tripEstimateBody = z.object({ callId, loadId: loadIdInput });
+export type TripEstimateBody = z.output<typeof tripEstimateBody>;
+
+// What the carrier keeps at a rate after diesel and tolls. Stored on the hold as is; never carries the max buy.
+export const tripSnapshot = z.object({
+  rate: z.number().int(),
+  dieselUsd: z.number().int(),
+  tollsUsd: z.number().int(),
+  carrierNetUsd: z.number().int(),
+  feasibility: z.enum(feasibilities),
+  legalEtaAt: z.iso.datetime(),
+  netPerHour: z.number().int(),
+});
+export type TripSnapshot = z.infer<typeof tripSnapshot>;
+
+export const tripEstimateResponse = z.object({
+  status: z.enum([
+    "ok",
+    "not_verified",
+    "load_unavailable",
+    "tms_unavailable",
+    "estimate_unavailable",
+    "service_unavailable",
+    "invalid_request",
+  ]),
+  message: z.string(),
+  rate: tripSnapshot.shape.rate.nullable(),
+  dieselUsd: tripSnapshot.shape.dieselUsd.nullable(),
+  tollsUsd: tripSnapshot.shape.tollsUsd.nullable(),
+  carrierNetUsd: tripSnapshot.shape.carrierNetUsd.nullable(),
+  feasibility: tripSnapshot.shape.feasibility.nullable(),
+  legalEtaAt: tripSnapshot.shape.legalEtaAt.nullable(),
+  netPerHour: tripSnapshot.shape.netPerHour.nullable(),
+});
+export type TripEstimateResponse = z.infer<typeof tripEstimateResponse>;
 
 // Callers and the agent name the channel loosely: "Text", "e-mail", "SMS message".
 const channelAliases = new Map([

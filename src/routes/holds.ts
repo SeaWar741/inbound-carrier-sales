@@ -22,8 +22,9 @@ import type { TmsClient } from "../infra/tms/tms-client.ts";
 import { sql, TwinError, type TwinClient } from "../infra/twin-client.ts";
 import { autonomyModes, holdRowSchema, type HoldRow } from "../infra/twin-schemas.ts";
 import { invalidRequestHandler } from "../plugins/invalid-request.ts";
+import { estimateLoadTrip, tripSnapshotFor, type TripEstimates } from "./trips.ts";
 
-export type HoldRouteDeps = { tms: Pick<TmsClient, "getLoad" | "bookLoad">; twin: Pick<TwinClient, "query"> };
+export type HoldRouteDeps = { tms: Pick<TmsClient, "getLoad" | "bookLoad">; twin: Pick<TwinClient, "query">; trips: TripEstimates };
 export type ConfirmHoldRouteDeps = { tms: Pick<TmsClient, "bookLoad">; twin: Pick<TwinClient, "query"> };
 export type ReleaseHoldRouteDeps = { twin: Pick<TwinClient, "query"> };
 
@@ -123,10 +124,13 @@ export function holdRoutes(deps: HoldRouteDeps): FastifyPluginAsync {
         if (load.status !== "OPEN") return noHold("load_unavailable", createMessages.loadUnavailable);
         if (agreedRate > load.maxBuy) return noHold("no_agreement", createMessages.noAgreement);
 
+        // The trip at the agreed rate goes in with the hold; without an estimate the hold is placed all the same.
+        const estimate = await estimateLoadTrip(deps.trips, load, agreedRate, request.log);
+        const trip = estimate ? JSON.stringify(tripSnapshotFor(agreedRate, estimate)) : null;
         try {
           const [hold] = await deps.twin.query(
-            sql`INSERT INTO holds (call_id, load_id, mc_number, agreed_rate, posted_rate, max_buy)
-                VALUES (${callId}, ${loadId}, ${call.mc_number}, ${agreedRate}, ${load.rate}, ${load.maxBuy}) RETURNING *`,
+            sql`INSERT INTO holds (call_id, load_id, mc_number, agreed_rate, posted_rate, max_buy, trip)
+                VALUES (${callId}, ${loadId}, ${call.mc_number}, ${agreedRate}, ${load.rate}, ${load.maxBuy}, ${trip}::jsonb) RETURNING *`,
             holdRowSchema,
           );
           if (!hold) throw new Error("hold insert returned no row");

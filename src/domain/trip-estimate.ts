@@ -80,6 +80,8 @@ export type TripEstimate = {
 
 const msPerHour = 3_600_000;
 const tenths = (n: number) => Math.round(n * 10) / 10;
+// Inputs are echoed back for the record; rounding keeps float noise (7.3454999999999995) out of JSON.
+const roundTo = (n: number, digits: number) => Math.round(n * 10 ** digits) / 10 ** digits;
 
 // Miles are the TMS load miles, the ones the agent pitches; the route only lends its speed and toll share.
 // Dollars are whole ("about $1,800" on the phone) and the net is built from the rounded parts so they add up.
@@ -105,7 +107,7 @@ export function estimateTrip(input: TripEstimateInput): TripEstimate {
     feasibility,
     legalEtaAt: new Date(input.pickupAt.getTime() + crewHours * msPerHour),
     netPerHour: crewHours > 0 ? Math.round(carrierNetUsd / crewHours) : 0,
-    dieselPerGal: input.dieselPerGal,
-    tollShare: input.tollShare,
+    dieselPerGal: roundTo(input.dieselPerGal, 3),
+    tollShare: roundTo(input.tollShare, 4),
   };
 }

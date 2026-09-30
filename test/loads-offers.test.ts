@@ -1,12 +1,14 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Config } from "../src/config.ts";
 import { testConfig } from "./test-config.ts";
+import type { TripEstimate } from "../src/domain/trip-estimate.ts";
 import type { LoadDetail, LoadSummary } from "../src/infra/tms/codec.ts";
 import { TmsBusinessError, TmsUnavailableError } from "../src/infra/tms/errors.ts";
 import { TmsClient } from "../src/infra/tms/tms-client.ts";
 import { TwinClient } from "../src/infra/twin-client.ts";
 import { loadRoutes, type LoadRouteDeps } from "../src/routes/loads.ts";
 import { offerRoutes } from "../src/routes/offers.ts";
+import type { TripEstimates } from "../src/routes/trips.ts";
 import { buildServer } from "../src/server.ts";
 import { startFakeTms, type FakeBehavior, type FakeTms } from "./fake-tms-server.ts";
 
@@ -98,8 +100,11 @@ const twin = new TwinClient({ apiKey: "k", fetch: twinFetch });
 const tmsClient = (fake: FakeTms) =>
   new TmsClient({ host: "127.0.0.1", port: fake.port, token: config.TMS_TOKEN, maxAttempts: 1, attemptDeadlineMs: 500 });
 
-function serverWith(tms: LoadRouteDeps["tms"]) {
-  return buildServer(config, { agentRoutes: [loadRoutes({ tms, twin }), offerRoutes({ tms, twin })], operatorRoutes: [] });
+// No vendor keys in tests: the default estimator answers null, like a deployment without EIA and ORS.
+const noTrips: TripEstimates = { estimate: async () => null };
+
+function serverWith(tms: LoadRouteDeps["tms"], trips: TripEstimates = noTrips) {
+  return buildServer(config, { agentRoutes: [loadRoutes({ tms, twin, trips }), offerRoutes({ tms, twin })], operatorRoutes: [] });
 }
 
 let fake: FakeTms;
@@ -185,6 +190,7 @@ describe("POST /v1/loads/search", () => {
       pieces: 25,
       dims: "41ft x 8ft x 9ft",
       notes: "",
+      feasibility: null,
     });
     expectNoMaxBuy(res.body);
     const [query] = fake.requests.slice(-3);
@@ -204,6 +210,50 @@ describe("POST /v1/loads/search", () => {
     });
     expect(res.json()).toMatchObject({ status: "ok" });
     expect(fake.requests.at(-3)).not.toContain("DEST_");
+  });
+
+  it("searches every equipment type when the caller says any, anything or all", async () => {
+    for (const equipmentType of ["any", "Anything", " ALL ", ""]) {
+      const res = await search({ callId: "call-ok", originCity: "Savannah", originState: "GA", equipmentType });
+      expect(res.json()).toMatchObject({ status: "ok" });
+      const query = fake.requests.findLast((line) => line.includes("CMD:LOAD_QUERY"));
+      expect(query).toContain("ORIG_CITY:Savannah|ORIG_STATE:GA|MAX_RESULTS:");
+      expect(query).not.toContain("EQTYPE");
+    }
+    const omitted = await search({ callId: "call-ok", originState: "GA" });
+    expect(omitted.json()).toMatchObject({ status: "ok" });
+  });
+
+  it("adds each pitched load's feasibility at the posted rate, estimated in parallel", async () => {
+    const tms = {
+      queryLoads: vi.fn(async () => ["LD1", "LD2", "LD3"].map((id) => summary(id, "OPEN"))),
+      getLoad: vi.fn(async (loadId: string) => detail(loadId, "OPEN")),
+    };
+    // Each estimate waits until all three have started, so a sequential search would never finish.
+    let started = 0;
+    let allStarted: () => void = () => {};
+    const together = new Promise<void>((resolve) => (allStarted = resolve));
+    const outcomes = [async () => ({ feasibility: "team" }) as TripEstimate, async () => Promise.reject(new Error("vendor down")), async () => null];
+    const estimate = vi.fn<TripEstimates["estimate"]>(async () => {
+      const outcome = outcomes[started] ?? (async () => null);
+      started += 1;
+      if (started === 3) allStarted();
+      await together;
+      return outcome();
+    });
+    const target = serverWith(tms, { estimate });
+    const res = await search({ callId: "call-ok", originState: "GA" }, target);
+    await target.close();
+    const body = res.json();
+    expect(body.status).toBe("ok");
+    // LD2's estimate failed outright; the search still pitches it, without feasibility.
+    expect(body.loads.map((l: { loadId: string; feasibility: string | null }) => [l.loadId, l.feasibility])).toEqual([
+      ["LD1", "team"],
+      ["LD2", null],
+      ["LD3", null],
+    ]);
+    expect(estimate.mock.calls.map(([trip]) => trip.rate)).toEqual([2000, 2000, 2000]);
+    expectNoMaxBuy(res.body);
   });
 
   it("refuses an unverified or unknown call without touching the TMS", async () => {
