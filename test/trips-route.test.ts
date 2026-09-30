@@ -121,6 +121,13 @@ describe("POST /v1/trips/estimate", () => {
     });
   });
 
+  it("speaks a few dollars of tolls as next to nothing", async () => {
+    estimate.mockImplementationOnce(async (trip) => ({ ...estimateAt(trip.rate), tollsUsd: 3 }));
+    const body = (await post({ callId: "call-ok", loadId: "LD00879" })).json();
+    expect(body.message).toMatch(/in diesel and next to nothing in tolls, you'd keep/);
+    expect(body.tollsUsd).toBe(3);
+  });
+
   it("estimates at our latest round on this load, not an earlier one or another load's", async () => {
     offers = [
       { callId: "call-ok", loadId: "LD00879", round: 1, decision: "counter", rateToSay: 7400 },

@@ -1,6 +1,7 @@
 import type { FastifyPluginAsync } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
+import { tollsSpokenFloorUsd } from "../constants.ts";
 import { tripEstimateBody, tripEstimateResponse, type TripEstimateResponse, type TripSnapshot } from "../contract.ts";
 import { dollars } from "../domain/negotiation.ts";
 import { TmsBusinessError, TmsUnavailableError } from "../infra/tms/errors.ts";
@@ -27,8 +28,9 @@ const feasibilityNote = {
 } as const;
 
 function messageFor(trip: TripSnapshot): string {
+  const tolls = trip.tollsUsd < tollsSpokenFloorUsd ? "next to nothing in tolls" : `about ${dollars(trip.tollsUsd)} in tolls`;
   return (
-    `At ${dollars(trip.rate)}, after about ${dollars(trip.dieselUsd)} in diesel and about ${dollars(trip.tollsUsd)} in tolls, ` +
+    `At ${dollars(trip.rate)}, after about ${dollars(trip.dieselUsd)} in diesel and ${tolls}, ` +
     `you'd keep about ${dollars(trip.carrierNetUsd)}.${feasibilityNote[trip.feasibility]}`
   );
 }

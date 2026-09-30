@@ -75,3 +75,6 @@ export const dieselCacheMs = 7 * 24 * 60 * 60 * 1000;
 // 5 real calls from a laptop: ORS 254-1577 ms (p95 1.58 s, the first on a cold connection),
 // EIA 111-1331 ms (p95 1.33 s). About 3x the slower p95.
 export const tripVendorTimeoutMs = 4_500;
+
+// Below this, tolls are spoken as "next to nothing" rather than "about $3 in tolls", which reads oddly aloud.
+export const tollsSpokenFloorUsd = 20;
