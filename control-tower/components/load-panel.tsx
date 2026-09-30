@@ -5,11 +5,11 @@ import type { IconType } from "react-icons";
 import { LuCalendarClock, LuContainer, LuFlag, LuMap, LuMapPin, LuMousePointerClick, LuTruck } from "react-icons/lu";
 import { DealCard } from "@/components/deal-card";
 import { EmptyState } from "@/components/empty-state";
-import { equipmentLabel, formatPickup, HoldCard, LaneText } from "@/components/hold-card";
+import { formatPickup, HoldCard, LaneText } from "@/components/hold-card";
 import { LaneMap, type LaneMapLoad } from "@/components/lane-map";
 import { Section } from "@/components/section";
 import type { TowerCall, TowerCarrier, WallOffer } from "@/lib/contracts";
-import { formatDateTime } from "@/lib/format";
+import { equipmentLabel, formatDateTime } from "@/lib/format";
 
 // The load on the table: the held one while a hold stands, otherwise the one offered most recently.
 function currentOffer(call: TowerCall): WallOffer | null {

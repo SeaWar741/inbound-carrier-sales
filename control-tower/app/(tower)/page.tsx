@@ -3,10 +3,9 @@
 import { useCallback, useMemo, useState } from "react";
 import { ActiveLoads } from "@/components/dashboard/active-loads";
 import { KpiTiles } from "@/components/dashboard/kpi-tiles";
-import { equipmentLabel } from "@/components/hold-card";
 import { LaneMap, type LaneMapLoad } from "@/components/lane-map";
 import type { TowerLoads } from "@/lib/contracts";
-import { carrierName } from "@/lib/format";
+import { carrierName, equipmentLabel } from "@/lib/format";
 import { emptyLoadFilters, filterLoads, loadEquipments, sortLoads, statusCounts, type LoadFilters, type LoadSort } from "@/lib/load-filters";
 import { usePoll } from "@/lib/use-poll";
 import { useSharedWall } from "@/lib/use-wall";

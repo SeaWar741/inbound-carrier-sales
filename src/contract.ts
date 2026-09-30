@@ -562,7 +562,7 @@ export const operatorNetworkQuery = withDayRange(
     view: z.enum(networkViews).default("all"),
     // MC, DOT or carrier name.
     q: optionalField(z.string().trim().max(64)),
-    key: optionalField(z.string().trim().max(160)),
+    key: optionalField(z.string().trim().max(128)),
   }),
 );
 export type OperatorNetworkQuery = z.output<typeof operatorNetworkQuery>;

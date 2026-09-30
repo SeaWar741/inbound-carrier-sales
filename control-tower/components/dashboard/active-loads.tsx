@@ -4,10 +4,9 @@ import { useCallback, useEffect, useRef } from "react";
 import { LuArrowDownUp, LuArrowRight, LuList, LuTriangleAlert, LuTruck, LuX } from "react-icons/lu";
 import { tripLabels, tripTones } from "@/components/dashboard/kpi-tiles";
 import { EmptyState } from "@/components/empty-state";
-import { equipmentLabel } from "@/components/hold-card";
 import { FilterSelect, SearchInput, TabStrip } from "@/components/inbox/filter-bar";
 import type { TowerLoad, TripStatus } from "@/lib/contracts";
-import { carrierName, formatDateTime, formatUsd } from "@/lib/format";
+import { carrierName, equipmentLabel, formatDateTime, formatUsd } from "@/lib/format";
 import type { LoadFilters, LoadSort } from "@/lib/load-filters";
 
 function LoadRow({ load, selected, onSelect }: { load: TowerLoad; selected: boolean; onSelect: (id: string) => void }) {

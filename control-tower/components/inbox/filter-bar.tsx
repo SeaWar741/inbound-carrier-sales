@@ -4,8 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { IconType } from "react-icons";
 import { Select } from "antd";
 import { LuArrowRight, LuArrowUpDown, LuChevronDown, LuContainer, LuFlag, LuRoute, LuSearch } from "react-icons/lu";
-import { equipmentLabel } from "@/components/hold-card";
 import { inboxSorts } from "@/lib/contracts";
+import { equipmentLabel } from "@/lib/format";
 
 // The filters the inbox keeps in the URL; an empty string is "no filter" (or the adapter default).
 export type InboxFilters = {

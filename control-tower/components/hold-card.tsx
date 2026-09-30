@@ -7,9 +7,6 @@ import { ActionCard, type ActionTone } from "@/components/section";
 import type { ConfirmHoldResponse, ReleaseHoldResponse, TowerCall, WallLane } from "@/lib/contracts";
 import { carrierId, formatUsd } from "@/lib/format";
 
-// Lives in lib so the node tests reach it; the components keep importing it from here.
-export { equipmentLabel } from "@/lib/format";
-
 type Hold = NonNullable<TowerCall["hold"]>;
 type HoldStatus = Hold["status"];
 

@@ -20,7 +20,7 @@ import {
   LuTruck,
 } from "react-icons/lu";
 import { CallDetail } from "@/components/call-detail";
-import { equipmentLabel, HoldCard } from "@/components/hold-card";
+import { HoldCard } from "@/components/hold-card";
 import type { InboxWindow } from "@/components/inbox/inbox-rail";
 import { Badge, CarrierStagePill, carrierStageStyle } from "@/components/inbox/stage-pill";
 import { VoiceControls } from "@/components/intervention-bar";
@@ -28,21 +28,7 @@ import { LoadPanel } from "@/components/load-panel";
 import { PulseDot } from "@/components/pulse-dot";
 import { ActionCard, Section } from "@/components/section";
 import type { TowerCall, TowerCarrier, TowerCarrierCalls, WallLane } from "@/lib/contracts";
-import {
-  callSummary,
-  carrierId,
-  carrierName,
-  deskDayKey,
-  formatDateTime,
-  formatElapsed,
-  formatDeskWhen,
-  formatPercent,
-  formatPerMile,
-  formatUsd,
-  loadCards,
-  outcomeLabel,
-  type LoadCard,
-} from "@/lib/format";
+import { callSummary, carrierId, carrierName, deskDayKey, equipmentLabel, formatDateTime, formatDeskWhen, formatElapsed, formatPercent, formatPerMile, formatUsd, loadCards, outcomeLabel, type LoadCard } from "@/lib/format";
 import { carrierPricing, loadOutcome, type LoadOutcome } from "@/lib/pricing";
 import { usePoll } from "@/lib/use-poll";
 import { useVoice, type Voice } from "@/lib/use-voice";

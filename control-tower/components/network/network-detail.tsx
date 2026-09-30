@@ -16,12 +16,11 @@ import {
   LuShieldCheck,
   LuShieldX,
 } from "react-icons/lu";
-import { equipmentLabel } from "@/components/hold-card";
 import { Badge } from "@/components/inbox/stage-pill";
 import { growthStyle, NetworkChips, TrendArrow } from "@/components/network/network-chips";
 import { Section } from "@/components/section";
 import type { NetworkCarrier } from "@/lib/contracts";
-import { carrierName, formatDateTime, formatTimeAgo } from "@/lib/format";
+import { carrierName, equipmentLabel, formatDateTime, formatTimeAgo } from "@/lib/format";
 import { inboxHref, networkReason, windowPhrase, type NetworkWindow } from "@/lib/network";
 
 function Fact({ icon: Icon, label, children }: { icon: IconType; label: string; children: React.ReactNode }) {

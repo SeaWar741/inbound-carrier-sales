@@ -3,10 +3,10 @@
 import type { IconType } from "react-icons";
 import { LuArrowDownRight, LuArrowRight, LuArrowUpRight, LuChevronDown, LuChevronRight, LuContainer, LuLoaderCircle, LuTriangleAlert } from "react-icons/lu";
 import { DemandCarriers } from "@/components/demand/demand-carriers";
-import { equipmentLabel } from "@/components/hold-card";
 import { Count, SkeletonRows, useLoadMore } from "@/components/paged-list";
 import type { DemandLane, TowerDemand } from "@/lib/contracts";
 import { demandKey, demandSignal, demandTrend, laneLabel, type DemandTrend } from "@/lib/demand";
+import { equipmentLabel } from "@/lib/format";
 
 // Lane and sentence take the room left; every count column is the same narrow width.
 const columns = "grid grid-cols-[minmax(0,1fr)_repeat(4,5.5rem)_12rem] items-center gap-3";
