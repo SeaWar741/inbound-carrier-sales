@@ -1,7 +1,7 @@
 "use client";
 
 import type { IconType } from "react-icons";
-import { LuArrowRight, LuCircleCheck, LuHand, LuLock, LuTriangleAlert } from "react-icons/lu";
+import { LuArrowRight, LuCircleCheck, LuHand, LuLock, LuMail, LuTriangleAlert } from "react-icons/lu";
 import { useEffect, useRef, useState } from "react";
 import { ActionCard, type ActionTone, Section } from "@/components/section";
 import type { ConfirmHoldResponse, ReleaseHoldResponse, TowerCall, WallLane } from "@/lib/contracts";
@@ -106,6 +106,8 @@ export function HoldCard({ call, hold }: { call: TowerCall; hold: Hold }) {
   const lane = hold.lane;
   const margin = hold.maxBuy === null ? null : hold.maxBuy - hold.agreedRate;
   const actionable = status === "held" && pending === null;
+  // Events come newest first; the adapter writes one when it tells the carrier how the hold ended.
+  const notice = call.events.find((event) => event.tool === "hold_notice");
 
   const settle = (answer: ConfirmHoldResponse | ReleaseHoldResponse | null) => {
     if (!answer) return;
@@ -221,6 +223,12 @@ export function HoldCard({ call, hold }: { call: TowerCall; hold: Hold }) {
         <p className="mt-2 text-xs text-fg-muted">{outcome?.message ?? "The hold was released and the load is back on the board."}</p>
       )}
       {status === "confirming" && <p className="mt-2 text-xs text-warn">Booking in progress with the TMS.</p>}
+      {notice?.summary && (
+        <p className={`mt-1 flex items-center gap-1.5 text-xs ${notice.status === "sent" ? "text-fg-muted" : "text-warn"}`}>
+          <LuMail size={14} aria-hidden />
+          {notice.summary}
+        </p>
+      )}
 
       {status === "held" && (
         <div className="mt-3 flex flex-col gap-2">

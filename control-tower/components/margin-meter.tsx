@@ -46,7 +46,7 @@ function Line({
   total = false,
   hint,
 }: {
-  label: React.ReactNode;
+  label: string;
   value: string;
   tone?: string;
   note?: string | null;
@@ -86,16 +86,13 @@ function TripBlock({ trip, miles }: { trip: TripSnapshot; miles: number | null }
           tone={trip.carrierNetUsd < 0 ? "text-risk" : "text-fg"}
           note={miles ? formatPerMile(trip.carrierNetUsd / miles) : null}
         />
-        <Line
-          label={
-            <span className="flex items-center gap-1.5">
-              Legal ETA
-              {badge && <Badge tone={badge.tone}>{badge.text}</Badge>}
-            </span>
-          }
-          hint="Earliest delivery within hours-of-service rules"
-          value={formatDateTime(trip.legalEtaAt)}
-        />
+        <Line label="Legal ETA" hint="Earliest delivery within hours-of-service rules" value={formatDateTime(trip.legalEtaAt)} />
+        {/* Its own row: next to the label the narrow panel cut it off. */}
+        {badge && (
+          <div className="flex justify-end">
+            <Badge tone={badge.tone}>{badge.text}</Badge>
+          </div>
+        )}
         <Line label="Net per hour" hint="Carrier net over driving and required rest" value={`${formatUsd(trip.netPerHour)}/h`} note={formatHours(trip.legalHours)} />
       </dl>
     </div>
