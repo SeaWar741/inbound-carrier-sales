@@ -123,15 +123,17 @@ for (let i = 1; i <= 24; i++) {
       const last = round === rounds;
       const decision = last ? (result === "lost" ? "reject" : "accept") : "counter";
       const rateToSay = decision === "accept" ? ask : roundTo25(posted + (maxBuy - posted) * (round / 3));
+      // We only counter or reject an ask above what we offer, so the decayed ask never lands below it.
+      const carrierAsk = decision === "accept" ? ask : Math.max(ask, rateToSay + 25);
       const at = hoursAgo - 0.05 - round * 0.03;
       offers.push(
-        sql`(${callId}, ${loadId}, ${round}, ${ask}, ${decision}, ${rateToSay}, ${posted}, ${maxBuy},
+        sql`(${callId}, ${loadId}, ${round}, ${carrierAsk}, ${decision}, ${rateToSay}, ${posted}, ${maxBuy},
           ${oCity}, ${oState}, ${oZip}, ${dCity}, ${dState}, ${dZip}, ${equipment}, ${miles}, ${pickupAt}, `.text +
           ago(at) +
           ")",
       );
       events.push(
-        sql`(${callId}, 'evaluate_offer', ${`${decision === "accept" ? "Accept" : decision === "reject" ? "Reject" : "Counter"} round ${round}: carrier asks $${ask.toLocaleString("en-US")}`}, 'ok', `.text +
+        sql`(${callId}, 'evaluate_offer', ${`${decision === "accept" ? "Accept" : decision === "reject" ? "Reject" : "Counter"} round ${round}: carrier asks $${carrierAsk.toLocaleString("en-US")}`}, 'ok', `.text +
           ago(at) +
           ")",
       );
@@ -194,8 +196,10 @@ history.forEach(({ lane, calls: past }, h) => {
     const pickupAt = wallClock(new Date(Date.now() - (hoursAgo - 48) * 3_600_000));
     calls.push(sql`(${callId}, ${String(8000000 + 25 + h)}, ${mc}, TRUE, TRUE, ${name}, `.text + ago(hoursAgo) + ")");
     search(callId, hoursAgo, [oCity, oState, oZip, dCity, dState, dZip, equipment], 1);
+    // A lost call is a carrier holding out above our ceiling after we offered max buy.
+    const carrierAsk = didBook ? posted : Math.max(roundTo25(maxBuy * 1.1), maxBuy + 25);
     offers.push(
-      sql`(${callId}, ${loadId}, 1, ${posted}, ${didBook ? "accept" : "reject"}, ${didBook ? posted : maxBuy}, ${posted}, ${maxBuy},
+      sql`(${callId}, ${loadId}, 1, ${carrierAsk}, ${didBook ? "accept" : "reject"}, ${didBook ? posted : maxBuy}, ${posted}, ${maxBuy},
         ${oCity}, ${oState}, ${oZip}, ${dCity}, ${dState}, ${dZip}, ${equipment}, ${miles}, ${pickupAt}, `.text +
         ago(hoursAgo - 0.1) +
         ")",
