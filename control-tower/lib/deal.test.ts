@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { TowerCall, WallOffer } from "./contracts.ts";
-import { arrivalText, dealEnd, dealRounds, dealStatus, labelGap, priceBar } from "./deal.ts";
+import { arrivalText, carrierEarnings, dealEnd, dealRounds, dealStatus, labelGap, ourEarnings, priceBar } from "./deal.ts";
 
 const offer = (loadId: string, round: number, carrierAsk: number, rateToSay: number | null, decision: WallOffer["decision"] = "counter"): WallOffer => ({
   loadId,
@@ -125,5 +125,58 @@ describe("priceBar", () => {
     const bar = priceBar({ posted: 800, max: 800, ours: 800, ask: null });
     assert.equal(bar.maxAt, 0);
     assert.deepEqual(bar.fill, { from: 0, to: 0 });
+  });
+});
+
+describe("ourEarnings", () => {
+  it("is our max minus the agreed rate, as a share of our max", () => {
+    assert.deepEqual(ourEarnings(1125, 1100, "agreed"), {
+      lead: "We earn",
+      amount: "$25",
+      pct: "2%",
+      note: "Our max $1,125 − agreed $1,100",
+      loss: false,
+    });
+  });
+  it("says we lose when the rate is over our max", () => {
+    assert.deepEqual(ourEarnings(1000, 1050, "agreed"), {
+      lead: "We lose",
+      amount: "$50",
+      pct: "5%",
+      note: "Our max $1,000 − agreed $1,050",
+      loss: true,
+    });
+  });
+  it("names our offer while negotiating, and needs both numbers", () => {
+    assert.equal(ourEarnings(1125, 1050, "offer")?.note, "At our offer of $1,050 · our max $1,125");
+    assert.equal(ourEarnings(null, 1100, "agreed"), null);
+    assert.equal(ourEarnings(1125, null, "offer"), null);
+  });
+});
+
+describe("carrierEarnings", () => {
+  const trip = { rate: 1100, dieselUsd: 290, tollsUsd: 20, carrierNetUsd: 790, netPerHour: 58, tollShare: 0.05 };
+  it("is the rate minus diesel and tolls, as a share of the rate", () => {
+    assert.deepEqual(carrierEarnings(trip), {
+      lead: "Carrier earns",
+      amount: "~$790",
+      pct: "72%",
+      note: "$1,100 − ~$290 diesel − ~$20 tolls · $58/h",
+      loss: false,
+    });
+  });
+  it("says the carrier loses when costs pass the rate", () => {
+    const row = carrierEarnings({ ...trip, rate: 250, carrierNetUsd: -60, netPerHour: -4 });
+    assert.equal(row?.lead, "Carrier loses");
+    assert.equal(row?.amount, "~$60");
+    assert.equal(row?.pct, "24%");
+    assert.equal(row?.loss, true);
+  });
+  it("says tolls were not counted when there was no route", () => {
+    const row = carrierEarnings({ ...trip, tollsUsd: 0, carrierNetUsd: 810, tollShare: null });
+    assert.equal(row?.note, "$1,100 − ~$290 diesel, tolls not counted · $58/h");
+  });
+  it("has nothing to say without a trip estimate", () => {
+    assert.equal(carrierEarnings(null), null);
   });
 });

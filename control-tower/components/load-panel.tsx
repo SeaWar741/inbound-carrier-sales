@@ -39,8 +39,8 @@ function Fact({ icon: Icon, label, children }: { icon: IconType; label: string; 
   );
 }
 
-// The selected call's load as detail-panel sections, top to bottom: the load with its map, then the
-// deal. The call's open hold is drawn here as the deal's action card, so the needs-you list above
+// The selected call's load as detail-panel sections, top to bottom: the deal, which is what the
+// operator acts on, then the load with its map. The call's open hold is drawn here as the deal's action card, so the needs-you list above
 // leaves it out.
 export function LoadPanel({
   selectedCall,
@@ -109,6 +109,18 @@ export function LoadPanel({
 
   return (
     <>
+      {/* A hold on a load that has no offer on this call still needs its buttons. */}
+      {openHold && openHold.loadId !== offer.loadId && <div className="p-4 pb-0">{openHoldCard}</div>}
+      <DealCard
+        key={offer.loadId}
+        call={selectedCall}
+        loadId={offer.loadId}
+        postedRate={offer.postedRate ?? standingHold?.postedRate ?? null}
+        maxBuy={offer.maxBuy ?? standingHold?.maxBuy ?? null}
+        miles={lane?.miles ?? null}
+        trip={standingHold?.trip ?? null}
+        action={openHold?.loadId === offer.loadId ? openHoldCard : undefined}
+      />
       <Section icon={LuMap} title="Load" aside={<span className="tabular truncate text-xs text-fg-muted">{offer.loadId}</span>}>
         <div className="h-[200px] overflow-hidden rounded-lg border border-line">
           <LaneMap loads={mapLoads} selectedId={loadId} />
@@ -136,18 +148,6 @@ export function LoadPanel({
           <p className="mt-3 text-xs text-fg-faint">Lane not recorded for this load.</p>
         )}
       </Section>
-      {/* A hold on a load that has no offer on this call still needs its buttons. */}
-      {openHold && openHold.loadId !== offer.loadId && <div className="p-4 pt-0">{openHoldCard}</div>}
-      <DealCard
-        key={offer.loadId}
-        call={selectedCall}
-        loadId={offer.loadId}
-        postedRate={offer.postedRate ?? standingHold?.postedRate ?? null}
-        maxBuy={offer.maxBuy ?? standingHold?.maxBuy ?? null}
-        miles={lane?.miles ?? null}
-        trip={standingHold?.trip ?? null}
-        action={openHold?.loadId === offer.loadId ? openHoldCard : undefined}
-      />
     </>
   );
 }

@@ -1,7 +1,9 @@
 import type { TowerCall, TripSnapshot, WallOffer } from "./contracts";
+import { formatUsd } from "./format.ts";
+import { marginKept } from "./pricing.ts";
 
 // The Deal card's story of one call on one load: where it stands, the rounds that led there, the
-// price bar, and what the carrier keeps. Pure, so the card only lays it out.
+// price bar, who earns what, and the trip. Pure, so the card only lays it out.
 
 type Hold = NonNullable<TowerCall["hold"]>;
 type DealCall = Pick<TowerCall, "live" | "offers" | "hold" | "events">;
@@ -53,6 +55,41 @@ export function arrivalText(trip: Pick<TripSnapshot, "feasibility" | "lateHours"
     case "impossible":
       return { text: `Arrives ~${Math.round(trip.lateHours)}h late`, tone: "risk" };
   }
+}
+
+// One row of "Who earns what": "We earn $25 · 2%" over a muted line that shows the subtraction.
+export type EarningsRow = { lead: string; amount: string; pct: string; note: string; loss: boolean };
+
+const pctText = (pct: number) => `${Math.round(Math.abs(pct))}%`;
+
+// What we make on the load: our max minus the rate, as a share of our max. At an agreed rate the
+// note shows that subtraction; while negotiating it is our latest offer, and says so.
+export function ourEarnings(maxBuy: number | null, rate: number | null, basis: "agreed" | "offer"): EarningsRow | null {
+  const kept = marginKept(maxBuy, rate);
+  if (!kept || maxBuy === null || rate === null) return null;
+  const loss = kept.usd < 0;
+  return {
+    lead: loss ? "We lose" : "We earn",
+    amount: formatUsd(Math.abs(kept.usd)),
+    pct: pctText(kept.pct),
+    note: basis === "agreed" ? `Our max ${formatUsd(maxBuy)} − agreed ${formatUsd(rate)}` : `At our offer of ${formatUsd(rate)} · our max ${formatUsd(maxBuy)}`,
+    loss,
+  };
+}
+
+// What the carrier keeps from the rate once diesel and tolls are paid, as a share of the rate, from
+// the hold's trip estimate. Null without an estimate: the card then says it was not estimated.
+export function carrierEarnings(trip: Pick<TripSnapshot, "rate" | "dieselUsd" | "tollsUsd" | "carrierNetUsd" | "netPerHour" | "tollShare"> | null): EarningsRow | null {
+  if (!trip) return null;
+  const loss = trip.carrierNetUsd < 0;
+  const tolls = trip.tollShare === null ? ", tolls not counted" : ` − ~${formatUsd(trip.tollsUsd)} tolls`;
+  return {
+    lead: loss ? "Carrier loses" : "Carrier earns",
+    amount: `~${formatUsd(Math.abs(trip.carrierNetUsd))}`,
+    pct: pctText(trip.rate > 0 ? (trip.carrierNetUsd / trip.rate) * 100 : 0),
+    note: `${formatUsd(trip.rate)} − ~${formatUsd(trip.dieselUsd)} diesel${tolls} · ${formatUsd(trip.netPerHour)}/h`,
+    loss,
+  };
 }
 
 export type BarLabel = { kind: "posted" | "ours" | "max" | "ask"; usd: number; at: number; row: "above" | "below" };

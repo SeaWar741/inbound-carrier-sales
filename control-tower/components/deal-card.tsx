@@ -2,7 +2,7 @@
 
 import type { IconType } from "react-icons";
 import {
-  LuBanknote,
+  LuBuilding2,
   LuCircleCheck,
   LuCircleX,
   LuClock,
@@ -23,9 +23,22 @@ import { holdNotice } from "@/components/hold-card";
 import { Badge } from "@/components/inbox/stage-pill";
 import { Section } from "@/components/section";
 import type { TowerCall, TripSnapshot } from "@/lib/contracts";
-import { arrivalText, dealEnd, dealRounds, dealStatus, priceBar, type BarLabel, type DealEnd, type DealRound, type DealStatus } from "@/lib/deal";
+import {
+  arrivalText,
+  carrierEarnings,
+  dealEnd,
+  dealRounds,
+  dealStatus,
+  ourEarnings,
+  priceBar,
+  type BarLabel,
+  type DealEnd,
+  type DealRound,
+  type DealStatus,
+  type EarningsRow,
+} from "@/lib/deal";
 import { formatDateTime, formatPerMile, formatUsd } from "@/lib/format";
-import { marginKept, perMile } from "@/lib/pricing";
+import { perMile } from "@/lib/pricing";
 
 // Same tones the hold chips used, one per way a deal can stand.
 const statusChip: Record<DealStatus, { text: string; tone: string; icon: IconType }> = {
@@ -195,13 +208,44 @@ function EndLine({ end, closedInRound }: { end: DealEnd; closedInRound: boolean 
   }
 }
 
-// What the carrier keeps on the held load once diesel and tolls are paid, and whether it arrives on
-// time. Estimates snapshotted when the hold was placed.
-function CarrierKeeps({ trip }: { trip: TripSnapshot }) {
+// One "Who earns what" row: the amount in bold, its share muted, and the subtraction under it.
+function EarnsLine({ icon: Icon, row }: { icon: IconType; row: EarningsRow }) {
+  return (
+    <div className={`flex items-start gap-2 text-xs ${row.loss ? "text-risk" : "text-fg"}`}>
+      <Icon size={14} className="mt-px shrink-0 text-fg-faint" aria-hidden />
+      <span className="min-w-0">
+        {row.lead} <span className="tabular font-semibold">{row.amount}</span>
+        <span className="tabular text-fg-muted"> · {row.pct}</span>
+        <span className="tabular mt-0.5 block text-[11px] text-fg-faint">{row.note}</span>
+      </span>
+    </div>
+  );
+}
+
+// Our margin and the carrier's, side by side, so the deal reads as good or bad for both at a glance.
+function WhoEarnsWhat({ ours, carrier }: { ours: EarningsRow | null; carrier: EarningsRow | null }) {
+  return (
+    <div className="flex flex-col gap-2 border-t border-line pt-3">
+      <Subhead icon={LuCoins}>Who earns what</Subhead>
+      {ours && <EarnsLine icon={LuBuilding2} row={ours} />}
+      {carrier ? (
+        <EarnsLine icon={LuTruck} row={carrier} />
+      ) : (
+        <Line icon={LuTruck} className="text-fg-muted">
+          Carrier earnings not estimated for this load
+        </Line>
+      )}
+    </div>
+  );
+}
+
+// The held load's trip: diesel, tolls and whether it arrives on time. Estimates snapshotted when the
+// hold was placed; what the carrier keeps from them is in "Who earns what".
+function Trip({ trip }: { trip: TripSnapshot }) {
   const arrival = arrivalText(trip);
   return (
     <div className="flex flex-col gap-1.5 border-t border-line pt-3">
-      <Subhead icon={LuTruck}>What the carrier keeps</Subhead>
+      <Subhead icon={LuTruck}>Trip</Subhead>
       <div className="flex flex-wrap gap-x-4 gap-y-1.5">
         <Line icon={LuFuel}>
           Diesel <span className="tabular">~{formatUsd(trip.dieselUsd)}</span>
@@ -216,11 +260,6 @@ function CarrierKeeps({ trip }: { trip: TripSnapshot }) {
           </Line>
         )}
       </div>
-      <Line icon={LuBanknote} className={trip.carrierNetUsd < 0 ? "text-risk" : "text-fg"}>
-        Keeps <span className="tabular font-medium">~{formatUsd(trip.carrierNetUsd)}</span>
-        <span className="text-fg-faint"> · </span>
-        <span className="tabular">{formatUsd(trip.netPerHour)}/h</span>
-      </Line>
       <Line icon={LuClock} className={toneText[arrival.tone]}>
         {arrival.text}
         <span className="tabular mt-0.5 block text-[11px] text-fg-faint">
@@ -234,7 +273,7 @@ function CarrierKeeps({ trip }: { trip: TripSnapshot }) {
 
 // Operator only: our max for the load is on screen here and nowhere the agent can reach.
 // The selected call's deal on one load, top to bottom: where it stands, the price bar, how the
-// rounds went, what the carrier keeps, and whether the carrier was told.
+// rounds went, who earns what, the trip, and whether the carrier was told.
 export function DealCard({
   call,
   loadId,
@@ -261,7 +300,10 @@ export function DealCard({
   const hold = call.hold?.loadId === loadId ? call.hold : null;
   const chip = statusChip[status];
   const agreed = hold && status !== "released" ? hold.agreedRate : null;
-  const keep = agreed === null ? null : marginKept(maxBuy, agreed);
+  // Earnings at the agreed rate, or at our latest offer while the carrier is still on the line.
+  const lastOffer = [...rounds].reverse().find((round) => round.ourOffer !== null)?.ourOffer ?? null;
+  const ours = agreed !== null ? ourEarnings(maxBuy, agreed, "agreed") : status === "negotiating" ? ourEarnings(maxBuy, lastOffer, "offer") : null;
+  const showEarnings = agreed !== null || ours !== null;
   const agreedPerMile = perMile(agreed, miles);
   const notice = hold && status !== "held" && status !== "confirming" ? holdNotice(call, hold) : null;
 
@@ -303,18 +345,9 @@ export function DealCard({
               Booking ref <span className="tabular font-semibold text-fg">{hold.bookingRef}</span>
             </span>
           )}
-          {keep && maxBuy !== null && (
-            <Line icon={LuCoins} className={keep.usd < 0 ? "text-risk" : "text-ok"}>
-              {keep.usd < 0 ? "We pay " : "We keep "}
-              <span className="tabular font-medium">
-                {formatUsd(Math.abs(keep.usd))} ({Math.round(Math.abs(keep.pct))}%)
-              </span>
-              <span className="text-fg-muted">
-                {keep.usd < 0 ? " over" : " under"} our <span className="tabular">{formatUsd(maxBuy)}</span> max
-              </span>
-            </Line>
-          )}
         </div>
+
+        {showEarnings && <WhoEarnsWhat ours={ours} carrier={carrierEarnings(agreed !== null ? trip : null)} />}
 
         {postedRate !== null && maxBuy !== null ? (
           <PriceBar
@@ -346,7 +379,7 @@ export function DealCard({
           <EndLine end={end} closedInRound={last?.decision === "accept"} />
         </div>
 
-        {trip && <CarrierKeeps trip={trip} />}
+        {trip && <Trip trip={trip} />}
 
         {notice?.summary ? (
           <Line icon={LuMail} className={notice.status === "sent" ? "text-fg-muted" : "text-warn"}>

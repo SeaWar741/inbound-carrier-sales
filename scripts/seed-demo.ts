@@ -5,9 +5,17 @@
 //        npm run seed:demo -- --teardown
 import { z } from "zod";
 import { operatorTimeZone } from "../src/constants.ts";
+import { TripEstimator } from "../src/infra/trip-estimator.ts";
 import { TwinClient, sql, type SqlStatement } from "../src/infra/twin-client.ts";
 
-const env = z.object({ HAPPYROBOT_API_KEY: z.string().min(1) }).parse(process.env);
+const env = z
+  .object({
+    HAPPYROBOT_API_KEY: z.string().min(1),
+    // Without either key every demo hold is stored without a trip, like create_hold does.
+    EIA_API_KEY: z.string().min(1).optional(),
+    ORS_API_KEY: z.string().min(1).optional(),
+  })
+  .parse(process.env);
 const twin = new TwinClient({ apiKey: env.HAPPYROBOT_API_KEY });
 const run = (statement: SqlStatement) => twin.query(statement, z.unknown());
 
@@ -48,6 +56,14 @@ const wallClock = (date: Date) =>
     .replaceAll(/\D/g, "");
 const roundTo25 = (value: number) => Math.round(value / 25) * 25;
 const ago = (hours: number) => `now() - ${hours} * interval '1 hour'`;
+// The fake loads carry no delivery appointment, so each gets a day per started 500 miles after
+// pickup: a window one driver makes on every demo lane, as most real loads are.
+const deliveryAfter = (pickup: Date, miles: number) => new Date(pickup.getTime() + Math.ceil(miles / 500) * 24 * 3_600_000);
+
+// The estimator create_hold uses, so demo holds show the same trip a real hold would. A lane seen
+// before reuses its route; with ORS over quota the fallback speed applies and tolls are left out.
+const trips = TripEstimator.fromConfig(env);
+const tripLog = { warn: (details: object, message: string) => console.warn(message, details) };
 
 const calls: string[] = [];
 const offers: string[] = [];
@@ -75,7 +91,8 @@ for (let i = 1; i <= 24; i++) {
     const loadId = `DM${nn}${j}`;
     const posted = roundTo25(miles * 2.4);
     const maxBuy = roundTo25(posted * 1.1);
-    const pickupAt = wallClock(new Date(Date.now() + (latest ? pickupOffset : 48) * 3_600_000));
+    const pickupDate = new Date(Date.now() + (latest ? pickupOffset : 48) * 3_600_000);
+    const pickupAt = wallClock(pickupDate);
     const rounds = 1 + ((i + j) % 3);
     const result = latest && outcome !== "lost" ? outcome : "lost";
 
@@ -112,8 +129,21 @@ for (let i = 1; i <= 24; i++) {
     if (result !== "lost") {
       const agreed = roundTo25(Math.min(ask, maxBuy));
       const status = result === "held" ? "held" : "booked";
+      // Same inputs estimateLoadTrip builds from a TMS load: its lane, miles and window at the agreed rate.
+      const estimate = await trips.estimate(
+        {
+          origin: { zip: oZip, state: oState },
+          destination: { zip: dZip, state: dState },
+          miles,
+          pickupAt: pickupDate,
+          deliveryAt: deliveryAfter(pickupDate, miles),
+          rate: agreed,
+        },
+        tripLog,
+      );
+      const trip = estimate ? JSON.stringify(estimate) : null;
       holds.push(
-        sql`(${callId}, ${loadId}, ${mc}, ${agreed}, ${status}, ${status === "booked" ? `DMB-${nn}` : null}, ${posted}, ${maxBuy}, `.text +
+        sql`(${callId}, ${loadId}, ${mc}, ${agreed}, ${status}, ${status === "booked" ? `DMB-${nn}` : null}, ${posted}, ${maxBuy}, ${trip}::jsonb, `.text +
           `${ago(hoursAgo - 0.2)}, ${ago(hoursAgo - 0.2)})`,
       );
       events.push(
@@ -134,7 +164,7 @@ await run({
     VALUES ${offers.join(", ")}`,
 });
 await run({
-  text: `INSERT INTO holds (call_id, load_id, mc_number, agreed_rate, status, booking_ref, posted_rate, max_buy, created_at, updated_at)
+  text: `INSERT INTO holds (call_id, load_id, mc_number, agreed_rate, status, booking_ref, posted_rate, max_buy, trip, created_at, updated_at)
     VALUES ${holds.join(", ")}`,
 });
 await run({ text: `INSERT INTO call_events (call_id, tool, summary, status, created_at) VALUES ${events.join(", ")}` });
