@@ -2,15 +2,6 @@
 
 import { useEffect, useRef } from "react";
 
-// A count column cell; the title says what the number counts.
-export function Count({ value, label }: { value: number; label: string }) {
-  return (
-    <span className="tabular text-right text-sm text-fg" title={`${value} ${label}`}>
-      {value}
-    </span>
-  );
-}
-
 // The cortex list skeleton: two bars per row.
 export function SkeletonRows({ rows = 6 }: { rows?: number }) {
   return (
