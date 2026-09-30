@@ -97,7 +97,7 @@ export async function getCarrierCalls(key: string, query: URLSearchParams): Prom
   );
 }
 
-// query carries the carriers page's view and filters as the adapter reads them (view, since, ..., page).
+// query carries the carriers page's view and filters as the adapter reads them (view, q, equipment, origin, sort, dir, page, pageSize).
 export async function getNetwork(query: URLSearchParams): Promise<AdapterResult<TowerNetwork>> {
   return read(`/v1/operator/network?${query.toString()}`, adapterNetworkResponse, "The carrier network is unavailable right now. Retry shortly.");
 }

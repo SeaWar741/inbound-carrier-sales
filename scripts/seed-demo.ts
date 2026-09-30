@@ -171,8 +171,8 @@ for (let i = 1; i <= 24; i++) {
 
 // History for the carrier network, on carriers that exist only in past weeks so every view has rows:
 // days ago per call and whether it booked. Each call searched, got one offer on its lane and either
-// booked it or walked away. The board read on 2026-09-30 had GA|REEFER open, so the Top carriers run
-// Atlanta REEFER (lane 1) and also read as Growth while that lane stays open.
+// booked it or walked away. The Top carriers run lane 1 (Atlanta REEFER) and book it more than twice,
+// so they read as Growth only while the TMS board has an open GA REEFER load; the seed does not post one.
 type History = { lane: number; calls: [daysAgo: number, booked: boolean][] };
 const history: History[] = [
   // At risk: booked 3 to 7 weeks ago, silent in the last 14 days.
@@ -215,19 +215,21 @@ history.forEach(({ lane, calls: past }, h) => {
 
 // Unmet demand for the radar: extra calls from existing carriers whose searches found nothing.
 // REEFER Houston to Atlanta by 4 carriers, FLATBED out of Denver to anywhere by 2, spread over two weeks.
+const houstonAtlantaReefer = ["Houston", "TX", "77002", "Atlanta", "GA", "30303", "REEFER"];
+const denverFlatbedAnywhere = ["Denver", "CO", "80202", null, null, null, "FLATBED"];
 const unmet: [carrier: number, daysAgo: number, lane: (string | null)[]][] = [
-  [2, 1, ["Houston", "TX", "77002", "Atlanta", "GA", "30303", "REEFER"]],
-  [2, 4, ["Houston", "TX", "77002", "Atlanta", "GA", "30303", "REEFER"]],
-  [2, 9, ["Houston", "TX", "77002", "Atlanta", "GA", "30303", "REEFER"]],
-  [5, 2, ["Houston", "TX", "77002", "Atlanta", "GA", "30303", "REEFER"]],
-  [5, 10, ["Houston", "TX", "77002", "Atlanta", "GA", "30303", "REEFER"]],
-  [11, 3, ["Houston", "TX", "77002", "Atlanta", "GA", "30303", "REEFER"]],
-  [14, 11, ["Houston", "TX", "77002", "Atlanta", "GA", "30303", "REEFER"]],
-  [11, 6, ["Houston", "TX", "77002", "Atlanta", "GA", "30303", "REEFER"]],
-  [14, 5, ["Houston", "TX", "77002", "Atlanta", "GA", "30303", "REEFER"]],
-  [17, 1, ["Denver", "CO", "80202", null, null, null, "FLATBED"]],
-  [17, 8, ["Denver", "CO", "80202", null, null, null, "FLATBED"]],
-  [20, 5, ["Denver", "CO", "80202", null, null, null, "FLATBED"]],
+  [2, 1, houstonAtlantaReefer],
+  [2, 4, houstonAtlantaReefer],
+  [2, 9, houstonAtlantaReefer],
+  [5, 2, houstonAtlantaReefer],
+  [5, 10, houstonAtlantaReefer],
+  [11, 3, houstonAtlantaReefer],
+  [14, 11, houstonAtlantaReefer],
+  [11, 6, houstonAtlantaReefer],
+  [14, 5, houstonAtlantaReefer],
+  [17, 1, denverFlatbedAnywhere],
+  [17, 8, denverFlatbedAnywhere],
+  [20, 5, denverFlatbedAnywhere],
 ];
 unmet.forEach(([i, daysAgo, lane], k) => {
   const nn = String(i).padStart(2, "0");

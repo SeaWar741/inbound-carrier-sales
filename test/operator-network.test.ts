@@ -24,7 +24,6 @@ const atRiskTopRow = {
   mc_number: "123456",
   dot_number: "7654321",
   carrier_name: "ACME TRUCKING LLC",
-  eligible: true,
   relationship: "at_risk",
   top: true,
   growth: true,
@@ -36,8 +35,6 @@ const atRiskTopRow = {
   calls: 4,
   negotiable_calls: 3,
   bookings: 2,
-  searches: 6,
-  loads_negotiated: 3,
   lanes: [
     { origin_state: "GA", destination_state: "KS", equipment: "DRY_VAN", n: 4, open: true },
     { origin_state: "TX", destination_state: null, equipment: null, n: 1, open: false },
@@ -51,7 +48,6 @@ const newRow = {
   mc_number: null,
   dot_number: null,
   carrier_name: null,
-  eligible: false,
   relationship: "new",
   top: false,
   growth: false,
@@ -61,8 +57,6 @@ const newRow = {
   calls: 1,
   negotiable_calls: 0,
   bookings: 0,
-  searches: 1,
-  loads_negotiated: 0,
   lanes: [],
 };
 
@@ -70,9 +64,7 @@ const newRow = {
 const networkRow = {
   total: "2",
   all_count: "2",
-  new_count: "1",
   at_risk_count: "1",
-  top_count: "1",
   growth_count: "1",
   called_kpi: "2",
   booked_kpi: "2",
@@ -136,8 +128,6 @@ describe("GET /v1/operator/network", () => {
 
   it.each([
     ["an unknown view", "?view=lost"],
-    ["an unknown since", "?since=1y"],
-    ["from without to", "?from=2026-09-01"],
     ["page 0", "?page=0"],
     ["an unknown sort", "?sort=name"],
     ["an unknown dir", "?dir=up"],
@@ -156,7 +146,7 @@ describe("GET /v1/operator/network", () => {
     expect(statements).toHaveLength(1);
     const body = operatorNetworkResponse.parse(res.json());
     expect(body).toMatchObject({ status: "ok", total: 2, page: 1, pageSize: 25, boardAvailable: true });
-    expect(body.counts).toEqual({ all: 2, new: 1, atRisk: 1, top: 1, growth: 1 });
+    expect(body.counts).toEqual({ all: 2, atRisk: 1, growth: 1 });
     expect(body.kpis).toEqual({ called: 2, booked: 2, negotiated: 3 });
     expect(body.openLanes).toEqual([
       { originState: "GA", equipment: "DRY_VAN", carriers: 1 },
@@ -171,7 +161,6 @@ describe("GET /v1/operator/network", () => {
       mcNumber: "123456",
       dotNumber: "7654321",
       carrierName: "ACME TRUCKING LLC",
-      eligible: true,
       relationship: "at_risk",
       top: true,
       growth: true,
@@ -184,8 +173,6 @@ describe("GET /v1/operator/network", () => {
         calls: 4,
         negotiableCalls: 3,
         bookings: 2,
-        searches: 6,
-        loadsNegotiated: 3,
       },
       lanes: [
         { originState: "GA", destinationState: "KS", equipment: "DRY_VAN", count: 4, open: true },
@@ -225,7 +212,8 @@ describe("GET /v1/operator/network", () => {
     expect(text).toContain("FROM filtered f WHERE f.relationship = 'at_risk'");
     expect(text).toContain("(SELECT count(*) FROM ordered) AS total");
     expect(text).toContain("(SELECT count(*) FROM filtered WHERE relationship = 'at_risk') AS at_risk_count");
-    expect(text).toContain("(SELECT count(*) FROM filtered WHERE top) AS top_count");
+    expect(text).not.toContain("new_count");
+    expect(text).not.toContain("top_count");
     expect(text).toContain("row_number() OVER (ORDER BY f.last_call_at DESC, f.carrier_key)");
     expect(text).toContain("p.ord > 25 AND p.ord <= 50");
     expect(text).toContain("LEFT JOIN LATERAL");
@@ -255,23 +243,46 @@ describe("GET /v1/operator/network", () => {
     expect(text).toContain("(SELECT COALESCE(sum(bookings), 0) FROM filtered) AS booked_kpi");
     expect(text).toContain("(SELECT COALESCE(sum(loads_negotiated), 0) FROM filtered) AS negotiated_kpi");
     expect(text).toContain("listed AS (\n      SELECT c.* FROM classified c WHERE c.calls > 0 OR c.relationship = 'at_risk'");
-    expect(text).toContain("FROM lanes l JOIN listed c ON c.carrier_key = l.carrier_key\n        WHERE l.open AND l.equipment IS NOT NULL GROUP BY l.origin_state, l.equipment");
+    expect(text).toContain(
+      "FROM lanes l JOIN listed c ON c.carrier_key = l.carrier_key\n        WHERE l.open AND l.equipment IS NOT NULL GROUP BY l.origin_state, l.equipment\n        ORDER BY carriers DESC, l.origin_state, l.equipment\n        LIMIT 5\n",
+    );
     expect(text).toContain("WHERE l.open GROUP BY l.origin_state\n");
   });
 
   it("renders the bar filters as escaped SQL in filtered", () => {
-    const text = networkQuery(operatorNetworkQuery.parse({ equipment: ["reefer"], origin: "ga", q: "50%_o'k", since: "7d" }), new Set()).text;
+    const text = networkQuery(operatorNetworkQuery.parse({ equipment: ["reefer"], origin: "ga", q: "50%_o'k" }), new Set()).text;
     const filtered = text.slice(text.indexOf("filtered AS ("), text.indexOf("ordered AS ("));
-    expect(filtered).toContain("EXISTS (SELECT 1 FROM lanes l WHERE l.carrier_key = c.carrier_key AND l.equipment IN (E'REEFER') AND l.origin_state = E'GA')");
+    expect(filtered).toContain("WHERE EXISTS (SELECT 1 FROM lanes l WHERE l.carrier_key = c.carrier_key AND l.equipment IN (E'REEFER') AND l.origin_state = E'GA')");
     expect(filtered).toContain("c.carrier_name ILIKE E'%50\\\\%\\\\_o''k%'");
-    expect(text).toContain("c.created_at >= (now() - interval '7 days')::timestamp AS in_window");
-    expect(filtered).not.toContain("l.open");
+    // The window is fixed at 30 days, whatever the request says.
+    expect(text).toContain("c.created_at >= (now() - interval '30 days')::timestamp AS in_window");
   });
 
-  it("narrows the lane filter to open lanes on the growth view, so a panel click keeps the panel's count", () => {
+  it("reads growth under a lane filter as an open lane that matches it, in the view, the count and the tag alike", () => {
     const text = networkQuery(operatorNetworkQuery.parse({ view: "growth", equipment: ["reefer"], origin: "ga" }), new Set()).text;
     const filtered = text.slice(text.indexOf("filtered AS ("), text.indexOf("ordered AS ("));
-    expect(filtered).toContain("l.equipment IN (E'REEFER') AND l.origin_state = E'GA' AND l.open)");
+    expect(filtered).toContain(
+      "SELECT c.*, EXISTS (SELECT 1 FROM lanes l WHERE l.carrier_key = c.carrier_key AND l.equipment IN (E'REEFER') AND l.origin_state = E'GA' AND l.open) AS growth_here",
+    );
+    expect(text).toContain("FROM filtered f WHERE f.growth_here");
+    expect(text).toContain("(SELECT count(*) FROM filtered WHERE growth_here) AS growth_count");
+    expect(text).toContain("p.growth_here AS growth");
+    // Without a lane filter it is the carrier's own growth tag.
+    expect(networkQuery(operatorNetworkQuery.parse({ view: "growth" }), new Set()).text).toContain("SELECT c.*, c.growth AS growth_here FROM listed c");
+  });
+
+  it("keeps the counts and KPIs independent of the view", () => {
+    const counts = (view: string) => {
+      const text = networkQuery(operatorNetworkQuery.parse({ view, equipment: ["reefer"], origin: "ga" }), new Set()).text;
+      return text.slice(text.indexOf("filtered AS ("), text.indexOf("ordered AS (")) + text.slice(text.indexOf("SELECT (SELECT count(*) FROM ordered)"));
+    };
+    for (const view of ["growth", "at_risk", "top", "new"]) expect(counts(view)).toBe(counts("all"));
+  });
+
+  it("ignores a since or day range on the fixed 30 day window", async () => {
+    statements.length = 0;
+    expect((await getNetwork("?since=7d&from=2026-09-01&to=2026-09-02")).statusCode).toBe(200);
+    expect(statements[0]).toContain("c.created_at >= (now() - interval '30 days')::timestamp AS in_window");
   });
 
   it("accepts only the listed page sizes", () => {
@@ -359,7 +370,6 @@ const demandRow = {
       origin_state: "TX",
       destination_state: null,
       equipment: null,
-      searches: "5",
       no_match: "4",
       offered_no_booking: "1",
       this_week: "3",
@@ -371,7 +381,6 @@ const demandRow = {
       origin_state: "GA",
       destination_state: "KS",
       equipment: "DRY_VAN",
-      searches: "0",
       no_match: "0",
       offered_no_booking: "2",
       this_week: "0",
@@ -423,7 +432,6 @@ describe("GET /v1/operator/demand", () => {
       originState: "TX",
       destinationState: null,
       equipment: null,
-      searches: 5,
       noMatch: 4,
       offeredNoBooking: 1,
       thisWeek: 3,
@@ -457,6 +465,15 @@ describe("GET /v1/operator/demand", () => {
     expect(text).toContain("o.equipment IS NOT NULL");
     expect(text).toContain("CASE WHEN ls.results = 0 THEN 1 ELSE 0 END AS no_match");
     expect(text).toContain("count(DISTINCT a.carrier_key) AS carriers");
+  });
+
+  it("counts only unmet asks: a search that found a load is covered demand and reaches no row, total or origin", () => {
+    for (const text of [demandQuery(operatorDemandQuery.parse({})).text, demandCarriersQuery(operatorDemandCarriersQuery.parse({ origin: "TX" })).text]) {
+      const asks = text.slice(text.indexOf("asks AS ("), text.indexOf("grouped AS ("));
+      expect(asks).toContain("WHERE a.no_match + a.offered_no_booking > 0");
+      // Every count downstream reads asks, never raw_asks.
+      expect(text.slice(text.indexOf("grouped AS ("))).not.toContain("raw_asks");
+    }
   });
 
   it.each([
@@ -495,11 +512,11 @@ describe("GET /v1/operator/demand", () => {
   });
 
   it.each([
-    ["lane", "asc", "ORDER BY g.origin_state ASC, g.destination_state ASC NULLS LAST, g.unmet DESC, g.searches DESC, g.equipment NULLS LAST"],
-    ["equipment", "desc", "ORDER BY g.equipment DESC NULLS LAST, g.unmet DESC, g.searches DESC, g.origin_state, g.destination_state NULLS LAST"],
-    ["unmet", "asc", "ORDER BY g.unmet ASC, g.searches DESC, g.origin_state, g.destination_state NULLS LAST, g.equipment NULLS LAST"],
-    ["thisWeek", "desc", "ORDER BY g.this_week DESC, g.unmet DESC, g.searches DESC, g.origin_state"],
-    ["carriers", "asc", "ORDER BY g.carriers ASC, g.unmet DESC, g.searches DESC, g.origin_state"],
+    ["lane", "asc", "ORDER BY g.origin_state ASC, g.destination_state ASC NULLS LAST, g.unmet DESC, g.no_match DESC, g.equipment NULLS LAST"],
+    ["equipment", "desc", "ORDER BY g.equipment DESC NULLS LAST, g.unmet DESC, g.no_match DESC, g.origin_state, g.destination_state NULLS LAST"],
+    ["unmet", "asc", "ORDER BY g.unmet ASC, g.no_match DESC, g.origin_state, g.destination_state NULLS LAST, g.equipment NULLS LAST"],
+    ["thisWeek", "desc", "ORDER BY g.this_week DESC, g.unmet DESC, g.no_match DESC, g.origin_state"],
+    ["carriers", "asc", "ORDER BY g.carriers ASC, g.unmet DESC, g.no_match DESC, g.origin_state"],
   ])("orders by %s %s from the whitelist, then the stable tie breakers", (sort, dir, order) => {
     expect(demandQuery(operatorDemandQuery.parse({ sort, dir })).text).toContain(order);
   });
@@ -510,10 +527,10 @@ describe("GET /v1/operator/demand", () => {
     expect(operatorDemandResponse.parse(res.json()).pageSize).toBe(50);
   });
 
-  it("orders by unmet then searches then lane, and pages", () => {
+  it("orders by unmet then no-match searches then lane, and pages", () => {
     const text = demandQuery(operatorDemandQuery.parse({ page: "3" })).text;
     expect(text).toContain(
-      "ORDER BY g.unmet DESC, g.searches DESC, g.origin_state, g.destination_state NULLS LAST, g.equipment NULLS LAST",
+      "ORDER BY g.unmet DESC, g.no_match DESC, g.origin_state, g.destination_state NULLS LAST, g.equipment NULLS LAST",
     );
     expect(text).toContain("GROUP BY a.origin_state, a.destination_state, a.equipment");
     expect(text).toContain("p.ord > 50 AND p.ord <= 75");
@@ -582,9 +599,9 @@ describe("GET /v1/operator/demand/carriers", () => {
     expect(exact).not.toContain("IS NULL AND a.equipment");
   });
 
-  it("counts asks as searches plus offered loads without a booking, ordered by asks then key", () => {
+  it("counts asks as the carrier's unmet asks on the lane, ordered by asks then key", () => {
     const text = demandCarriersQuery(operatorDemandCarriersQuery.parse({ origin: "TX" })).text;
-    expect(text).toContain("sum(a.searches + a.offered_no_booking) AS asks");
+    expect(text).toContain("SELECT a.carrier_key, sum(a.unmet) AS asks");
     expect(text).toContain("row_number() OVER (ORDER BY g.asks DESC, g.carrier_key)");
     expect(text).toContain("date_trunc('week', now() AT TIME ZONE E'America/Chicago')");
   });
