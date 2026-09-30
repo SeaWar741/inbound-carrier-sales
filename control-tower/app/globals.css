@@ -55,8 +55,8 @@
   --tone-green-soft: oklch(0.962 0.044 156.743);
   --tone-amber: oklch(0.666 0.179 58.318);
   --tone-amber-soft: oklch(0.962 0.059 95.617);
-  --tone-emerald: oklch(0.508 0.118 165.612);
-  --tone-emerald-soft: oklch(0.95 0.052 163.051);
+  --tone-emerald: var(--ok);
+  --tone-emerald-soft: var(--ok-soft);
   --tone-blue: oklch(0.546 0.245 262.881);
   --tone-blue-soft: oklch(0.932 0.032 255.585);
   --tone-violet: oklch(0.541 0.281 293.009);
