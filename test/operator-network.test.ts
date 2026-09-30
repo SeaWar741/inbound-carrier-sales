@@ -39,8 +39,8 @@ const atRiskTopRow = {
   searches: 6,
   loads_negotiated: 3,
   lanes: [
-    { origin_state: "GA", destination_state: "KS", equipment: "DRY_VAN", n: 4 },
-    { origin_state: "TX", destination_state: null, equipment: null, n: 1 },
+    { origin_state: "GA", destination_state: "KS", equipment: "DRY_VAN", n: 4, open: true },
+    { origin_state: "TX", destination_state: null, equipment: null, n: 1, open: false },
   ],
 };
 
@@ -156,8 +156,8 @@ describe("GET /v1/operator/network", () => {
         loadsNegotiated: 3,
       },
       lanes: [
-        { originState: "GA", destinationState: "KS", equipment: "DRY_VAN", count: 4 },
-        { originState: "TX", destinationState: null, equipment: null, count: 1 },
+        { originState: "GA", destinationState: "KS", equipment: "DRY_VAN", count: 4, open: true },
+        { originState: "TX", destinationState: null, equipment: null, count: 1, open: false },
       ],
     });
     expect(body.rows[1]).toMatchObject({ key: "call:call-x", relationship: "new", top: false, lanes: [] });
@@ -220,8 +220,8 @@ describe("GET /v1/operator/network", () => {
       expect(tms.queryLoads).toHaveBeenCalledTimes(5);
       // Booked loads are not open lanes; a search without equipment matches the state alone.
       for (const text of statements) {
-        expect(text).toContain("(l.origin_state || '|' || l.equipment) IN (E'GA|DRY_VAN', E'TX|REEFER')");
-        expect(text).toContain("OR (l.equipment IS NULL AND l.origin_state IN (E'GA', E'TX'))");
+        expect(text).toContain("(r.origin_state || '|' || r.equipment) IN (E'GA|DRY_VAN', E'TX|REEFER')");
+        expect(text).toContain("OR (r.equipment IS NULL AND r.origin_state IN (E'GA', E'TX'))");
         expect(text).not.toContain("OH|DRY_VAN");
       }
     } finally {
@@ -235,8 +235,8 @@ describe("GET /v1/operator/network", () => {
     expect(res.statusCode).toBe(200);
     expect(operatorNetworkResponse.parse(res.json()).boardAvailable).toBe(false);
     const [text] = statements;
-    expect(text).toContain("(l.origin_state || '|' || l.equipment) IN (NULL)");
-    expect(text).toContain("l.origin_state IN (NULL)");
+    expect(text).toContain("(r.origin_state || '|' || r.equipment) IN (NULL)");
+    expect(text).toContain("r.origin_state IN (NULL)");
     expect(text).not.toContain("|DRY_VAN'");
     // A failed read is not cached: the next request asks the board again.
     const calls = downTms.queryLoads.mock.calls.length;

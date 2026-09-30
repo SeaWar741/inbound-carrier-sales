@@ -593,13 +593,15 @@ const networkCarrier = z.object({
     searches: z.number().int(),
     loadsNegotiated: z.number().int(),
   }),
-  // The carrier's most observed lanes in the window, from its searches and negotiated loads; null means any.
+  // The carrier's lanes in the window, from its searches and negotiated loads; null means any. Count is
+  // calls; open means the board has an open load on it now, and open lanes come first.
   lanes: z.array(
     z.object({
       originState: z.string().nullable(),
       destinationState: z.string().nullable(),
       equipment: z.string().nullable(),
       count: z.number().int(),
+      open: z.boolean(),
     }),
   ),
 });

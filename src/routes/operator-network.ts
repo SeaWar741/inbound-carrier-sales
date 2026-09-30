@@ -111,13 +111,19 @@ export function networkQuery(params: OperatorNetworkQuery, lanes: ReadonlySet<st
       SELECT k.carrier_key, count(DISTINCT o.load_id) AS loads_negotiated
       FROM keyed k JOIN offers o ON o.call_id = k.call_id WHERE k.in_window GROUP BY k.carrier_key
     ), lanes AS (
-      SELECT k.carrier_key, ls.origin_state, ls.destination_state, ls.equipment
-      FROM keyed k JOIN load_searches ls ON ls.call_id = k.call_id WHERE k.in_window
-      UNION ALL
-      -- One lane per negotiated load on a call, however many rounds it took. Offers made before the
-      -- lane was stored have none; unlike a search, their NULL equipment does not mean any.
-      SELECT DISTINCT ON (o.call_id, o.load_id) k.carrier_key, o.origin_state, o.destination_state, o.equipment
-      FROM keyed k JOIN offers o ON o.call_id = k.call_id WHERE k.in_window AND o.equipment IS NOT NULL
+      -- A lane is open when the board has an open load from its origin state on its equipment; a search
+      -- without equipment asked for any, so it matches the state on every open equipment.
+      SELECT r.*, COALESCE((r.origin_state || '|' || r.equipment) IN (` + sql`${pairs}`.text + `)
+        OR (r.equipment IS NULL AND r.origin_state IN (` + sql`${pairStates}`.text + `)), FALSE) AS open
+      FROM (
+        SELECT k.carrier_key, k.call_id, ls.origin_state, ls.destination_state, ls.equipment
+        FROM keyed k JOIN load_searches ls ON ls.call_id = k.call_id WHERE k.in_window
+        UNION ALL
+        -- One lane per negotiated load on a call, however many rounds it took. Offers made before the
+        -- lane was stored have none; unlike a search, their NULL equipment does not mean any.
+        SELECT DISTINCT ON (o.call_id, o.load_id) k.carrier_key, k.call_id, o.origin_state, o.destination_state, o.equipment
+        FROM keyed k JOIN offers o ON o.call_id = k.call_id WHERE k.in_window AND o.equipment IS NOT NULL
+      ) r
     ), classified AS (
       SELECT f.*, COALESCE(n.loads_negotiated, 0) AS loads_negotiated,
         CASE
@@ -126,10 +132,7 @@ export function networkQuery(params: OperatorNetworkQuery, lanes: ReadonlySet<st
           ELSE 'active'
         END AS relationship,
         (f.bookings >= ` + sql`${segmentTopMinBookings}`.text + ` AND f.bookings >= ` + sql`${segmentTopMinRate}`.text + ` * f.negotiable_calls) AS top,
-        -- A search without equipment asked for any, so it matches the state on every open equipment.
-        EXISTS (SELECT 1 FROM lanes l WHERE l.carrier_key = f.carrier_key AND (
-          (l.origin_state || '|' || l.equipment) IN (` + sql`${pairs}`.text + `)
-          OR (l.equipment IS NULL AND l.origin_state IN (` + sql`${pairStates}`.text + `)))) AS growth
+        EXISTS (SELECT 1 FROM lanes l WHERE l.carrier_key = f.carrier_key AND l.open) AS growth
       FROM facts f LEFT JOIN negotiated n ON n.carrier_key = f.carrier_key
     ), filtered AS (
       SELECT c.* FROM classified c
@@ -151,12 +154,14 @@ export function networkQuery(params: OperatorNetworkQuery, lanes: ReadonlySet<st
           p.calls, p.negotiable_calls, p.bookings, p.searches, p.loads_negotiated, pl.lanes
         FROM ordered p
         LEFT JOIN LATERAL (
-          SELECT COALESCE(json_agg(t ORDER BY t.n DESC, t.origin_state, t.destination_state, t.equipment), '[]'::json) AS lanes
+          SELECT COALESCE(json_agg(t ORDER BY t.open DESC, t.n DESC, t.origin_state, t.destination_state, t.equipment), '[]'::json) AS lanes
           FROM (
-            SELECT l.origin_state, l.destination_state, l.equipment, count(*) AS n
+            -- Calls, not rows: a call that searched a lane and negotiated a load on it ran it once.
+            -- Open lanes first, so the one behind the growth tag is always among the five.
+            SELECT l.origin_state, l.destination_state, l.equipment, count(DISTINCT l.call_id) AS n, bool_or(l.open) AS open
             FROM lanes l WHERE l.carrier_key = p.carrier_key
             GROUP BY l.origin_state, l.destination_state, l.equipment
-            ORDER BY n DESC, l.origin_state, l.destination_state, l.equipment
+            ORDER BY open DESC, n DESC, l.origin_state, l.destination_state, l.equipment
             LIMIT 5
           ) t
         ) pl ON TRUE
@@ -187,7 +192,13 @@ const networkRow = z.object({
   searches: count,
   loads_negotiated: count,
   lanes: z.array(
-    z.object({ origin_state: z.string().nullable(), destination_state: z.string().nullable(), equipment: z.string().nullable(), n: count }),
+    z.object({
+      origin_state: z.string().nullable(),
+      destination_state: z.string().nullable(),
+      equipment: z.string().nullable(),
+      n: count,
+      open: z.boolean(),
+    }),
   ),
 });
 type NetworkRow = z.output<typeof networkRow>;
@@ -230,6 +241,7 @@ function toNetworkCarrier(row: NetworkRow): NetworkCarrier {
       destinationState: lane.destination_state,
       equipment: lane.equipment,
       count: lane.n,
+      open: lane.open,
     })),
   };
 }
