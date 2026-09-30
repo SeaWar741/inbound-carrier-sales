@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef } from "react";
-import { LuArrowDownUp, LuArrowRight, LuList, LuTriangleAlert, LuTruck, LuX } from "react-icons/lu";
+import { LuArrowDownUp, LuArrowRight, LuList, LuRoute, LuTriangleAlert, LuTruck, LuX } from "react-icons/lu";
 import { tripLabels, tripTones } from "@/components/dashboard/kpi-tiles";
 import { EmptyState } from "@/components/empty-state";
 import { FilterSelect, SearchInput, TabStrip } from "@/components/inbox/filter-bar";
@@ -68,6 +68,11 @@ const statusTabs: { status: TripStatus | ""; label: string }[] = [
   { status: "arrived", label: tripLabels.arrived },
 ];
 
+// A value from the URL may not be in the current data; keep it listed so the chip shows what filters.
+function withCurrent(values: string[], current: string): string[] {
+  return current === "" || values.includes(current) ? values : [...values, current].sort();
+}
+
 const sortOptions: { value: LoadSort; label: string }[] = [
   { value: "", label: "Status" },
   { value: "pickup", label: "Pickup" },
@@ -86,6 +91,7 @@ export function ActiveLoads({
   sort,
   counts,
   equipments,
+  origins,
   onFilter,
   onSort,
   onClear,
@@ -101,11 +107,12 @@ export function ActiveLoads({
   sort: LoadSort;
   counts: Record<TripStatus | "all", number> | null;
   equipments: string[];
+  origins: string[];
   onFilter: <K extends keyof LoadFilters>(key: K, value: LoadFilters[K]) => void;
   onSort: (sort: LoadSort) => void;
   onClear: () => void;
 }) {
-  const narrowed = filters.q !== "" || filters.status !== "" || filters.equipment !== "" || sort !== "";
+  const narrowed = filters.q !== "" || filters.status !== "" || filters.equipment !== "" || filters.origin !== "" || sort !== "";
   const onSearch = useCallback((q: string) => onFilter("q", q), [onFilter]);
 
   return (
@@ -127,11 +134,21 @@ export function ActiveLoads({
         <SearchInput q={filters.q} onSearch={onSearch} placeholder="Search load, city, carrier, MC" label="Search loads" />
         <div className="flex min-w-0 items-center gap-1.5">
           <FilterSelect
+            label="From"
+            icon={LuRoute}
+            value={filters.origin}
+            onChange={(v) => onFilter("origin", v)}
+            options={[{ value: "", label: "From" }, ...withCurrent(origins, filters.origin).map((s) => ({ value: s, label: s }))]}
+          />
+          <FilterSelect
             label="Equipment"
             icon={LuTruck}
             value={filters.equipment}
             onChange={(v) => onFilter("equipment", v)}
-            options={[{ value: "", label: "Equipment" }, ...equipments.map((c) => ({ value: c, label: equipmentLabel(c) }))]}
+            options={[
+              { value: "", label: "Equipment" },
+              ...withCurrent(equipments, filters.equipment).map((c) => ({ value: c, label: equipmentLabel(c) })),
+            ]}
           />
           {narrowed && (
             <button

@@ -1,22 +1,39 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useCallback, useMemo, useState } from "react";
 import { ActiveLoads } from "@/components/dashboard/active-loads";
 import { KpiTiles } from "@/components/dashboard/kpi-tiles";
 import { LaneMap, type LaneMapLoad } from "@/components/lane-map";
 import type { TowerLoads } from "@/lib/contracts";
 import { carrierName, equipmentLabel } from "@/lib/format";
-import { emptyLoadFilters, filterLoads, loadEquipments, sortLoads, statusCounts, type LoadFilters, type LoadSort } from "@/lib/load-filters";
+import { emptyLoadFilters, filterLoads, loadEquipments, loadOrigins, sortLoads, statusCounts, type LoadFilters, type LoadSort } from "@/lib/load-filters";
 import { usePoll } from "@/lib/use-poll";
 import { useSharedWall } from "@/lib/use-wall";
 
 const loadsPollMs = 15_000;
 
+// useSearchParams needs a Suspense boundary to prerender.
 export default function DashboardPage() {
+  return (
+    <Suspense>
+      <Dashboard />
+    </Suspense>
+  );
+}
+
+function Dashboard() {
+  const searchParams = useSearchParams();
   const { data: wall } = useSharedWall();
   const { data, error } = usePoll<TowerLoads>("/api/loads", loadsPollMs, "load list");
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [filters, setFilters] = useState<LoadFilters>(emptyLoadFilters);
+  // Links from other pages (/?origin=TX&equipment=REEFER) open the list already narrowed; later
+  // filter changes stay local and do not write back to the URL.
+  const [filters, setFilters] = useState<LoadFilters>(() => ({
+    ...emptyLoadFilters,
+    origin: (searchParams.get("origin") ?? "").trim().toUpperCase(),
+    equipment: (searchParams.get("equipment") ?? "").trim().toUpperCase(),
+  }));
   const [sort, setSort] = useState<LoadSort>("");
 
   const loads = data?.loads ?? null;
@@ -25,6 +42,7 @@ export default function DashboardPage() {
   const shown = useMemo(() => (data ? sortLoads(filterLoads(data.loads, filters), sort) : null), [data, filters, sort]);
   const counts = useMemo(() => (data ? statusCounts(data.loads, filters) : null), [data, filters]);
   const equipments = useMemo(() => loadEquipments(data?.loads ?? []), [data]);
+  const origins = useMemo(() => loadOrigins(data?.loads ?? []), [data]);
 
   const onFilter = useCallback(<K extends keyof LoadFilters>(key: K, value: LoadFilters[K]) => {
     setFilters((current) => ({ ...current, [key]: value }));
@@ -79,6 +97,7 @@ export default function DashboardPage() {
           sort={sort}
           counts={counts}
           equipments={equipments}
+          origins={origins}
           onFilter={onFilter}
           onSort={setSort}
           onClear={onClear}
