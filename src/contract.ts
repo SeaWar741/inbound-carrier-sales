@@ -551,3 +551,69 @@ export type OperatorCarrierCallsQuery = z.output<typeof operatorCarrierCallsQuer
 // `since` window, null when it has no call there.
 export const operatorCarrierCallsResponse = z.object({ status: z.literal("ok"), calls: z.array(wallCall), carrier: operatorCarrier.nullable() });
 export type OperatorCarrierCallsResponse = z.infer<typeof operatorCarrierCallsResponse>;
+
+export const networkViews = ["all", "new", "at_risk", "top", "growth"] as const;
+export const carrierRelationships = ["new", "at_risk", "active"] as const;
+
+// The inbox window (30 days by default, long enough to see a carrier's pattern), the bar filters and a view.
+export const operatorNetworkQuery = withDayRange(
+  operatorCarriersFields.pick({ from: true, to: true, equipment: true, origin: true, page: true }).extend({
+    since: z.enum(["today", "7d", "30d"]).default("30d"),
+    view: z.enum(networkViews).default("all"),
+    // MC, DOT or carrier name.
+    q: optionalField(z.string().trim().max(64)),
+  }),
+);
+export type OperatorNetworkQuery = z.output<typeof operatorNetworkQuery>;
+
+const networkCarrier = z.object({
+  key: z.string(),
+  mcNumber: z.string().nullable(),
+  dotNumber: z.string().nullable(),
+  carrierName: z.string().nullable(),
+  // From the carrier's latest call.
+  eligible: z.boolean(),
+  // new, else at_risk, else active; lifetime facts decide it, not the window.
+  relationship: z.enum(carrierRelationships),
+  // Independent of the relationship and of each other.
+  top: z.boolean(),
+  // The carrier searched or negotiated a lane (origin state and equipment) the board has open now.
+  growth: z.boolean(),
+  facts: z.object({
+    lifetimeCalls: z.number().int(),
+    lifetimeBookings: z.number().int(),
+    lastCallAt: z.iso.datetime(),
+    // Calls in the last 14 days and in the 14 days before those.
+    callsRecent: z.number().int(),
+    callsPrior: z.number().int(),
+    // The rest are inside the window; negotiable calls have at least one offer.
+    calls: z.number().int(),
+    negotiableCalls: z.number().int(),
+    bookings: z.number().int(),
+    searches: z.number().int(),
+    loadsNegotiated: z.number().int(),
+  }),
+  // The carrier's most observed lanes in the window, from its searches and negotiated loads; null means any.
+  lanes: z.array(
+    z.object({
+      originState: z.string().nullable(),
+      destinationState: z.string().nullable(),
+      equipment: z.string().nullable(),
+      count: z.number().int(),
+    }),
+  ),
+});
+export type NetworkCarrier = z.infer<typeof networkCarrier>;
+
+export const operatorNetworkResponse = z.object({
+  status: z.literal("ok"),
+  rows: z.array(networkCarrier),
+  // Carriers in the view after the filters; the counts apply the filters but not the view.
+  total: z.number().int(),
+  page: z.number().int(),
+  pageSize: z.number().int(),
+  counts: z.object({ all: z.number().int(), new: z.number().int(), atRisk: z.number().int(), top: z.number().int(), growth: z.number().int() }),
+  // False when the TMS board could not be read; growth is then false for every carrier.
+  boardAvailable: z.boolean(),
+});
+export type OperatorNetworkResponse = z.infer<typeof operatorNetworkResponse>;

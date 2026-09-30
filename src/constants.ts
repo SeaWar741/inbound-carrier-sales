@@ -62,6 +62,19 @@ export const dashboardLoadsLimit = 500;
 // A carrier's timeline shows its recent calls, not its full history.
 export const carrierCallsLimit = 50;
 
+// Carrier network. A carrier with fewer calls than this has no pattern yet to judge, so it is new.
+export const segmentNewMaxCalls = 3;
+// Two weeks is about two load cycles for a regular carrier: a booked carrier silent this long, or
+// calling less than half as often as in the two weeks before, is at risk.
+export const segmentRecentDays = 14;
+// Top: at least this many bookings in the window, and bookings on at least this share of the calls
+// that reached a negotiation (calls that failed OTP or found no load do not count against it).
+export const segmentTopMinBookings = 2;
+export const segmentTopMinRate = 0.5;
+// Open lanes change as loads are booked, but the growth tag is a hint, not a quote; ten minutes
+// keeps the network page to five LOAD_QUERY calls per ten minutes.
+export const openLanesCacheMs = 10 * 60 * 1000;
+
 // Trip estimate. Class 8 tractor-trailers average 6.3 mpg (AFDC data/10310, from FHWA VM-1 2024).
 export const truckMpg = 6.3;
 // Ohio Turnpike Class 5 E-ZPass, 2026 schedule, per tolled mile. PA and Indiana charge more, so this is
