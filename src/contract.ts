@@ -648,6 +648,8 @@ export const operatorDemandResponse = z.object({
   status: z.literal("ok"),
   rows: z.array(demandLane),
   total: z.number().int(),
+  // Across every row the filters keep, not only this page.
+  totals: z.object({ noMatch: z.number().int(), offeredNoBooking: z.number().int(), carriers: z.number().int() }),
   page: z.number().int(),
   pageSize: z.number().int(),
 });

@@ -295,9 +295,13 @@ function demandCtes(): string {
 // One round trip: the page of lanes and the total. Lanes are the asks grouped by
 // (origin, destination, equipment); the week columns split the unmet asks by desk week.
 export function demandQuery(params: OperatorDemandQuery): SqlStatement {
-  const filters: string[] = [];
-  if (params.equipment.length > 0) filters.push(sql`g.equipment IN (${params.equipment})`.text);
-  if (params.origin) filters.push(sql`g.origin_state = ${params.origin}`.text);
+  // The same filters on a grouped row (g) and on a single ask (a), for the carriers total.
+  const filtersOn = (alias: "g" | "a") => {
+    const list: string[] = [];
+    if (params.equipment.length > 0) list.push(`${alias}.` + sql`equipment IN (${params.equipment})`.text);
+    if (params.origin) list.push(`${alias}.` + sql`origin_state = ${params.origin}`.text);
+    return list.length > 0 ? list.join("\n        AND ") : "TRUE";
+  };
   const offset = (params.page - 1) * inboxPageSize;
 
   const text =
@@ -317,10 +321,15 @@ export function demandQuery(params: OperatorDemandQuery): SqlStatement {
       ) AS ord
       FROM grouped g
       WHERE ` +
-    (filters.length > 0 ? filters.join("\n        AND ") : "TRUE") +
+    filtersOn("g") +
     `
     )
     SELECT (SELECT count(*) FROM ordered) AS total,
+      (SELECT COALESCE(sum(no_match), 0) FROM ordered) AS no_match_total,
+      (SELECT COALESCE(sum(offered_no_booking), 0) FROM ordered) AS offered_no_booking_total,
+      (SELECT count(DISTINCT a.carrier_key) FROM asks a WHERE ` +
+    filtersOn("a") +
+    `) AS carriers_total,
       COALESCE((SELECT json_agg(r ORDER BY r.ord) FROM (
         SELECT p.ord, p.origin_state, p.destination_state, p.equipment, p.searches, p.no_match, p.offered_no_booking,
           p.this_week, p.previous_week, p.carriers
@@ -383,7 +392,13 @@ const demandRow = z.object({
 });
 
 // Twin returns count(*) and sum(int) as strings and the json column already parsed.
-export const demandResult = z.object({ total: count, rows: z.array(demandRow) });
+export const demandResult = z.object({
+  total: count,
+  no_match_total: count,
+  offered_no_booking_total: count,
+  carriers_total: count,
+  rows: z.array(demandRow),
+});
 
 const toDemandLane = (row: z.output<typeof demandRow>): DemandLane => ({
   originState: row.origin_state,
@@ -454,7 +469,14 @@ export function operatorNetworkRoutes(deps: OperatorNetworkDeps): FastifyPluginA
         try {
           const [row] = await deps.twin.query(demandQuery(params), demandResult);
           if (!row) throw new Error("demand query returned no row");
-          return { status: "ok" as const, rows: row.rows.map(toDemandLane), total: row.total, page: params.page, pageSize: inboxPageSize };
+          return {
+            status: "ok" as const,
+            rows: row.rows.map(toDemandLane),
+            total: row.total,
+            page: params.page,
+            pageSize: inboxPageSize,
+            totals: { noMatch: row.no_match_total, offeredNoBooking: row.offered_no_booking_total, carriers: row.carriers_total },
+          };
         } catch (error) {
           request.log.warn({ err: error }, "operator demand unavailable");
           return reply.code(503).send({ status: "service_unavailable", message: "The demand data is unavailable right now. Retry shortly." });

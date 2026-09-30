@@ -264,6 +264,9 @@ describe("GET /v1/operator/network", () => {
 // Radar rows as Twin nests them: sums and counts as strings, like int8.
 const demandRow = {
   total: "2",
+  no_match_total: "4",
+  offered_no_booking_total: "3",
+  carriers_total: "3",
   rows: [
     {
       ord: 1,
@@ -319,7 +322,7 @@ describe("GET /v1/operator/demand", () => {
     expect(res.statusCode).toBe(200);
     expect(statements).toHaveLength(1);
     const body = operatorDemandResponse.parse(res.json());
-    expect(body).toMatchObject({ status: "ok", total: 2, page: 1, pageSize: 25 });
+    expect(body).toMatchObject({ status: "ok", total: 2, page: 1, pageSize: 25, totals: { noMatch: 4, offeredNoBooking: 3, carriers: 3 } });
     expect(body.rows[0]).toEqual({
       originState: "TX",
       destinationState: null,
@@ -372,6 +375,8 @@ describe("GET /v1/operator/demand", () => {
   it("renders the equipment and origin filters as escaped SQL", () => {
     const text = demandQuery(operatorDemandQuery.parse({ equipment: ["reefer", "dry van"], origin: "tx" })).text;
     expect(text).toContain("WHERE g.equipment IN (E'REEFER', E'DRY_VAN')");
+    // The carriers total counts asks under the same filters, not the page.
+    expect(text).toContain("FROM asks a WHERE a.equipment IN (E'REEFER', E'DRY_VAN')");
     expect(text).toContain("AND g.origin_state = E'TX'");
   });
 
