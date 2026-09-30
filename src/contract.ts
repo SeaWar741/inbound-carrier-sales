@@ -338,6 +338,9 @@ const wallOffer = z.object({
   createdAt: z.iso.datetime(),
 });
 
+// One negotiation round; wallOffer keeps only the latest round per load.
+const wallRound = wallOffer.pick({ loadId: true, round: true, carrierAsk: true, decision: true, rateToSay: true, createdAt: true });
+
 const wallHold = z.object({
   holdId: z.string(),
   loadId: z.string(),
@@ -383,6 +386,7 @@ export const wallCall = z.object({
   riskReason: z.string().nullable(),
   // Oldest first, the latest round of each load.
   offers: z.array(wallOffer),
+  rounds: z.array(wallRound),
   hold: wallHold.nullable(),
   // Oldest first, the last ones of the call only.
   events: z.array(wallEvent),
