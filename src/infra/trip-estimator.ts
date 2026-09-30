@@ -1,0 +1,117 @@
+import { readFileSync } from "node:fs";
+import type { Config } from "../config.ts";
+import { dieselCacheMs } from "../constants.ts";
+import { estimateTrip, laneDieselPerGal, type TripEstimate } from "../domain/trip-estimate.ts";
+import { EiaClient } from "./eia-client.ts";
+import { OrsClient, type LngLat, type OrsRoute } from "./ors-client.ts";
+
+type Log = { warn: (details: object, message: string) => void };
+
+export type TripEndpoint = { zip: string; state: string };
+export type TripRequest = {
+  origin: TripEndpoint;
+  destination: TripEndpoint;
+  miles: number;
+  pickupAt: Date;
+  deliveryAt: Date;
+  rate: number;
+};
+
+// Same table the control tower draws with, so the estimate and the map agree on where a ZIP3 is.
+const defaultCentroidsUrl = new URL("../../control-tower/lib/zip3-centroids.json", import.meta.url);
+
+export function readZip3Centroids(url: URL = defaultCentroidsUrl): Map<string, LngLat> {
+  const raw = JSON.parse(readFileSync(url, "utf8")) as Record<string, [number, number]>;
+  return new Map(Object.entries(raw));
+}
+
+export type TripEstimatorOptions = {
+  eia?: EiaClient;
+  ors?: OrsClient;
+  centroids: ReadonlyMap<string, LngLat>;
+  now?: () => number;
+};
+
+// Adds cost and legal time to a load without ever failing the tool call around it: any vendor error,
+// timeout or unknown ZIP3 answers null and the agent pitches the load without an estimate.
+export class TripEstimator {
+  readonly #eia: EiaClient | undefined;
+  readonly #ors: OrsClient | undefined;
+  readonly #centroids: ReadonlyMap<string, LngLat>;
+  readonly #now: () => number;
+  // No expiry: roads do not change between calls, and the key space is bounded by the board's lanes
+  // (at most about 909). Promises are cached so parallel estimates on one lane share a request.
+  readonly #routes = new Map<string, Promise<OrsRoute>>();
+  #diesel: { prices: Promise<Map<string, number>>; fetchedAt: number } | undefined;
+
+  constructor(options: TripEstimatorOptions) {
+    this.#eia = options.eia;
+    this.#ors = options.ors;
+    this.#centroids = options.centroids;
+    this.#now = options.now ?? Date.now;
+  }
+
+  static fromConfig(config: Pick<Config, "EIA_API_KEY" | "ORS_API_KEY">, centroids = readZip3Centroids()): TripEstimator {
+    const { EIA_API_KEY: eiaKey, ORS_API_KEY: orsKey } = config;
+    if (!eiaKey || !orsKey) return new TripEstimator({ centroids });
+    return new TripEstimator({ eia: new EiaClient({ apiKey: eiaKey }), ors: new OrsClient({ apiKey: orsKey }), centroids });
+  }
+
+  async estimate(trip: TripRequest, log: Log): Promise<TripEstimate | null> {
+    if (!this.#eia || !this.#ors) return null;
+    const originZip3 = trip.origin.zip.slice(0, 3);
+    const destinationZip3 = trip.destination.zip.slice(0, 3);
+    const from = this.#centroids.get(originZip3);
+    const to = this.#centroids.get(destinationZip3);
+    if (!from || !to) {
+      log.warn({ originZip3, destinationZip3 }, "trip estimate skipped: unknown ZIP3");
+      return null;
+    }
+    try {
+      const [route, prices] = await Promise.all([
+        this.#route(this.#ors, `${originZip3}-${destinationZip3}`, from, to),
+        this.#dieselPrices(this.#eia),
+      ]);
+      const dieselPerGal = laneDieselPerGal(prices, trip.origin.state, trip.destination.state);
+      if (dieselPerGal === undefined) {
+        log.warn({ origin: trip.origin.state, destination: trip.destination.state }, "trip estimate skipped: no diesel price");
+        return null;
+      }
+      return estimateTrip({
+        miles: trip.miles,
+        rate: trip.rate,
+        pickupAt: trip.pickupAt,
+        deliveryAt: trip.deliveryAt,
+        avgMph: route.distanceMi / (route.durationS / 3600),
+        tollShare: route.tollShare,
+        dieselPerGal,
+      });
+    } catch (error) {
+      log.warn({ err: error }, "trip estimate unavailable");
+      return null;
+    }
+  }
+
+  #route(ors: OrsClient, lane: string, from: LngLat, to: LngLat): Promise<OrsRoute> {
+    let route = this.#routes.get(lane);
+    if (!route) {
+      route = ors.route(from, to);
+      // A failed lookup is not cached, so the next call on the lane tries again.
+      route.catch(() => this.#routes.delete(lane));
+      this.#routes.set(lane, route);
+    }
+    return route;
+  }
+
+  #dieselPrices(eia: EiaClient): Promise<Map<string, number>> {
+    const now = this.#now();
+    if (!this.#diesel || now - this.#diesel.fetchedAt >= dieselCacheMs) {
+      const entry = { prices: eia.latestDieselPrices(), fetchedAt: now };
+      entry.prices.catch(() => {
+        if (this.#diesel === entry) this.#diesel = undefined;
+      });
+      this.#diesel = entry;
+    }
+    return this.#diesel.prices;
+  }
+}

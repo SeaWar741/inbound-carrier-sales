@@ -21,8 +21,10 @@ export const tmsAttemptDeadlineMs = 2_000;
 export const tmsMaxAttempts = 3;
 export const tmsBackoffBaseMs = 150;
 // Budget for one TMS command including its retries, not for a whole tool call. Worst cases per call:
-// search = Twin 2 s + hold check 2 s + LOAD_QUERY 5 s + LOAD_GET 5 s (details in parallel) = 14 s;
-// offers = Twin 2 s + LOAD_GET 5 s + Twin 2 s = 9 s; holds = Twin 2 s x 2 + LOAD_GET 5 s + Twin 2 s x 2 = 13 s;
+// search = Twin 2 s + hold check 2 s + LOAD_QUERY 5 s + LOAD_GET 5 s (details in parallel)
+//   + trip estimate 4.5 s (the 3 pitched loads in parallel, EIA and ORS each bounded by tripVendorTimeoutMs) = 18.5 s;
+// offers = Twin 2 s + LOAD_GET 5 s + Twin 2 s = 9 s;
+// holds = Twin 2 s x 2 + LOAD_GET 5 s + trip estimate 4.5 s + Twin 2 s x 2 = 17.5 s;
 // confirm = Twin 2 s x 2 + LOAD_BOOK 5 s + Twin 2 s = 11 s.
 export const tmsTotalBudgetMs = 5_000;
 
@@ -54,3 +56,22 @@ export const inboxPageSize = 25;
 export const dashboardLoadsLimit = 500;
 // A carrier's timeline shows its recent calls, not its full history.
 export const carrierCallsLimit = 50;
+
+// Trip estimate. Class 8 tractor-trailers average 6.3 mpg (AFDC data/10310, from FHWA VM-1 2024).
+export const truckMpg = 6.3;
+// Ohio Turnpike Class 5 E-ZPass, 2026 schedule, per tolled mile. PA and Indiana charge more, so this is
+// a floor. ATRI's 4.3 cents is averaged over all miles, tolled or not, and would undercount a tolled lane.
+export const tollUsdPerMile = 0.226;
+// Hours of service, 49 CFR 395.3: 11 h driving per shift, a 30 min break once driving passes 8 h,
+// 10 h off duty between shifts. The 14 h window and the 60/70 h cycle are left out on purpose.
+export const hosDriveHoursPerShift = 11;
+export const hosBreakAfterHours = 8;
+export const hosBreakHours = 0.5;
+export const hosOffDutyHours = 10;
+// A team keeps the truck rolling about 22 h a day, the rest is fuel, inspections and swaps (FreightWaves).
+export const teamDriveHoursPerDay = 22;
+// EIA publishes weekly on Tuesday about 10:00 ET with Monday's prices; a week old price is the current one.
+export const dieselCacheMs = 7 * 24 * 60 * 60 * 1000;
+// 5 real calls from a laptop: ORS 254-1577 ms (p95 1.58 s, the first on a cold connection),
+// EIA 111-1331 ms (p95 1.33 s). About 3x the slower p95.
+export const tripVendorTimeoutMs = 4_500;

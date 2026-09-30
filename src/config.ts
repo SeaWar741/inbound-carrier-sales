@@ -24,6 +24,9 @@ const configSchema = z
     OTP_DEMO_PHONE: z.string().regex(/^\+[1-9]\d{7,14}$/, "E.164").optional(),
     // Simulated carriers cannot read an inbox, so local runs against the fake TMS may pin the code.
     OTP_FIXED_CODE: z.string().regex(/^\d{6}$/).optional(),
+    // Trip estimates need both; without either one the estimator answers null and calls go on without them.
+    EIA_API_KEY: z.string().min(1).optional(),
+    ORS_API_KEY: z.string().min(1).optional(),
   })
   .refine((c) => c.AGENT_API_KEY !== c.OPERATOR_API_KEY, {
     message: "AGENT_API_KEY and OPERATOR_API_KEY must differ",
