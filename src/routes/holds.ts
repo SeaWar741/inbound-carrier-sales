@@ -43,6 +43,11 @@ const createMessages = {
   invalid: "I need the load number and the agreed rate in whole dollars to hold it.",
 } as const;
 
+// Only called past the late tolerance, so the rounded hours are always plural and never a decimal on the phone.
+const windowTooTight = (lateHours: number) =>
+  `I can't hold that one: even running team it would deliver about ${Math.round(lateHours)} hours after the appointment. ` +
+  "A rep can check whether the receiver will move it.";
+
 const noHold = (status: Exclude<CreateHoldResponse["status"], "ok">, message: string): CreateHoldResponse => ({
   status,
   message,
@@ -191,6 +196,11 @@ export function holdRoutes(deps: HoldRouteDeps): FastifyPluginAsync {
 
         // The trip at the agreed rate goes in with the hold; without an estimate the hold is placed all the same.
         const estimate = await estimateLoadTrip(deps.trips, load, agreedRate, request.log);
+        // A load no crew can deliver inside the appointment grace is never held, so nothing is inserted.
+        if (estimate?.feasibility === "impossible") {
+          return noHold("window_too_tight", windowTooTight(estimate.lateHours));
+        }
+        if (!estimate) request.log.warn({ loadId }, "hold placed without a trip estimate");
         const trip = estimate ? JSON.stringify(tripSnapshotFor(agreedRate, estimate)) : null;
         try {
           const [hold] = await deps.twin.query(

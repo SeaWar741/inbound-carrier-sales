@@ -21,17 +21,21 @@ const messages = {
   invalid: "I need the load number to work out that trip.",
 } as const;
 
-const feasibilityNote = {
-  solo: "",
-  team: " That delivery window needs a team.",
-  impossible: " That delivery window is too tight to make legally.",
-} as const;
+// Impossible is only past the late tolerance, so the rounded hours are always plural.
+function feasibilityNote(trip: TripSnapshot): string {
+  if (trip.feasibility === "solo") return "";
+  if (trip.feasibility === "team") return " That delivery window needs a team.";
+  return (
+    " That delivery window is too tight to make legally: it would land about " +
+    `${Math.round(trip.lateHours)} hours after the delivery appointment, even running team.`
+  );
+}
 
 function messageFor(trip: TripSnapshot): string {
   const tolls = trip.tollsUsd < tollsSpokenFloorUsd ? "next to nothing in tolls" : `about ${dollars(trip.tollsUsd)} in tolls`;
   return (
     `At ${dollars(trip.rate)}, after about ${dollars(trip.dieselUsd)} in diesel and ${tolls}, ` +
-    `you'd keep about ${dollars(trip.carrierNetUsd)}.${feasibilityNote[trip.feasibility]}`
+    `you'd keep about ${dollars(trip.carrierNetUsd)}.${feasibilityNote(trip)}`
   );
 }
 

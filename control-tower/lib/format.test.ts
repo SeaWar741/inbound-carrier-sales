@@ -41,10 +41,11 @@ describe("toolLabel", () => {
 });
 
 describe("feasibilityBadge", () => {
-  it("badges team and impossible trips, never solo", () => {
-    assert.equal(feasibilityBadge("solo"), null);
-    assert.equal(feasibilityBadge("team")?.text, "Team");
-    assert.equal(feasibilityBadge("impossible")?.text, "Can't make it");
+  it("badges team and impossible trips, never solo, and says how late an impossible one lands", () => {
+    assert.equal(feasibilityBadge({ feasibility: "solo", lateHours: 0 }), null);
+    assert.deepEqual(feasibilityBadge({ feasibility: "team", lateHours: 1.5 }), { text: "Needs team", tone: "bg-tone-amber-soft text-tone-amber" });
+    assert.deepEqual(feasibilityBadge({ feasibility: "impossible", lateHours: 7.6 }), { text: "Late ~8h", tone: "bg-tone-red-soft text-tone-red" });
+    assert.equal(feasibilityBadge({ feasibility: "impossible", lateHours: 2.4 })?.text, "Late ~2h");
   });
 });
 

@@ -46,6 +46,10 @@ const tripSnapshot = z.object({
   feasibility: z.enum(feasibilities),
   legalEtaAt: z.iso.datetime(),
   legalHours: z.number(),
+  // Hours past the delivery appointment the chosen crew lands; snapshots stored before it read as on time.
+  lateHours: z.number().default(0),
+  // The TMS delivery appointment; null on snapshots stored before it was recorded.
+  deliveryAt: z.iso.datetime().nullable().default(null),
   netPerHour: z.number().int(),
   dieselPerGal: z.number(),
   // 0..1: the share of the route on toll roads.

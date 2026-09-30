@@ -104,6 +104,8 @@ export function LoadPanel({
   }
 
   const pickup = trip?.pickupAt ? formatDateTime(trip.pickupAt) : lane ? formatPickup(lane.pickupAt) : null;
+  // The hold's legal (HOS) ETA beats the next trip's flat-speed one when this load's hold has an estimate.
+  const eta = standingHold?.trip?.legalEtaAt ?? trip?.etaAt ?? null;
 
   return (
     <>
@@ -124,9 +126,9 @@ export function LoadPanel({
                 <span className="tabular">{pickup}</span>
               </Fact>
             )}
-            {trip?.etaAt && (
+            {eta && (
               <Fact icon={LuFlag} label="ETA">
-                <span className="tabular">{formatDateTime(trip.etaAt)}</span>
+                <span className="tabular">{formatDateTime(eta)}</span>
               </Fact>
             )}
           </dl>

@@ -210,6 +210,8 @@ describe("toWallCall", () => {
       ],
       hold: { status: "booked", agreedRate: 2300, maxBuy: 2500, bookingRef: "BR-1", lane, trip, createdAt: "2026-09-29T15:09:00.000Z" },
     });
+    // A snapshot stored before lateness and the appointment were recorded reads as on time with none.
+    expect(booked?.hold?.trip).toMatchObject({ lateHours: 0, deliveryAt: null });
     expect(booked?.events.map((e) => e.tool)).toEqual(["verify_carrier", "create_hold"]);
     expect(booked?.interventions).toEqual([
       { kind: "authorization", loadId: "LD00881", amountUsd: 50, message: "Authorize +$50", createdAt: "2026-09-29T15:07:00.000Z" },

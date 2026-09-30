@@ -95,10 +95,33 @@ describe("estimateTrip", () => {
     expect(estimate.netPerHour).toBe(Math.round(1955 / ((20 * 24) / 22)));
   });
 
-  it("is impossible when not even a team fits, and still gives the team ETA", () => {
-    const estimate = estimateTrip({ ...base, deliveryAt: new Date("2026-10-02T06:00:00Z") });
+  it("is impossible when not even a team lands within 2 h of the appointment, and gives the team ETA and lateness", () => {
+    const deliveryAt = new Date("2026-10-02T06:00:00Z");
+    const estimate = estimateTrip({ ...base, deliveryAt });
     expect(estimate.feasibility).toBe("impossible");
     expect(estimate.legalEtaAt).toEqual(new Date("2026-10-02T09:49:05.454Z"));
+    expect(estimate.deliveryAt).toEqual(deliveryAt);
+    // Team ETA 09:49 against a 06:00 appointment.
+    expect(estimate.lateHours).toBe(3.8);
+  });
+
+  it("is on time with no lateness when the crew lands before the appointment", () => {
+    expect(estimateTrip({ ...base, deliveryAt: new Date("2026-10-03T12:00:00Z") }).lateHours).toBe(0);
+  });
+
+  it("keeps the crew exactly 2 h late, and not 2.1 h late", () => {
+    // Solo needs 31 h, landing 2026-10-02T19:00Z; team needs 21.8 h, landing 09:49Z.
+    const soloTwoLate = estimateTrip({ ...base, deliveryAt: new Date("2026-10-02T17:00:00Z") });
+    expect(soloTwoLate).toMatchObject({ feasibility: "solo", lateHours: 2 });
+    const soloTooLate = estimateTrip({ ...base, deliveryAt: new Date("2026-10-02T16:54:00Z") });
+    expect(soloTooLate).toMatchObject({ feasibility: "team", lateHours: 0 });
+
+    // 1,100 mi = 22 h of driving: a team needs exactly 24 h, landing 2026-10-02T12:00Z.
+    const long = { ...base, miles: 1100 };
+    const teamTwoLate = estimateTrip({ ...long, deliveryAt: new Date("2026-10-02T10:00:00Z") });
+    expect(teamTwoLate).toMatchObject({ feasibility: "team", lateHours: 2 });
+    const teamTooLate = estimateTrip({ ...long, deliveryAt: new Date("2026-10-02T09:54:00Z") });
+    expect(teamTooLate).toMatchObject({ feasibility: "impossible", lateHours: 2.1 });
   });
 });
 

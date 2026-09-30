@@ -415,7 +415,9 @@ export function CarrierDetail({
   const dot = carrier?.dotNumber ?? latest?.dotNumber ?? null;
   // The numbers line never repeats what the name already says ("MC 135797" over "DOT 80806").
   const numbers = [mc && `MC ${mc}`, dot && `DOT ${dot}`].filter((part) => part && part !== name).join(" · ");
-  const eta = carrier?.nextTrip?.etaAt ?? null;
+  // The selected load's standing hold carries a legal (HOS) ETA; the carrier's next trip only a flat-speed one.
+  const selectedHold = selected?.hold && selected.hold.status !== "released" ? selected.hold : null;
+  const eta = selectedHold?.trip?.legalEtaAt ?? carrier?.nextTrip?.etaAt ?? null;
   const callsCount = carrier?.callsCount ?? calls.length;
   const loadsCount = carrier?.loadsCount ?? null;
 

@@ -3,6 +3,7 @@ import {
   hosBreakHours,
   hosDriveHoursPerShift,
   hosOffDutyHours,
+  lateToleranceHours,
   teamDriveHoursPerDay,
   tollUsdPerMile,
   truckMpg,
@@ -68,10 +69,14 @@ export type TripEstimate = {
   dieselUsd: number;
   tollsUsd: number;
   carrierNetUsd: number;
-  // Hours the chosen crew needs by law: solo when one driver fits the window, else a team.
+  // Hours the chosen crew needs by law: solo when one driver makes the appointment, else a team.
   legalHours: number;
   feasibility: Feasibility;
   legalEtaAt: Date;
+  // The TMS delivery appointment, echoed so the snapshot can show it next to the legal ETA.
+  deliveryAt: Date;
+  // How far past the appointment the chosen crew lands; 0 when on time.
+  lateHours: number;
   netPerHour: number;
   dieselPerGal: number;
   tollShare: number;
@@ -90,7 +95,9 @@ export function estimateTrip(input: TripEstimateInput): TripEstimate {
   const soloHours = soloLegalHours(driveHours);
   const teamHours = teamLegalHours(driveHours);
   const windowHours = (input.deliveryAt.getTime() - input.pickupAt.getTime()) / msPerHour;
-  const feasibility: Feasibility = soloHours <= windowHours ? "solo" : teamHours <= windowHours ? "team" : "impossible";
+  // A receiver still takes a truck inside the appointment grace, so a crew that lands within it makes the load.
+  const latestHours = windowHours + lateToleranceHours;
+  const feasibility: Feasibility = soloHours <= latestHours ? "solo" : teamHours <= latestHours ? "team" : "impossible";
   const crewHours = feasibility === "solo" ? soloHours : teamHours;
 
   const dieselUsd = Math.round((input.miles / truckMpg) * input.dieselPerGal);
@@ -104,6 +111,8 @@ export function estimateTrip(input: TripEstimateInput): TripEstimate {
     legalHours: tenths(crewHours),
     feasibility,
     legalEtaAt: new Date(input.pickupAt.getTime() + crewHours * msPerHour),
+    deliveryAt: input.deliveryAt,
+    lateHours: tenths(Math.max(0, crewHours - windowHours)),
     netPerHour: crewHours > 0 ? Math.round(carrierNetUsd / crewHours) : 0,
     dieselPerGal: roundTo(input.dieselPerGal, 3),
     tollShare: roundTo(input.tollShare, 4),

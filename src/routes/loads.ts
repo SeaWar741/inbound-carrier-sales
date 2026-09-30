@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
-import { loadsPitchedPerSearch } from "../constants.ts";
+import { loadsPitchedPerSearch, searchCandidateFactor } from "../constants.ts";
 import {
   searchLoadsBody,
   searchLoadsResponse,
@@ -22,6 +22,7 @@ export type LoadRouteDeps = { tms: Pick<TmsClient, "queryLoads" | "getLoad">; tw
 const messages = {
   notVerified: "I need to verify your carrier before I can go over loads with you.",
   noLoads: "I don't have any open loads on that lane right now.",
+  windowsTooTight: "The loads I have on that lane right now have delivery windows too tight to run legally.",
   tmsUnavailable: "I can't reach our load board right now. Please give me a moment and try again.",
   serviceUnavailable: "I'm having trouble on my end right now. Please give me a moment and try again.",
   invalid: "I need at least a pickup city, state or zip to search for loads.",
@@ -113,7 +114,10 @@ export function loadRoutes(deps: LoadRouteDeps): FastifyPluginAsync {
           const summaries = await deps.tms.queryLoads(toFilters(request.body));
           const open = summaries.filter((load) => isOpen(load.status));
           const heldElsewhere = await loadsHeldByOtherCalls(deps.twin, request.body.callId, open.map((load) => load.loadId));
-          const shortlist = open.filter((load) => !heldElsewhere.has(load.loadId)).slice(0, loadsPitchedPerSearch);
+          // More candidates than the pitch, so loads nobody can deliver on time can be dropped without thinning it.
+          const shortlist = open
+            .filter((load) => !heldElsewhere.has(load.loadId))
+            .slice(0, loadsPitchedPerSearch * searchCandidateFactor);
           // A load that vanished, changed status or could not be read since the query is dropped, not pitched.
           const details = await Promise.all(
             shortlist.map((load) =>
@@ -127,15 +131,21 @@ export function loadRoutes(deps: LoadRouteDeps): FastifyPluginAsync {
               }),
             ),
           );
-          const pitched = details.filter((load): load is LoadDetail => typeof load === "object" && isOpen(load.status));
-          // At the posted rate, since nothing is negotiated yet; a failed estimate only leaves feasibility null.
-          const estimates = await Promise.all(pitched.map((load) => estimateLoadTrip(deps.trips, load, load.rate, request.log)));
-          const loads = pitched.map((load, i) => toPitchedLoad(load, estimates[i]?.feasibility ?? null));
+          const candidates = details.filter((load): load is LoadDetail => typeof load === "object" && isOpen(load.status));
+          // At the posted rate, since nothing is negotiated yet. A load no crew can deliver on time is never
+          // pitched; a failed estimate keeps the load with feasibility null, so a vendor outage never empties the board.
+          const estimates = await Promise.all(candidates.map((load) => estimateLoadTrip(deps.trips, load, load.rate, request.log)));
+          const deliverable = candidates
+            .map((load, i) => toPitchedLoad(load, estimates[i]?.feasibility ?? null))
+            .filter((load) => load.feasibility !== "impossible");
+          const loads = deliverable.slice(0, loadsPitchedPerSearch);
           const noneRead = details.every((load) => typeof load !== "object");
           if (noneRead && details.includes("unavailable")) {
             return noLoads("tms_unavailable", messages.tmsUnavailable);
           }
-          if (loads.length === 0) return noLoads("no_loads", messages.noLoads);
+          if (loads.length === 0) {
+            return noLoads("no_loads", candidates.length > 0 ? messages.windowsTooTight : messages.noLoads);
+          }
           return { status: "ok" as const, message: found(loads.length), loads };
         } catch (error) {
           request.log.warn({ err: error }, "load search unavailable");

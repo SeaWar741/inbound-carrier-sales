@@ -283,6 +283,8 @@ describe("hold routes", () => {
         legalHours: 30.9,
         feasibility: "solo",
         legalEtaAt: new Date("2026-10-05T02:07:00.000Z"),
+        deliveryAt: new Date("2026-10-05T04:00:00.000Z"),
+        lateHours: 0,
         netPerHour: 38,
         dieselPerGal: 6.944,
         tollShare: 0.2074,
@@ -299,11 +301,41 @@ describe("hold routes", () => {
         feasibility: "solo",
         legalEtaAt: "2026-10-05T02:07:00.000Z",
         legalHours: 30.9,
+        lateHours: 0,
+        deliveryAt: "2026-10-05T04:00:00.000Z",
         netPerHour: 38,
         dieselPerGal: 6.944,
         tollShare: 0.2074,
       });
       expect(res.body).not.toMatch(/diesel|1160/i);
+    });
+
+    it("refuses a load no crew can deliver on time and inserts nothing", async () => {
+      trips.estimate.mockResolvedValue({
+        dieselUsd: 1100,
+        tollsUsd: 40,
+        carrierNetUsd: 1160,
+        legalHours: 21.8,
+        feasibility: "impossible",
+        legalEtaAt: new Date("2026-10-05T12:10:00.000Z"),
+        deliveryAt: new Date("2026-10-05T04:00:00.000Z"),
+        lateHours: 8.2,
+        netPerHour: 53,
+        dieselPerGal: 6.944,
+        tollShare: 0.2074,
+      } satisfies TripEstimate);
+      accept("call-a", "LD00881", 2300);
+      const res = await createHold({ callId: "call-a", loadId: "LD00881", agreedRate: 2300 });
+      expect(res.json()).toEqual({
+        status: "window_too_tight",
+        message:
+          "I can't hold that one: even running team it would deliver about 8 hours after the appointment. " +
+          "A rep can check whether the receiver will move it.",
+        holdId: null,
+        holdStatus: null,
+      });
+      expect(state.holds).toEqual([]);
+      expect(bookRequests()).toEqual([]);
     });
 
     it("places the hold with a NULL trip when there is no estimate", async () => {

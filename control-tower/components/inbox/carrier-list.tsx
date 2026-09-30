@@ -26,7 +26,7 @@ function StatusIcon({ carrier }: { carrier: TowerCarrier }) {
 function FeasibilityBadge({ carrier }: { carrier: TowerCarrier }) {
   const hold = carrier.latestCall.hold;
   if (!hold?.trip || hold.status === "released") return null;
-  const badge = feasibilityBadge(hold.trip.feasibility);
+  const badge = feasibilityBadge(hold.trip);
   if (badge === null) return null;
   const Icon = hold.trip.feasibility === "team" ? LuUsers : LuClockAlert;
   return (

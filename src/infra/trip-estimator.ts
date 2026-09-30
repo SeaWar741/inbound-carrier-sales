@@ -146,6 +146,8 @@ export function tripSnapshotFor(rate: number, estimate: TripEstimate): TripSnaps
     feasibility: estimate.feasibility,
     legalEtaAt: estimate.legalEtaAt.toISOString(),
     legalHours: estimate.legalHours,
+    lateHours: estimate.lateHours,
+    deliveryAt: estimate.deliveryAt.toISOString(),
     netPerHour: estimate.netPerHour,
     dieselPerGal: estimate.dieselPerGal,
     tollShare: estimate.tollShare,

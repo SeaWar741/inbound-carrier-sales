@@ -265,8 +265,8 @@ describe("POST /v1/loads/search", () => {
     expect(fake.requests.length).toBe(before);
   });
 
-  it("keeps only OPEN loads, caps the pitch at 3, and fetches details only for those", async () => {
-    const statuses = ["BOOKED", "OPEN", "COVERED", "OPEN", "OPEN", "OPEN", "open"];
+  it("keeps only OPEN loads, reads up to 6 candidates, and caps the pitch at 3", async () => {
+    const statuses = ["BOOKED", "OPEN", "COVERED", "OPEN", "OPEN", "OPEN", "open", "OPEN", "OPEN", "OPEN", "OPEN"];
     const tms = {
       queryLoads: vi.fn(async () => statuses.map((status, i) => summary(`LD${i}`, status))),
       getLoad: vi.fn(async (loadId: string) => detail(loadId, loadId === "LD3" ? "BOOKED" : "OPEN")),
@@ -274,10 +274,58 @@ describe("POST /v1/loads/search", () => {
     const target = serverWith(tms);
     const res = await search({ callId: "call-ok", originZip: "31401", equipmentType: "DRY_VAN" }, target);
     await target.close();
-    expect(tms.getLoad.mock.calls.map(([id]) => id)).toEqual(["LD1", "LD3", "LD4"]);
+    expect(tms.getLoad.mock.calls.map(([id]) => id)).toEqual(["LD1", "LD3", "LD4", "LD5", "LD7", "LD8"]);
     // LD3 changed status between query and detail, so it is dropped rather than pitched.
-    expect(res.json().loads.map((l: { loadId: string }) => l.loadId)).toEqual(["LD1", "LD4"]);
+    expect(res.json().loads.map((l: { loadId: string }) => l.loadId)).toEqual(["LD1", "LD4", "LD5"]);
     expectNoMaxBuy(res.body);
+  });
+
+  it("never pitches a load no crew can deliver on time, and keeps one without an estimate", async () => {
+    const ids = ["LD1", "LD2", "LD3", "LD4", "LD5", "LD6"];
+    const tms = {
+      queryLoads: vi.fn(async () => ids.map((id) => summary(id, "OPEN"))),
+      getLoad: vi.fn(async (loadId: string) => detail(loadId, "OPEN")),
+    };
+    const outcomes: Record<string, TripEstimate["feasibility"] | null> = {
+      LD1: "impossible",
+      LD2: null,
+      LD3: "impossible",
+      LD4: "team",
+      LD5: "solo",
+      LD6: "solo",
+    };
+    // Estimates start in candidate order, so the nth call is the nth load.
+    let started = 0;
+    const estimate = vi.fn<TripEstimates["estimate"]>(async () => {
+      const feasibility = outcomes[ids[started++] ?? ""] ?? null;
+      return feasibility === null ? null : ({ feasibility } as TripEstimate);
+    });
+    const target = serverWith(tms, { estimate });
+    const res = await search({ callId: "call-ok", originState: "GA" }, target);
+    await target.close();
+    expect(res.json().status).toBe("ok");
+    expect(res.json().loads.map((l: { loadId: string; feasibility: string | null }) => [l.loadId, l.feasibility])).toEqual([
+      ["LD2", null],
+      ["LD4", "team"],
+      ["LD5", "solo"],
+    ]);
+    expect(estimate).toHaveBeenCalledTimes(6);
+  });
+
+  it("answers no_loads when every candidate's delivery window is too tight", async () => {
+    const tms = {
+      queryLoads: vi.fn(async () => ["LD1", "LD2"].map((id) => summary(id, "OPEN"))),
+      getLoad: vi.fn(async (loadId: string) => detail(loadId, "OPEN")),
+    };
+    const estimate = vi.fn<TripEstimates["estimate"]>(async () => ({ feasibility: "impossible" }) as TripEstimate);
+    const target = serverWith(tms, { estimate });
+    const res = await search({ callId: "call-ok", originState: "GA" }, target);
+    await target.close();
+    expect(res.json()).toEqual({
+      status: "no_loads",
+      message: "The loads I have on that lane right now have delivery windows too tight to run legally.",
+      loads: [],
+    });
   });
 
   it("drops a load the TMS no longer finds and answers no_loads when none are open", async () => {
@@ -305,7 +353,7 @@ describe("POST /v1/loads/search", () => {
     await target.close();
     // The caller's own hold stays visible; only another call's hold hides a load.
     expect(res.json().loads.map((l: { loadId: string }) => l.loadId)).toEqual(["LD2", "LD3", "LD4"]);
-    expect(tms.getLoad.mock.calls.map(([id]) => id)).toEqual(["LD2", "LD3", "LD4"]);
+    expect(tms.getLoad.mock.calls.map(([id]) => id)).toEqual(["LD2", "LD3", "LD4", "LD5"]);
     const holdQueries = sqlLog.filter((text) => text.includes("FROM holds"));
     expect(holdQueries).toEqual([
       "SELECT load_id FROM holds WHERE load_id IN (E'LD1', E'LD2', E'LD3', E'LD4', E'LD5') AND status <> 'released' AND call_id <> E'call-ok'",

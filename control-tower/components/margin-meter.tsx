@@ -69,7 +69,7 @@ function Line({
 // What the carrier keeps on the held load once diesel and tolls are paid, and when it can legally
 // deliver. Estimates snapshotted when the hold was placed, laid out on the receipt's grid.
 function TripBlock({ trip, miles }: { trip: TripSnapshot; miles: number | null }) {
-  const badge = feasibilityBadge(trip.feasibility);
+  const badge = feasibilityBadge(trip);
   return (
     <div className="flex flex-col gap-2 border-t border-line pt-3">
       <h4 className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-fg-faint">
@@ -86,6 +86,7 @@ function TripBlock({ trip, miles }: { trip: TripSnapshot; miles: number | null }
           tone={trip.carrierNetUsd < 0 ? "text-risk" : "text-fg"}
           note={miles ? formatPerMile(trip.carrierNetUsd / miles) : null}
         />
+        {trip.deliveryAt && <Line label="Delivery appt" hint="The delivery appointment in the TMS" value={formatDateTime(trip.deliveryAt)} />}
         <Line label="Legal ETA" hint="Earliest delivery within hours-of-service rules" value={formatDateTime(trip.legalEtaAt)} />
         {/* Its own row: next to the label the narrow panel cut it off. */}
         {badge && (

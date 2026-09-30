@@ -1,4 +1,4 @@
-import type { CarrierStage, Feasibility, TowerCall } from "./contracts";
+import type { CarrierStage, TowerCall, TripSnapshot } from "./contracts";
 import type { LoadOutcome } from "./pricing";
 
 // Display helpers for money, durations and times. The desk runs on Chicago time.
@@ -43,15 +43,15 @@ export function formatHours(hours: number): string {
   return `${hours.toFixed(1)} h`;
 }
 
-// A trip the carrier cannot drive solo inside the load's window; solo needs no badge.
-export function feasibilityBadge(feasibility: Feasibility): { text: string; tone: string } | null {
-  switch (feasibility) {
+// A trip one driver cannot make on time; solo needs no badge. Impossible says how late even a team lands.
+export function feasibilityBadge(trip: Pick<TripSnapshot, "feasibility" | "lateHours">): { text: string; tone: string } | null {
+  switch (trip.feasibility) {
     case "solo":
       return null;
     case "team":
-      return { text: "Team", tone: "bg-tone-amber-soft text-tone-amber" };
+      return { text: "Needs team", tone: "bg-tone-amber-soft text-tone-amber" };
     case "impossible":
-      return { text: "Can't make it", tone: "bg-tone-red-soft text-tone-red" };
+      return { text: `Late ~${Math.round(trip.lateHours)}h`, tone: "bg-tone-red-soft text-tone-red" };
   }
 }
 

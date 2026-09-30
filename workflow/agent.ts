@@ -62,7 +62,7 @@ const tools: ToolSpec[] = [
   {
     name: "search_loads",
     exposedFields: ["status", "message", "loads"],
-    description: "Search open loads for the caller's lane and equipment. Only works after check_otp verified the caller. Each load carries feasibility: solo, team (the window needs a team driver), impossible (too tight to run legally) or null.",
+    description: "Search open loads for the caller's lane and equipment. Only works after check_otp verified the caller. Each load carries feasibility: solo, team (the delivery window needs a team driver) or null; loads no crew can deliver on time are never returned.",
     path: "/v1/loads/search",
     waitMessage: "Alright, let me see what I've got on that lane.",
     parameters: [

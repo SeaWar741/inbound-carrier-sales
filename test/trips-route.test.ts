@@ -58,6 +58,8 @@ const estimateAt = (rate: number, feasibility: TripEstimate["feasibility"] = "so
   legalHours: 97.4,
   feasibility,
   legalEtaAt: new Date("2026-10-07T20:37:00.000Z"),
+  deliveryAt: new Date("2026-10-06T16:13:00.000Z"),
+  lateHours: feasibility === "impossible" ? 7.6 : 0,
   netPerHour: 50,
   dieselPerGal: 6.944,
   tollShare: 0.2074,
@@ -155,7 +157,9 @@ describe("POST /v1/trips/estimate", () => {
     estimate.mockImplementation(async (trip) => estimateAt(trip.rate, "impossible"));
     const impossible = (await post({ callId: "call-ok", loadId: "LD00879" })).json();
     expect(impossible).toMatchObject({ status: "ok", feasibility: "impossible" });
-    expect(impossible.message).toMatch(/ That delivery window is too tight to make legally\.$/);
+    expect(impossible.message).toMatch(
+      / That delivery window is too tight to make legally: it would land about 8 hours after the delivery appointment, even running team\.$/,
+    );
   });
 
   it("refuses an unverified or unknown call without touching the TMS or the estimator", async () => {

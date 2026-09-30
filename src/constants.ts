@@ -22,7 +22,7 @@ export const tmsMaxAttempts = 3;
 export const tmsBackoffBaseMs = 150;
 // Budget for one TMS command including its retries, not for a whole tool call. Worst cases per call:
 // search = Twin 2 s + hold check 2 s + LOAD_QUERY 5 s + LOAD_GET 5 s (details in parallel)
-//   + trip estimate 4.5 s (the 3 pitched loads in parallel, EIA and ORS each bounded by tripVendorTimeoutMs) = 18.5 s;
+//   + trip estimate 4.5 s (every candidate load in parallel, EIA and ORS each bounded by tripVendorTimeoutMs) = 18.5 s;
 // offers = Twin 2 s + LOAD_GET 5 s + Twin 2 s = 9 s;
 // holds = Twin 2 s x 2 + LOAD_GET 5 s + trip estimate 4.5 s + Twin 2 s x 2 = 17.5 s;
 // confirm = Twin 2 s x 2 + LOAD_BOOK 5 s + Twin 2 s = 11 s.
@@ -70,6 +70,12 @@ export const hosBreakHours = 0.5;
 export const hosOffDutyHours = 10;
 // A team keeps the truck rolling about 22 h a day, the rest is fuel, inspections and swaps (FreightWaves).
 export const teamDriveHoursPerDay = 22;
+// Delivery appointment grace runs from 15 minutes to 2 hours in practice. The loose end is taken so a load
+// the receiver would still accept is not refused; past it the load is not pitched or held.
+export const lateToleranceHours = 2;
+// Search estimates this many times the pitched count, so dropping loads nobody can deliver on time
+// still leaves a full pitch when the board has them.
+export const searchCandidateFactor = 2;
 // EIA publishes weekly on Tuesday about 10:00 ET with Monday's prices; a week old price is the current one.
 export const dieselCacheMs = 7 * 24 * 60 * 60 * 1000;
 // 5 real calls from a laptop: ORS 254-1577 ms (p95 1.58 s, the first on a cold connection),
