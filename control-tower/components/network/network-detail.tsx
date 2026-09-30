@@ -112,7 +112,7 @@ export function NetworkDetail({ carrier, now, dateWindow }: { carrier: NetworkCa
                   <LuArrowRight size={12} className="shrink-0 text-fg-faint" aria-hidden />
                   <span className="font-medium text-fg">{lane.destinationState ?? "Any"}</span>
                   <span className="min-w-0 truncate text-fg-muted">· {lane.equipment ? equipmentLabel(lane.equipment) : "Any equipment"}</span>
-                  {lane.open && <Badge tone={growthStyle.pill}>Open on board</Badge>}
+                  {lane.open && <Badge tone={growthStyle.pill}>Open from {lane.originState}</Badge>}
                   <span className="tabular ml-auto shrink-0 text-fg-muted" title={`On ${lane.count} ${lane.count === 1 ? "call" : "calls"}`}>
                     {lane.count}×
                   </span>
