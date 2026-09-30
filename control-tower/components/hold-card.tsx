@@ -2,6 +2,7 @@
 
 import { LuArrowRight, LuCircleCheck, LuLock, LuTriangleAlert } from "react-icons/lu";
 import { useEffect, useRef, useState } from "react";
+import { Section } from "@/components/section";
 import type { ConfirmHoldResponse, ReleaseHoldResponse, TowerCall, WallLane } from "@/lib/contracts";
 import { carrierId, formatUsd } from "@/lib/format";
 
@@ -76,7 +77,8 @@ async function postHold(url: string, headers: Record<string, string>): Promise<C
   return body;
 }
 
-// The simulated handoff: the operator books or releases the load the agent held.
+// The simulated handoff: the operator books or releases the load the agent held. Rendered as a
+// section of the detail panel.
 export function HoldCard({ call, hold }: { call: TowerCall; hold: Hold }) {
   const [armed, setArmed] = useState(false);
   const [pending, setPending] = useState<"confirm" | "release" | null>(null);
@@ -141,46 +143,60 @@ export function HoldCard({ call, hold }: { call: TowerCall; hold: Hold }) {
     }
   };
 
-  return (
-    <div className="flex flex-col gap-2 px-3 py-3">
-      <div className="flex items-center justify-between">
-        <h3 className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-fg-faint">
-          <LuLock size={12} aria-hidden />
-          Hold
-        </h3>
-        <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium leading-none ${chip.tone}`}>{chip.text}</span>
-      </div>
+  const chipEl = <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium leading-none ${chip.tone}`}>{chip.text}</span>;
+  // While the hold waits on the desk the card is the action: the amount, the load, and the buttons.
+  const open = status === "held" || status === "confirming";
 
-      <dl className="divide-y divide-line">
-        <Row label="Carrier">
-          <span className="tabular">{carrierId(call)}</span>
-          {call.mcNumber && call.dotNumber && <span className="tabular text-fg-faint"> DOT {call.dotNumber}</span>}
-        </Row>
-        <Row label="Load">
-          <span className="tabular">{hold.loadId}</span>
-        </Row>
-        <Row label="Lane">{lane ? <LaneText lane={lane} /> : <span className="text-fg-faint">Not recorded</span>}</Row>
-        {lane && (
-          <>
-            <Row label="Pickup">
-              <span className="tabular">{formatPickup(lane.pickupAt)}</span>
-            </Row>
-            <Row label="Equipment">{equipmentLabel(lane.equipment)}</Row>
-            <Row label="Miles">
-              <span className="tabular">{lane.miles.toLocaleString("en-US")}</span>
-            </Row>
-          </>
-        )}
-        <Row label="Agreed rate">
-          <span className="tabular font-semibold">{formatUsd(hold.agreedRate)}</span>
-        </Row>
-        <Row label="Margin vs max buy">
-          <span className="tabular text-ok">{margin === null ? "-" : formatUsd(margin)}</span>
-        </Row>
-      </dl>
+  return (
+    <Section icon={LuLock} title="Hold" aside={chipEl}>
+      {open ? (
+        <div className="flex flex-col gap-1">
+          <span className="tabular text-2xl font-semibold text-fg">{formatUsd(hold.agreedRate)}</span>
+          <span className="min-w-0 truncate text-sm text-fg">
+            <span className="tabular font-medium">{hold.loadId}</span>
+            {lane && (
+              <>
+                <span className="text-fg-faint"> · </span>
+                <LaneText lane={lane} />
+              </>
+            )}
+          </span>
+          <span className="text-xs text-fg-muted">
+            {carrierId(call)} · margin vs max buy <span className="tabular text-ok">{margin === null ? "-" : formatUsd(margin)}</span>
+          </span>
+        </div>
+      ) : (
+        <dl className="divide-y divide-line">
+          <Row label="Carrier">
+            <span className="tabular">{carrierId(call)}</span>
+            {call.mcNumber && call.dotNumber && <span className="tabular text-fg-faint"> DOT {call.dotNumber}</span>}
+          </Row>
+          <Row label="Load">
+            <span className="tabular">{hold.loadId}</span>
+          </Row>
+          <Row label="Lane">{lane ? <LaneText lane={lane} /> : <span className="text-fg-faint">Not recorded</span>}</Row>
+          {lane && (
+            <>
+              <Row label="Pickup">
+                <span className="tabular">{formatPickup(lane.pickupAt)}</span>
+              </Row>
+              <Row label="Equipment">{equipmentLabel(lane.equipment)}</Row>
+              <Row label="Miles">
+                <span className="tabular">{lane.miles.toLocaleString("en-US")}</span>
+              </Row>
+            </>
+          )}
+          <Row label="Agreed rate">
+            <span className="tabular font-semibold">{formatUsd(hold.agreedRate)}</span>
+          </Row>
+          <Row label="Margin vs max buy">
+            <span className="tabular text-ok">{margin === null ? "-" : formatUsd(margin)}</span>
+          </Row>
+        </dl>
+      )}
 
       {(status === "booked" || status === "booked_unconfirmed") && (
-        <p className={`flex items-center gap-1.5 text-xs ${status === "booked" ? "text-ok" : "text-warn"}`}>
+        <p className={`mt-2 flex items-center gap-1.5 text-xs ${status === "booked" ? "text-ok" : "text-warn"}`}>
           <LuCircleCheck size={14} aria-hidden />
           {status === "booked" ? "Booked" : "Booked, TMS confirmation pending"}
           {bookingRef && (
@@ -192,18 +208,18 @@ export function HoldCard({ call, hold }: { call: TowerCall; hold: Hold }) {
         </p>
       )}
       {status === "released" && (
-        <p className="text-xs text-fg-muted">{outcome?.message ?? "The hold was released and the load is back on the board."}</p>
+        <p className="mt-2 text-xs text-fg-muted">{outcome?.message ?? "The hold was released and the load is back on the board."}</p>
       )}
-      {status === "confirming" && <p className="text-xs text-warn">Booking in progress with the TMS.</p>}
+      {status === "confirming" && <p className="mt-2 text-xs text-warn">Booking in progress with the TMS.</p>}
 
       {status === "held" && (
-        <div className="flex gap-2 pt-1">
+        <div className="mt-3 flex flex-col gap-2">
           <button
             type="button"
             onClick={() => void confirm()}
             disabled={!actionable}
             aria-live="polite"
-            className={`flex-1 rounded-[var(--radius-panel)] px-3 py-2 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+            className={`h-10 w-full cursor-pointer rounded-[var(--radius-panel)] px-3 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
               armed ? "bg-ok text-white" : "bg-accent text-white hover:bg-accent/90"
             }`}
           >
@@ -222,19 +238,19 @@ export function HoldCard({ call, hold }: { call: TowerCall; hold: Hold }) {
             type="button"
             onClick={() => void release()}
             disabled={!actionable}
-            className="rounded-[var(--radius-panel)] border border-line-strong px-3 py-2 text-xs font-medium text-fg-muted transition-colors hover:text-fg disabled:cursor-not-allowed disabled:opacity-60"
+            className="h-10 w-full cursor-pointer rounded-[var(--radius-panel)] border border-line-strong bg-panel px-3 text-sm font-medium text-fg-muted transition-colors hover:bg-panel-raised hover:text-fg disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {pending === "release" ? "Releasing..." : "Release"}
+            {pending === "release" ? "Releasing..." : "Release hold"}
           </button>
         </div>
       )}
 
       {error && (
-        <p role="alert" className="flex items-start gap-1.5 text-xs text-risk">
+        <p role="alert" className="mt-2 flex items-start gap-1.5 text-xs text-risk">
           <LuTriangleAlert size={14} className="mt-px shrink-0" aria-hidden />
           {error}
         </p>
       )}
-    </div>
+    </Section>
   );
 }

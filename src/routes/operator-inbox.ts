@@ -3,6 +3,7 @@ import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import {
   carrierStages,
+  type CarrierStage,
   operatorCarrierCallsParams,
   operatorCarrierCallsQuery,
   operatorCarrierCallsResponse,
@@ -190,12 +191,12 @@ const carrierColumns =
           (SELECT row_to_json(w) FROM (SELECT ` + wallCallColumns.text + `
             FROM calls t WHERE t.call_id = p.latest_call_id) w) AS latest_call`;
 
-// One round trip: the page of carriers, the tab total and the four tab counts. `filtered` applies
-// the bar filters; the counts group it by tab and the total and page add the tab, so all three
-// read one predicate.
+// One round trip: the page of carriers, the total, and the counts per tab and per stage. `filtered`
+// applies the bar filters (equipment, lane, search; the window is in the CTEs); the counts group it
+// by tab and by stage, and the total and page add the rail's tab and stage, so a count never
+// shrinks because another rail row is selected.
 export function carriersQuery(params: OperatorCarriersQuery): SqlStatement {
   const filters: string[] = [];
-  if (params.stage.length > 0) filters.push(sql`st.carrier_stage IN (${params.stage})`.text);
   const laneFilters: string[] = [];
   if (params.equipment.length > 0) laneFilters.push(sql`o.equipment IN (${params.equipment})`.text);
   if (params.origin) laneFilters.push(sql`o.origin_state = ${params.origin}`.text);
@@ -210,7 +211,10 @@ export function carriersQuery(params: OperatorCarriersQuery): SqlStatement {
         s.mc_number ILIKE ${pattern} OR s.dot_number ILIKE ${pattern} OR s.carrier_name ILIKE ${pattern}
         OR EXISTS (SELECT 1 FROM offers o WHERE o.call_id = s.call_id AND o.load_id ILIKE ${pattern})))`.text);
   }
-  const tabFilter = params.tab === "all" ? "TRUE" : sql`f.tab = ${params.tab}`.text;
+  const railFilters: string[] = [];
+  if (params.tab !== "all") railFilters.push(sql`f.tab = ${params.tab}`.text);
+  if (params.stage.length > 0) railFilters.push(sql`f.carrier_stage IN (${params.stage})`.text);
+  const railFilter = railFilters.length > 0 ? railFilters.join(" AND ") : "TRUE";
   const offset = (params.page - 1) * inboxPageSize;
 
   const text =
@@ -228,13 +232,16 @@ export function carriersQuery(params: OperatorCarriersQuery): SqlStatement {
       WHERE ` + (filters.length > 0 ? filters.join("\n        AND ") : "TRUE") + `
     ), ordered AS (
       SELECT f.*, row_number() OVER (ORDER BY ` + sortOrders[params.sort] + `) AS ord
-      FROM filtered f WHERE ` + tabFilter + `
+      FROM filtered f WHERE ` + railFilter + `
     )
     SELECT (SELECT count(*) FROM ordered) AS total,
       (SELECT count(*) FROM filtered WHERE tab = 'needs_you') AS needs_you,
       (SELECT count(*) FROM filtered WHERE tab = 'live') AS live,
       (SELECT count(*) FROM filtered WHERE tab = 'active') AS active,
       (SELECT count(*) FROM filtered WHERE tab = 'closed') AS closed,
+      COALESCE((SELECT json_object_agg(g.carrier_stage, g.n) FROM (
+        SELECT carrier_stage, count(*) AS n FROM filtered GROUP BY carrier_stage
+      ) g), '{}'::json) AS stage_counts,
       COALESCE((SELECT json_agg(r ORDER BY r.ord) FROM (
         SELECT p.ord, ` + carrierColumns + `
         FROM ordered p WHERE p.ord > ` + sql`${offset}`.text + ` AND p.ord <= ` + sql`${offset + inboxPageSize}`.text + `
@@ -269,6 +276,8 @@ export const carriersRow = z.object({
   live: count,
   active: count,
   closed: count,
+  // Only stages with a carrier appear; the rest are zero.
+  stage_counts: z.partialRecord(z.enum(carrierStages), count),
   rows: z.array(carrierRow),
 });
 
@@ -341,6 +350,7 @@ export function operatorInboxRoutes(deps: OperatorInboxDeps): FastifyPluginAsync
             page: params.page,
             pageSize: inboxPageSize,
             counts: { needsYou: row.needs_you, live: row.live, active: row.active, closed: row.closed },
+            stageCounts: Object.fromEntries(carrierStages.map((stage) => [stage, row.stage_counts[stage] ?? 0])) as Record<CarrierStage, number>,
           };
         } catch (error) {
           request.log.warn({ err: error }, "operator carriers unavailable");

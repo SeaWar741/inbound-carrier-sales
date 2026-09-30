@@ -1,3 +1,5 @@
+import type { IconType } from "react-icons";
+import { LuCircleCheck, LuCircleX, LuFlag, LuHand, LuHandshake, LuPhoneCall, LuTruck } from "react-icons/lu";
 import type { CallStage, CarrierStage, TowerCall } from "@/lib/contracts";
 import { callStageLabel, carrierStageLabels } from "@/lib/format";
 
@@ -11,6 +13,17 @@ const carrierStageTone: Record<CarrierStage, { pill: string; dot: string }> = {
   in_transit: { pill: "bg-ok-soft text-ok", dot: "bg-ok" },
   arrived: { pill: "bg-panel-raised text-fg-muted", dot: "bg-line-strong" },
   lost: { pill: "bg-panel-raised text-fg-muted", dot: "bg-line-strong" },
+};
+
+// One icon per stage, shared by the stage rail, the list rows and the detail header.
+export const carrierStageIcon: Record<CarrierStage, IconType> = {
+  live: LuPhoneCall,
+  negotiating: LuHandshake,
+  needs_approval: LuHand,
+  booked: LuCircleCheck,
+  in_transit: LuTruck,
+  arrived: LuFlag,
+  lost: LuCircleX,
 };
 
 // Same tones the call wall used for a single call's stage.
@@ -38,8 +51,10 @@ export function Badge({ tone, size = "sm", children }: { tone: string; size?: ke
 }
 
 export function CarrierStagePill({ stage, size = "sm" }: { stage: CarrierStage; size?: keyof typeof badgeSize }) {
+  const Icon = carrierStageIcon[stage];
   return (
     <Badge tone={carrierStageTone[stage].pill} size={size}>
+      <Icon size={size === "sm" ? 11 : 13} aria-hidden />
       {carrierStageLabels[stage]}
     </Badge>
   );

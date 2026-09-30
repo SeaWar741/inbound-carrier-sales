@@ -195,11 +195,13 @@ const adapterCarrier = z.object({
 export const adapterCarriersResponse = z.object({
   status: z.literal("ok"),
   rows: z.array(adapterCarrier),
-  // Carriers in the selected tab after the filters; counts are per tab after the same filters.
+  // Carriers in the selected tab and stages after the filters. The counts, per tab and per stage,
+  // apply the same filters but not the tab or stage, so every rail row keeps its own count.
   total: z.number().int(),
   page: z.number().int(),
   pageSize: z.number().int(),
   counts: z.object({ needsYou: z.number().int(), live: z.number().int(), active: z.number().int(), closed: z.number().int() }),
+  stageCounts: z.record(z.enum(carrierStages), z.number().int()),
 });
 export type AdapterCarriersResponse = z.infer<typeof adapterCarriersResponse>;
 

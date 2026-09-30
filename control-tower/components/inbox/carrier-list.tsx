@@ -1,26 +1,40 @@
 "use client";
 
 import { useRef } from "react";
-import { LuArrowUpRight, LuChevronLeft, LuInbox, LuChevronRight, LuHand, LuPackage, LuPhone, LuTriangleAlert } from "react-icons/lu";
-import { TabStrip } from "@/components/inbox/filter-bar";
-import { Badge, CarrierStageDot, CarrierStagePill } from "@/components/inbox/stage-pill";
+import { LuArrowUpRight, LuChevronLeft, LuChevronRight, LuHand, LuPackage, LuPhone, LuPhoneCall, LuTriangleAlert, LuTruck } from "react-icons/lu";
+import { CarrierStageDot, CarrierStagePill } from "@/components/inbox/stage-pill";
 import { PulseDot } from "@/components/pulse-dot";
-import type { inboxTabs, TowerCarrier, TowerCarriers } from "@/lib/contracts";
+import type { TowerCarrier, TowerCarriers } from "@/lib/contracts";
 import { callSummary, carrierName, formatTimeAgo } from "@/lib/format";
 
-export type InboxTab = (typeof inboxTabs)[number];
+// What the right edge of a row flags: a human is needed, a call is live, or freight is moving.
+function StatusIcon({ carrier }: { carrier: TowerCarrier }) {
+  if (carrier.needsHuman || carrier.carrierStage === "needs_approval") {
+    return (
+      <span role="img" aria-label="Needs you" title="Needs you" className="flex shrink-0 text-risk">
+        <LuHand size={18} aria-hidden />
+      </span>
+    );
+  }
+  if (carrier.latestCall.live) {
+    return (
+      <span role="img" aria-label="Live call" title="Live call" className="flex shrink-0 items-center gap-1.5 text-ok">
+        <PulseDot tone="ok" />
+        <LuPhoneCall size={18} aria-hidden />
+      </span>
+    );
+  }
+  if (carrier.carrierStage === "in_transit") {
+    return (
+      <span role="img" aria-label="In transit" title="In transit" className="flex shrink-0 text-accent">
+        <LuTruck size={18} aria-hidden />
+      </span>
+    );
+  }
+  return null;
+}
 
-type Counts = TowerCarriers["counts"];
-const tabs: { tab: InboxTab; label: string; title: string; count: (counts: Counts) => number; urgent?: boolean }[] = [
-  // The four tabs split every carrier, so their sum is the whole list.
-  { tab: "all", label: "", title: "All carriers", count: (c) => c.needsYou + c.live + c.active + c.closed },
-  { tab: "needs_you", label: "Needs you", title: "Needs you", count: (c) => c.needsYou, urgent: true },
-  { tab: "live", label: "Live", title: "Live", count: (c) => c.live },
-  { tab: "active", label: "Active", title: "Active", count: (c) => c.active },
-  { tab: "closed", label: "Closed", title: "Closed", count: (c) => c.closed },
-];
-
-// The cortex lead row: dot and name, numbers, last message, badges, time and counts.
+// The cortex lead row: dot, name and status icon; numbers; last event; stage badge; time and counts.
 function CarrierRow({
   carrier,
   now,
@@ -53,8 +67,7 @@ function CarrierRow({
           <CarrierStageDot stage={carrier.carrierStage} />
           <span className="min-w-0 truncate font-medium text-fg">{carrierName(carrier)}</span>
           <span className="min-w-0 flex-1" />
-          {carrier.latestCall.live && <PulseDot tone="accent" label="Live call" />}
-          <CarrierStagePill stage={carrier.carrierStage} />
+          <StatusIcon carrier={carrier} />
         </div>
 
         {carrier.carrierName && numbers && <p className="tabular mt-0.5 truncate pl-[18px] text-sm text-fg-muted">{numbers}</p>}
@@ -65,6 +78,11 @@ function CarrierRow({
             <span className="truncate">{summary}</span>
           </p>
         )}
+
+        <div className="mt-1.5 flex min-w-0 items-center gap-2 pl-[18px]">
+          <CarrierStagePill stage={carrier.carrierStage} />
+          {carrier.needsHuman && <span className="truncate text-[11px] font-medium text-risk">Asked for a human</span>}
+        </div>
 
         <div className="mt-1 flex min-w-0 items-center gap-1.5 pl-[18px] text-xs text-fg-faint">
           <span className="shrink-0" title={carrier.lastActivityAt}>
@@ -82,13 +100,6 @@ function CarrierRow({
             <span className="tabular">{carrier.loadsCount}</span>
             <span className="sr-only">loads</span>
           </span>
-          <span className="min-w-0 flex-1" />
-          {carrier.needsHuman && (
-            <Badge tone="bg-risk-soft text-risk">
-              <LuHand size={11} aria-hidden />
-              Needs human
-            </Badge>
-          )}
         </div>
       </button>
     </li>
@@ -96,7 +107,7 @@ function CarrierRow({
 }
 
 // The cortex list skeleton: two bars per row.
-export function SkeletonRows({ rows = 5 }: { rows?: number }) {
+function SkeletonRows({ rows = 5 }: { rows?: number }) {
   return (
     <div aria-hidden className="space-y-3 p-4">
       {Array.from({ length: rows }, (_, i) => (
@@ -117,12 +128,11 @@ export function CarrierList({
   loading,
   error,
   now,
-  tab,
+  title,
   page,
   filters,
   filtered,
   selectedKey,
-  onTab,
   onPage,
   onSelect,
   onClearFilters,
@@ -131,14 +141,14 @@ export function CarrierList({
   loading: boolean;
   error: string | null;
   now: number;
-  tab: InboxTab;
+  // The selected rail row's label.
+  title: string;
   page: number;
   // The filter chips and search box, rendered in the header.
   filters: React.ReactNode;
-  // Any filter other than the tab narrows the list.
+  // Any filter other than the rail row narrows the list.
   filtered: boolean;
   selectedKey: string | null;
-  onTab: (tab: InboxTab) => void;
   onPage: (page: number) => void;
   onSelect: (key: string) => void;
   onClearFilters: () => void;
@@ -149,8 +159,7 @@ export function CarrierList({
   const pageSize = data?.pageSize ?? 0;
   const first = (page - 1) * pageSize + 1;
   const last = Math.min(page * pageSize, total);
-  const everything = data ? tabs[0]!.count(data.counts) : 0;
-  const title = tabs.find((t) => t.tab === tab)?.title ?? "Carriers";
+  const everything = data ? data.counts.needsYou + data.counts.live + data.counts.active + data.counts.closed : 0;
 
   function onKeyDown(event: React.KeyboardEvent<HTMLUListElement>) {
     if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
@@ -225,7 +234,7 @@ export function CarrierList({
       <div className="shrink-0 border-b border-line px-4 py-3">
         <div className="mb-3 flex items-center justify-between gap-2">
           <h2 className="truncate font-semibold text-fg">{title}</h2>
-          <span className="tabular shrink-0 text-sm text-fg-muted">{data ? `${total} carriers` : ""}</span>
+          <span className="tabular shrink-0 text-sm text-fg-muted">{data ? `${total} ${total === 1 ? "carrier" : "carriers"}` : ""}</span>
         </div>
         {filters}
         {data?.liveUnavailable && (
@@ -241,19 +250,6 @@ export function CarrierList({
           </p>
         )}
       </div>
-
-      <TabStrip
-        label="Carrier tabs"
-        tabs={tabs.map((t) => ({
-          value: t.tab,
-          label: t.label || <LuInbox size={14} aria-hidden />,
-          ariaLabel: t.label ? undefined : "All",
-          count: data ? t.count(data.counts) : null,
-          urgent: t.urgent,
-        }))}
-        active={tab}
-        onTab={onTab}
-      />
 
       <div className="min-h-0 flex-1 overflow-y-auto">{body}</div>
 

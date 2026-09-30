@@ -1,12 +1,31 @@
 "use client";
 
-import { LuArrowDown, LuAudioWaveform, LuCheck, LuDollarSign, LuEar, LuMessageCircleMore, LuMic } from "react-icons/lu";
+import type { IconType } from "react-icons";
+import {
+  LuArrowDown,
+  LuAudioWaveform,
+  LuBot,
+  LuCalculator,
+  LuCheck,
+  LuDollarSign,
+  LuEar,
+  LuHand,
+  LuKeyRound,
+  LuLock,
+  LuMessageCircleMore,
+  LuMic,
+  LuPhoneOff,
+  LuSearch,
+  LuShieldCheck,
+  LuUser,
+  LuWrench,
+} from "react-icons/lu";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useLayoutEffect, useRef, useState } from "react";
 import { EmptyState } from "@/components/empty-state";
 import type { SentIntervention } from "@/components/intervention-bar";
 import type { StreamLine, TowerCall } from "@/lib/contracts";
-import { formatClock, formatUsd } from "@/lib/format";
+import { formatClock, formatUsd, toolKey, toolLabel } from "@/lib/format";
 import type { CallStream } from "@/lib/use-call-stream";
 
 type Intervention = TowerCall["interventions"][number];
@@ -112,20 +131,40 @@ function Delivery({ sent }: { sent: SentIntervention }) {
   }
 }
 
+// Icons for the agent's tools, keyed like toolLabel; unknown tools get a wrench.
+const toolIcons: Record<string, IconType> = {
+  verify_carrier: LuShieldCheck,
+  send_otp: LuKeyRound,
+  check_otp: LuKeyRound,
+  search_loads: LuSearch,
+  evaluate_offer: LuCalculator,
+  create_hold: LuLock,
+  request_human: LuHand,
+  hangup: LuPhoneOff,
+};
+
+const avatar = "flex size-8 shrink-0 items-center justify-center rounded-full";
+
 function EntryRow({ entry }: { entry: Entry }) {
   if (entry.type === "tool") {
+    const Icon = toolIcons[toolKey(entry.name)] ?? LuWrench;
+    const label = toolLabel(entry.name);
     return (
-      <div className="flex items-center gap-2 py-0.5 text-[10px] text-fg-faint" title={formatClock(entry.at, true)}>
-        <span className="h-px flex-1 bg-line" />
-        <span className="tabular">{entry.name}</span>
-        <span className="h-px flex-1 bg-line" />
+      <div className="flex justify-center">
+        <span
+          className="inline-flex items-center gap-1.5 rounded-full border border-line bg-panel px-2.5 py-1 text-[11px] text-fg-muted"
+          title={`${entry.name} at ${formatClock(entry.at, true)}`}
+        >
+          <Icon size={12} className="shrink-0 text-fg-faint" aria-hidden />
+          {label}
+        </span>
       </div>
     );
   }
   if (entry.type === "operator") {
     const Icon = operatorIcon[entry.kind];
     return (
-      <div className="flex flex-col gap-1 rounded-[var(--radius-panel)] border border-line-strong px-2.5 py-1.5">
+      <div className="flex flex-col gap-1 rounded-[var(--radius-panel)] border border-line-strong bg-panel px-2.5 py-1.5">
         <span className="flex items-start gap-2 text-xs text-fg">
           <Icon size={13} className="mt-0.5 shrink-0 text-fg-muted" aria-hidden />
           <span className="min-w-0 flex-1">{entry.text}</span>
@@ -139,14 +178,26 @@ function EntryRow({ entry }: { entry: Entry }) {
       </div>
     );
   }
+  // The cortex chat: the carrier on the left in a white bubble, the agent on the right in accent.
   const agent = entry.line.role === "agent";
   return (
-    <div className={`flex ${agent ? "justify-start" : "justify-end"}`}>
-      <div className={`flex max-w-[85%] gap-2 ${agent ? "" : "flex-row-reverse text-right"}`}>
+    <div className={`flex ${agent ? "justify-end" : "justify-start"}`}>
+      <div className={`flex max-w-[75%] min-w-0 items-end gap-2 ${agent ? "flex-row-reverse" : ""}`}>
         {agent ? (
-          <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-accent" aria-hidden />
-        ) : null}
-        <p className={`text-sm leading-snug ${agent ? "text-fg" : "rounded-[var(--radius-panel)] bg-panel-raised px-2.5 py-1.5 text-fg-muted"}`}>
+          <span className={`${avatar} bg-accent text-white shadow-md`} aria-hidden>
+            <LuBot size={16} />
+          </span>
+        ) : (
+          <span className={`${avatar} border border-line bg-panel text-fg-muted shadow-md`} aria-hidden>
+            <LuUser size={16} />
+          </span>
+        )}
+        <p
+          className={`min-w-0 rounded-2xl px-4 py-2.5 text-sm leading-snug break-words ${
+            agent ? "rounded-br-md bg-accent text-white" : "rounded-bl-md border border-line bg-panel text-fg shadow-md"
+          }`}
+          title={formatClock(entry.at, true)}
+        >
           <span className="sr-only">{agent ? "Agent: " : "Carrier: "}</span>
           {entry.line.text}
         </p>
@@ -213,9 +264,9 @@ export function Transcript({
         role="log"
         aria-live="polite"
         aria-label="Transcript"
-        className="h-full overflow-y-auto px-3 py-3"
+        className="h-full overflow-y-auto bg-bg px-4 py-4"
       >
-        <ol className="flex flex-col gap-2">
+        <ol className="flex flex-col gap-3">
           <AnimatePresence initial={false}>
             {entries.map((entry) => (
               <motion.li

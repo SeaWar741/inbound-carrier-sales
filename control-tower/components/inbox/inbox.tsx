@@ -4,9 +4,10 @@ import { useSearchParams } from "next/navigation";
 import { useCallback, useMemo } from "react";
 import { LuInbox } from "react-icons/lu";
 import { CarrierDetail } from "@/components/inbox/carrier-detail";
-import { CarrierList, type InboxTab } from "@/components/inbox/carrier-list";
+import { CarrierList } from "@/components/inbox/carrier-list";
 import { FilterBar, type InboxFilters } from "@/components/inbox/filter-bar";
-import { inboxTabs, type TowerCarriers } from "@/lib/contracts";
+import { InboxRail, selectedRailItem, type InboxTab, type RailItem } from "@/components/inbox/inbox-rail";
+import { carrierStages, inboxTabs, type TowerCarriers } from "@/lib/contracts";
 import { useNow } from "@/lib/use-now";
 import { usePoll } from "@/lib/use-poll";
 
@@ -14,9 +15,11 @@ const carriersPollMs = 5_000;
 
 // Everything the carrier list query reads from the URL; carrier and call only drive the detail.
 const listKeys = ["tab", "stage", "equipment", "origin", "destination", "since", "q", "sort", "page"] as const;
-const filterKeys = ["stage", "equipment", "origin", "destination", "since", "q"] as const;
+// What "Clear filters" resets; the rail row (tab and stage) stays.
+const filterKeys = ["equipment", "origin", "destination", "since", "q"] as const;
 
 // The inbox keeps its whole state in the URL, so a reload or a shared link lands on the same view.
+// Four panes: the stage rail, the carrier list, the conversation, and the detail panel.
 export function Inbox() {
   const searchParams = useSearchParams();
   const now = useNow();
@@ -25,8 +28,9 @@ export function Inbox() {
     const query = new URLSearchParams();
     for (const key of listKeys) {
       const value = searchParams.get(key);
-      // A hand-edited tab the list would show as "All" must not make the adapter refuse the query.
+      // A hand-edited tab or stage the rail would not show must not make the adapter refuse the query.
       if (key === "tab" && !inboxTabs.some((t) => t === value)) continue;
+      if (key === "stage" && !carrierStages.some((s) => s === value)) continue;
       if (value) query.set(key, value);
     }
     return query.toString();
@@ -35,11 +39,13 @@ export function Inbox() {
 
   const tabParam = searchParams.get("tab");
   const tab: InboxTab = inboxTabs.find((t) => t === tabParam) ?? "all";
+  const stage = carrierStages.find((s) => s === searchParams.get("stage")) ?? "";
+  const railItem = selectedRailItem(tab, stage);
   const page = Math.max(1, Number.parseInt(searchParams.get("page") ?? "1", 10) || 1);
   const selectedKey = searchParams.get("carrier");
   const selectedCallId = searchParams.get("call");
   const filters: InboxFilters = {
-    stage: searchParams.get("stage") ?? "",
+    stage,
     equipment: searchParams.get("equipment") ?? "",
     origin: searchParams.get("origin") ?? "",
     destination: searchParams.get("destination") ?? "",
@@ -63,9 +69,13 @@ export function Inbox() {
     [],
   );
 
-  // A new filter, sort or tab starts again on page 1.
+  // A new filter, sort or rail row starts again on page 1. A rail row sets its tab or stage and clears the other.
   const onFilter = useCallback((key: keyof InboxFilters, value: string) => update({ [key]: value, page: null }), [update]);
-  const onTab = useCallback((next: InboxTab) => update({ tab: next === "all" ? null : next, page: null }), [update]);
+  const onRail = useCallback(
+    (item: RailItem) => update({ tab: item.tab === "all" ? null : item.tab, stage: item.stage, page: null }),
+    [update],
+  );
+  const onSince = useCallback((since: string) => update({ since, page: null }), [update]);
   const onPage = useCallback((next: number) => update({ page: next > 1 ? String(next) : null }), [update]);
   const onSelect = useCallback((key: string) => update({ carrier: key, call: null }), [update]);
   const onSelectCall = useCallback((callId: string) => update({ call: callId }), [update]);
@@ -76,18 +86,21 @@ export function Inbox() {
 
   return (
     <div className="flex h-full min-h-0 overflow-hidden">
-      <div className="h-full min-h-0 w-[22rem] shrink-0">
+      <div className="h-full min-h-0 w-56 shrink-0">
+        <InboxRail data={data} selected={railItem} since={filters.since} onSelect={onRail} onSince={onSince} />
+      </div>
+
+      <div className="h-full min-h-0 w-[360px] shrink-0">
         <CarrierList
           data={data}
           loading={loading}
           error={error}
           now={now}
-          tab={tab}
+          title={railItem?.label ?? "Carriers"}
           page={page}
           filters={<FilterBar filters={filters} onChange={onFilter} />}
           filtered={filtered}
           selectedKey={selectedKey}
-          onTab={onTab}
           onPage={onPage}
           onSelect={onSelect}
           onClearFilters={onClearFilters}
