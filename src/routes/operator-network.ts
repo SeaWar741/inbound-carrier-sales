@@ -44,7 +44,8 @@ export async function openLanes(tms: Pick<TmsClient, "queryLoads">, log: Pick<Fa
     // LOAD_QUERY has no status filter, so a full answer may have left open loads out.
     if (boards.some((board) => board.length === openLanesPerEquipment)) log.warn("open lanes may be partial: an equipment type filled the TMS cap");
     return new Set(boards.flat().filter((load) => load.status === "OPEN").map((load) => `${load.origState}|${load.equipmentType}`));
-  } catch {
+  } catch (error) {
+    log.warn({ err: error }, "open lanes unavailable, growth tags skipped");
     return null;
   }
 }
@@ -76,6 +77,8 @@ export function networkQuery(params: OperatorNetworkQuery, lanes: ReadonlySet<st
   if (laneFilters.length > 0) {
     filters.push(`EXISTS (SELECT 1 FROM lanes l WHERE l.carrier_key = c.carrier_key AND ${laneFilters.join(" AND ")})`);
   }
+  // One carrier by key, so a selection that paged or polled out of view still has its row.
+  if (params.key) filters.push(sql`c.carrier_key = ${params.key}`.text);
   if (params.q) {
     const pattern = containsPattern(params.q);
     filters.push(sql`(c.mc_number ILIKE ${pattern} OR c.dot_number ILIKE ${pattern} OR c.carrier_name ILIKE ${pattern})`.text);
@@ -320,7 +323,7 @@ export function demandQuery(params: OperatorDemandQuery): SqlStatement {
     SELECT (SELECT count(*) FROM ordered) AS total,
       COALESCE((SELECT json_agg(r ORDER BY r.ord) FROM (
         SELECT p.ord, p.origin_state, p.destination_state, p.equipment, p.searches, p.no_match, p.offered_no_booking,
-          p.unmet, p.this_week, p.previous_week, p.carriers
+          p.this_week, p.previous_week, p.carriers
         FROM ordered p WHERE p.ord > ` +
     sql`${offset}`.text +
     ` AND p.ord <= ` +
@@ -374,7 +377,6 @@ const demandRow = z.object({
   searches: count,
   no_match: count,
   offered_no_booking: count,
-  unmet: count,
   this_week: count,
   previous_week: count,
   carriers: count,
@@ -390,7 +392,6 @@ const toDemandLane = (row: z.output<typeof demandRow>): DemandLane => ({
   searches: row.searches,
   noMatch: row.no_match,
   offeredNoBooking: row.offered_no_booking,
-  unmet: row.unmet,
   thisWeek: row.this_week,
   previousWeek: row.previous_week,
   carriers: row.carriers,
@@ -426,7 +427,6 @@ export function operatorNetworkRoutes(deps: OperatorNetworkDeps): FastifyPluginA
       async (request, reply) => {
         const params = request.query;
         const lanes = await currentLanes(request.log);
-        if (!lanes) request.log.warn("open lanes unavailable, growth tags skipped");
         try {
           const [row] = await deps.twin.query(networkQuery(params, lanes), networkResult);
           if (!row) throw new Error("network query returned no row");

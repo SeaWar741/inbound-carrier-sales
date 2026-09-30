@@ -128,7 +128,7 @@ Each carrier gets one relationship status, first match wins:
 - **Active**: everyone else.
 
 Two tags sit on top of the status, independent of it and of each other:
-- **Top**: at least `segmentTopMinBookings` (2) bookings in the date range, and bookings on at least `segmentTopMinRate` (50 %) of the calls that reached an offer. Calls that failed verification or found no load do not count against a carrier.
+- **Top**: at least `segmentTopMinBookings` (2) bookings in the date range, and at least `segmentTopMinRate` (0.5) bookings per call that reached an offer. Calls that failed verification or found no load do not count against a carrier.
 - **Growth**: a lane the carrier searched or negotiated has an open load on the board now, matched on origin state and equipment. A search without equipment asked for any, so it matches the state on every equipment.
 
 A carrier can be at risk, Top and Growth at once, so the page counts overlap. The status and the tags are decided once, in SQL, and the tower only words the reason, for example "Last call 22 d ago; 2 bookings before. Has run TX · Reefer, open on the board now".

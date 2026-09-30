@@ -200,6 +200,11 @@ describe("GET /v1/operator/network", () => {
     expect(text).toContain("LIMIT 5");
   });
 
+  it("narrows to one carrier by key, escaped", () => {
+    const text = networkQuery(operatorNetworkQuery.parse({ key: "mc:9'1" }), new Set()).text;
+    expect(text).toContain("c.carrier_key = E'mc:9''1'");
+  });
+
   it("renders the bar filters as escaped SQL in filtered", () => {
     const text = networkQuery(operatorNetworkQuery.parse({ equipment: ["reefer"], origin: "ga", q: "50%_o'k", since: "7d" }), new Set()).text;
     const filtered = text.slice(text.indexOf("filtered AS ("), text.indexOf("ordered AS ("));
@@ -268,7 +273,6 @@ const demandRow = {
       searches: "5",
       no_match: "4",
       offered_no_booking: "1",
-      unmet: "5",
       this_week: "3",
       previous_week: "1",
       carriers: "2",
@@ -281,7 +285,6 @@ const demandRow = {
       searches: "0",
       no_match: "0",
       offered_no_booking: "2",
-      unmet: "2",
       this_week: "0",
       previous_week: "2",
       carriers: "1",
@@ -324,7 +327,6 @@ describe("GET /v1/operator/demand", () => {
       searches: 5,
       noMatch: 4,
       offeredNoBooking: 1,
-      unmet: 5,
       thisWeek: 3,
       previousWeek: 1,
       carriers: 2,

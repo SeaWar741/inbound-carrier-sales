@@ -562,6 +562,7 @@ export const operatorNetworkQuery = withDayRange(
     view: z.enum(networkViews).default("all"),
     // MC, DOT or carrier name.
     q: optionalField(z.string().trim().max(64)),
+    key: optionalField(z.string().trim().max(160)),
   }),
 );
 export type OperatorNetworkQuery = z.output<typeof operatorNetworkQuery>;
@@ -635,8 +636,7 @@ const demandLane = z.object({
   noMatch: z.number().int(),
   // Loads negotiated on a call that never got a hold (held, confirming or booked) on that call.
   offeredNoBooking: z.number().int(),
-  // noMatch + offeredNoBooking, over the 4 weeks and in this and the previous desk week.
-  unmet: z.number().int(),
+  // Unmet asks (noMatch + offeredNoBooking) in this and the previous desk week.
   thisWeek: z.number().int(),
   previousWeek: z.number().int(),
   // Distinct carriers behind the searches and offers.

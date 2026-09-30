@@ -67,8 +67,8 @@ export const segmentNewMaxCalls = 3;
 // Two weeks is about two load cycles for a regular carrier: a booked carrier silent this long, or
 // calling less than half as often as in the two weeks before, is at risk.
 export const segmentRecentDays = 14;
-// Top: at least this many bookings in the window, and bookings on at least this share of the calls
-// that reached a negotiation (calls that failed OTP or found no load do not count against it).
+// Top: at least this many bookings in the window, and at least this many bookings per call that
+// reached a negotiation (calls that failed OTP or found no load do not count against it).
 export const segmentTopMinBookings = 2;
 export const segmentTopMinRate = 0.5;
 // Open lanes change as loads are booked, but the growth tag is a hint, not a quote; ten minutes

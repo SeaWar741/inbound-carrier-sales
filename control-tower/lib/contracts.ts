@@ -314,8 +314,7 @@ const demandLane = z.object({
   noMatch: z.number().int(),
   // Loads offered on a call that never got a hold on that call.
   offeredNoBooking: z.number().int(),
-  // noMatch + offeredNoBooking, over the 4 weeks and in this and the previous desk week.
-  unmet: z.number().int(),
+  // Unmet asks (noMatch + offeredNoBooking) in this and the previous desk week.
   thisWeek: z.number().int(),
   previousWeek: z.number().int(),
   // Distinct carriers behind the searches and offers.

@@ -11,7 +11,6 @@ function lane(overrides: Partial<DemandLane> = {}): DemandLane {
     searches: 7,
     noMatch: 7,
     offeredNoBooking: 2,
-    unmet: 9,
     thisWeek: 3,
     previousWeek: 1,
     carriers: 4,
