@@ -28,6 +28,8 @@ const theme: ThemeConfig = {
   },
   components: {
     Select: { optionSelectedBg: "#e9f3ff", optionSelectedColor: "#0285ff", optionFontSize: 12 },
+    // The sort arrow already says which column sorts; no gray band on it.
+    Table: { headerBg: "#fafafa", headerSortActiveBg: "#fafafa", headerSortHoverBg: "#fafafa", bodySortBg: "transparent" },
   },
 };
 
