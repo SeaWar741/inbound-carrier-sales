@@ -13,20 +13,20 @@ const tones = {
   amber: { icon: "text-tone-amber", pill: "bg-tone-amber-soft text-tone-amber" },
   emerald: { icon: "text-tone-emerald", pill: "bg-tone-emerald-soft text-tone-emerald" },
   blue: { icon: "text-tone-blue", pill: "bg-tone-blue-soft text-tone-blue" },
-  violet: { icon: "text-tone-violet", pill: "bg-tone-violet-soft text-tone-violet" },
+  teal: { icon: "text-tone-teal", pill: "bg-tone-teal-soft text-tone-teal" },
   gray: { icon: "text-tone-gray", pill: "bg-tone-gray-soft text-tone-gray" },
 } satisfies Record<string, StageTone>;
 
 // The one stage language of the inbox: the rail, the list rows and the detail badge all read it.
 // Red waits on a human, green is on the phone, amber is haggling, emerald is booked, blue is
-// rolling, violet has arrived, gray is lost.
+// rolling, teal has arrived, gray is lost.
 export const carrierStageStyle: Record<CarrierStage, { label: string; icon: IconType; tone: StageTone }> = {
   needs_approval: { label: carrierStageLabels.needs_approval, icon: LuHand, tone: tones.red },
   live: { label: carrierStageLabels.live, icon: LuPhoneCall, tone: tones.green },
   negotiating: { label: carrierStageLabels.negotiating, icon: LuHandshake, tone: tones.amber },
   booked: { label: carrierStageLabels.booked, icon: LuCircleCheck, tone: tones.emerald },
   in_transit: { label: carrierStageLabels.in_transit, icon: LuTruck, tone: tones.blue },
-  arrived: { label: carrierStageLabels.arrived, icon: LuFlag, tone: tones.violet },
+  arrived: { label: carrierStageLabels.arrived, icon: LuFlag, tone: tones.teal },
   lost: { label: carrierStageLabels.lost, icon: LuCircleX, tone: tones.gray },
 };
 

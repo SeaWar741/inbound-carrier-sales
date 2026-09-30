@@ -59,8 +59,8 @@
   --tone-emerald-soft: var(--ok-soft);
   --tone-blue: oklch(0.546 0.245 262.881);
   --tone-blue-soft: oklch(0.932 0.032 255.585);
-  --tone-violet: oklch(0.541 0.281 293.009);
-  --tone-violet-soft: oklch(0.943 0.029 294.588);
+  --tone-teal: oklch(0.6 0.118 184.704);
+  --tone-teal-soft: oklch(0.953 0.051 180.801);
   --tone-gray: oklch(0.551 0.027 264.364);
   --tone-gray-soft: oklch(0.967 0.003 264.542);
 }
@@ -92,8 +92,8 @@
   --color-tone-emerald-soft: var(--tone-emerald-soft);
   --color-tone-blue: var(--tone-blue);
   --color-tone-blue-soft: var(--tone-blue-soft);
-  --color-tone-violet: var(--tone-violet);
-  --color-tone-violet-soft: var(--tone-violet-soft);
+  --color-tone-teal: var(--tone-teal);
+  --color-tone-teal-soft: var(--tone-teal-soft);
   --color-tone-gray: var(--tone-gray);
   --color-tone-gray-soft: var(--tone-gray-soft);
   --font-sans: var(--font-geist-sans);
