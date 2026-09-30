@@ -1,23 +1,20 @@
-import { networkSorts, networkViews, pageSizes, type NetworkCarrier, type TowerCall } from "./contracts.ts";
-import { deskDayKey, equipmentLabel, formatUsd } from "./format.ts";
+import { networkSorts, networkViews, type NetworkCarrier, type TowerCall } from "./contracts.ts";
+import { deskDayKey, equipmentLabel, formatUsd, plural } from "./format.ts";
+import { paging, setPaging } from "./list-query.ts";
 
 const dayMs = 86_400_000;
 // The inbox's longest `since` preset; an older last call needs an explicit day range there.
 const inboxLongestDays = 30;
 
-const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
-
-// The adapter's defaults, which the URL never repeats.
+// The adapter's default sort, which the URL never repeats.
 export const defaultSort: NetworkSort = "lastCall";
-export const defaultPageSize = 25;
 export type NetworkSort = (typeof networkSorts)[number];
-export type SortDir = "asc" | "desc";
 
 // The filters the carriers page keeps in the URL besides the status view, sort and paging.
 export const networkFilterKeys = ["q", "equipment", "origin"] as const;
 
 // The adapter query for the carriers page URL. Only valid values go out, so a hand-edited URL shows
-// the default instead of an error; the window is the adapter's default 30 days.
+// the default instead of an error; the window is the adapter's fixed 30 days.
 export function networkQuery(search: Pick<URLSearchParams, "get">): string {
   const query = new URLSearchParams();
   const view = search.get("view");
@@ -26,31 +23,8 @@ export function networkQuery(search: Pick<URLSearchParams, "get">): string {
     const value = search.get(key)?.trim();
     if (value) query.set(key, value);
   }
-  const { sort, dir, page, pageSize } = networkPaging(search);
-  if (sort !== defaultSort) query.set("sort", sort);
-  if (dir === "asc") query.set("dir", "asc");
-  if (page > 1) query.set("page", String(page));
-  if (pageSize !== defaultPageSize) query.set("pageSize", String(pageSize));
+  setPaging(query, paging(search, networkSorts, defaultSort), defaultSort);
   return query.toString();
-}
-
-// Sort and paging as the URL holds them, defaults filled in.
-export function networkPaging(search: Pick<URLSearchParams, "get">): { sort: NetworkSort; dir: SortDir; page: number; pageSize: number } {
-  const sort = networkSorts.find((s) => s === search.get("sort")) ?? defaultSort;
-  const dir: SortDir = search.get("dir") === "asc" ? "asc" : "desc";
-  const page = Number(search.get("page"));
-  const pageSize = Number(search.get("pageSize"));
-  return {
-    sort,
-    dir,
-    page: Number.isInteger(page) && page > 1 ? page : 1,
-    pageSize: (pageSizes as readonly number[]).includes(pageSize) ? pageSize : defaultPageSize,
-  };
-}
-
-// The URL changes for a new sort; defaults are dropped and the list starts again at page 1.
-export function sortChange(sort: NetworkSort, dir: SortDir): Record<string, string | null> {
-  return { sort: sort === defaultSort ? null : sort, dir: dir === "asc" ? "asc" : null, page: null };
 }
 
 // Whole days since the carrier's last call.

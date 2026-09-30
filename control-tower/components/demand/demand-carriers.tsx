@@ -4,14 +4,12 @@ import { Tooltip } from "antd";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { LuInbox, LuLoaderCircle, LuTriangleAlert } from "react-icons/lu";
+import { iconButton } from "@/components/paged-table";
 import type { DemandCarrier, DemandLane, TowerDemandCarriers } from "@/lib/contracts";
 import { asksLabel, carrierListHref, demandCarriersQuery, demandInboxHref } from "@/lib/demand";
 import { fetchTower } from "@/lib/use-poll";
 
 type Loaded = { rows: DemandCarrier[]; total: number; page: number };
-
-const iconButton =
-  "grid size-7 cursor-pointer place-items-center rounded-md text-fg-muted outline-none transition-colors hover:bg-panel-raised hover:text-fg focus-visible:ring-2 focus-visible:ring-accent/40";
 
 // One carrier: MC and name open it on the Carriers page, the icon opens its calls in the inbox.
 function CarrierRow({ carrier }: { carrier: DemandCarrier }) {

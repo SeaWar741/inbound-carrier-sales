@@ -8,6 +8,7 @@ import { LaneMap, type LaneMapLoad } from "@/components/lane-map";
 import type { TowerLoads } from "@/lib/contracts";
 import { carrierName, equipmentLabel } from "@/lib/format";
 import { emptyLoadFilters, filterLoads, loadEquipments, loadOrigins, sortLoads, statusCounts, type LoadFilters, type LoadSort } from "@/lib/load-filters";
+import { updateSearch } from "@/lib/url-search";
 import { usePoll } from "@/lib/use-poll";
 import { useSharedWall } from "@/lib/use-wall";
 
@@ -27,8 +28,8 @@ function Dashboard() {
   const { data: wall } = useSharedWall();
   const { data, error } = usePoll<TowerLoads>("/api/loads", loadsPollMs, "load list");
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  // Links from other pages (/?origin=TX&equipment=REEFER) open the list already narrowed; later
-  // filter changes stay local and do not write back to the URL.
+  // Links from other pages (/?origin=TX&equipment=REEFER) open the list already narrowed. Origin and
+  // equipment changes write back to the URL, so a cleared filter stays cleared on reload.
   const [filters, setFilters] = useState<LoadFilters>(() => ({
     ...emptyLoadFilters,
     origin: (searchParams.get("origin") ?? "").trim().toUpperCase(),
@@ -46,10 +47,12 @@ function Dashboard() {
 
   const onFilter = useCallback(<K extends keyof LoadFilters>(key: K, value: LoadFilters[K]) => {
     setFilters((current) => ({ ...current, [key]: value }));
+    if (key === "origin" || key === "equipment") updateSearch({ [key]: value || null });
   }, []);
   const onClear = useCallback(() => {
     setFilters(emptyLoadFilters);
     setSort("");
+    updateSearch({ origin: null, equipment: null });
   }, []);
 
   // A selected load the filters (or the next poll) drop is no longer selected.

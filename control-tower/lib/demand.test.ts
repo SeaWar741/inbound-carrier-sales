@@ -1,33 +1,31 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { DemandLane } from "./contracts.ts";
+import { demandSorts, type DemandLane } from "./contracts.ts";
 import {
+  defaultDemandSort,
   asksLabel,
   carrierListHref,
   demandCarriersQuery,
   demandEquipmentLabel,
   demandInboxHref,
   demandKey,
-  demandPaging,
   demandQuery,
   demandSaid,
-  demandSortChange,
   demandTrend,
   demandUnmet,
   laneLabel,
   nextOf,
   nextStepHref,
-  topOrigins,
   unmetBarPercent,
   weekChange,
 } from "./demand.ts";
+import { paging, sortChange } from "./list-query.ts";
 
 function lane(overrides: Partial<DemandLane> = {}): DemandLane {
   return {
     originState: "TX",
     destinationState: "GA",
     equipment: "DRY_VAN",
-    searches: 7,
     noMatch: 7,
     offeredNoBooking: 2,
     thisWeek: 3,
@@ -37,7 +35,9 @@ function lane(overrides: Partial<DemandLane> = {}): DemandLane {
   };
 }
 
-describe("demandQuery and demandPaging", () => {
+const demandPaging = (search: URLSearchParams) => paging(search, demandSorts, defaultDemandSort);
+
+describe("demandQuery and paging", () => {
   it("sends nothing for the defaults", () => {
     assert.equal(demandQuery(new URLSearchParams("")), "");
     assert.deepEqual(demandPaging(new URLSearchParams("")), { sort: "unmet", dir: "desc", page: 1, pageSize: 25 });
@@ -55,11 +55,11 @@ describe("demandQuery and demandPaging", () => {
   });
 });
 
-describe("demandSortChange", () => {
+describe("sortChange on the demand sorts", () => {
   it("leaves the default sort and direction out of the URL and goes back to page 1", () => {
-    assert.deepEqual(demandSortChange("unmet", "desc"), { sort: null, dir: null, page: null });
-    assert.deepEqual(demandSortChange("lane", "asc"), { sort: "lane", dir: "asc", page: null });
-    assert.deepEqual(demandSortChange("thisWeek", "desc"), { sort: "thisWeek", dir: null, page: null });
+    assert.deepEqual(sortChange("unmet", "desc", defaultDemandSort), { sort: null, dir: null, page: null });
+    assert.deepEqual(sortChange("lane", "asc", defaultDemandSort), { sort: "lane", dir: "asc", page: null });
+    assert.deepEqual(sortChange("thisWeek", "desc", defaultDemandSort), { sort: "thisWeek", dir: null, page: null });
   });
 });
 
@@ -114,26 +114,6 @@ describe("nextOf and nextStepHref", () => {
   it("opens the dashboard on the lane's pickup state, and its equipment when it has one", () => {
     assert.equal(nextStepHref(lane({ equipment: "REEFER" })), "/?origin=TX&equipment=REEFER");
     assert.equal(nextStepHref(lane({ equipment: null })), "/?origin=TX");
-  });
-});
-
-describe("topOrigins", () => {
-  it("keeps the first five origins with unmet asks, in the adapter's order", () => {
-    // As the adapter sends them: unmet most first, then origin.
-    const origins = [
-      { originState: "TX", unmet: 9 },
-      { originState: "IL", unmet: 5 },
-      { originState: "AL", unmet: 3 },
-      { originState: "GA", unmet: 3 },
-      { originState: "NY", unmet: 2 },
-      { originState: "OH", unmet: 1 },
-      { originState: "CA", unmet: 0 },
-    ];
-    assert.deepEqual(
-      topOrigins(origins).map((row) => row.originState),
-      ["TX", "IL", "AL", "GA", "NY"],
-    );
-    assert.deepEqual(topOrigins([{ originState: "CA", unmet: 0 }]), []);
   });
 });
 

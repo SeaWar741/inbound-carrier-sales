@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { NetworkCarrier } from "./contracts.ts";
-import { callOutcome, callsWindow, inboxHref, networkPaging, networkQuery, shortReason, sortChange } from "./network.ts";
+import { networkSorts, type NetworkCarrier } from "./contracts.ts";
+import { pageChange, paging, sortChange } from "./list-query.ts";
+import { callOutcome, callsWindow, defaultSort, inboxHref, networkQuery, shortReason } from "./network.ts";
+
+const networkPaging = (search: URLSearchParams) => paging(search, networkSorts, defaultSort);
 
 const now = Date.parse("2026-09-30T17:00:00Z");
 const daysAgo = (days: number) => new Date(now - days * 86_400_000).toISOString();
@@ -13,7 +16,6 @@ function carrier(overrides: Partial<Omit<NetworkCarrier, "facts">> & { facts?: P
     mcNumber: "123456",
     dotNumber: "7654321",
     carrierName: "Acme Freight",
-    eligible: true,
     relationship: "active",
     top: false,
     growth: false,
@@ -28,8 +30,6 @@ function carrier(overrides: Partial<Omit<NetworkCarrier, "facts">> & { facts?: P
       calls: 5,
       negotiableCalls: 5,
       bookings: 3,
-      searches: 4,
-      loadsNegotiated: 6,
       ...facts,
     },
   };
@@ -141,18 +141,27 @@ describe("networkQuery", () => {
   });
 });
 
-describe("networkPaging", () => {
+describe("paging on the network sorts", () => {
   it("fills in the defaults", () => {
     assert.deepEqual(networkPaging(new URLSearchParams()), { sort: "lastCall", dir: "desc", page: 1, pageSize: 25 });
     assert.deepEqual(networkPaging(new URLSearchParams("sort=bookings&dir=asc&page=2&pageSize=10")), { sort: "bookings", dir: "asc", page: 2, pageSize: 10 });
   });
 });
 
-describe("sortChange", () => {
+describe("sortChange on the network sorts", () => {
   it("drops the defaults and goes back to page 1", () => {
-    assert.deepEqual(sortChange("lastCall", "desc"), { sort: null, dir: null, page: null });
-    assert.deepEqual(sortChange("calls", "asc"), { sort: "calls", dir: "asc", page: null });
-    assert.deepEqual(sortChange("mc", "desc"), { sort: "mc", dir: null, page: null });
+    assert.deepEqual(sortChange("lastCall", "desc", defaultSort), { sort: null, dir: null, page: null });
+    assert.deepEqual(sortChange("calls", "asc", defaultSort), { sort: "calls", dir: "asc", page: null });
+    assert.deepEqual(sortChange("mc", "desc", defaultSort), { sort: "mc", dir: null, page: null });
+  });
+});
+
+describe("pageChange", () => {
+  it("keeps the default page and size out of the URL and restarts at page 1 on a new size", () => {
+    assert.deepEqual(pageChange(3, 25, 25), { page: "3" });
+    assert.deepEqual(pageChange(1, 25, 25), { page: null });
+    assert.deepEqual(pageChange(1, 50, 25), { pageSize: "50", page: null });
+    assert.deepEqual(pageChange(1, 25, 10), { pageSize: null, page: null });
   });
 });
 

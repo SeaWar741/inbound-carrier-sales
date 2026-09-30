@@ -1,13 +1,12 @@
 "use client";
 
-import { ConfigProvider, Pagination, Table, Tooltip, type TableColumnsType, type TableProps } from "antd";
+import { ConfigProvider, Table, Tooltip, type TableColumnsType } from "antd";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useMemo, useState } from "react";
 import type { IconType } from "react-icons";
 import {
   LuChevronDown,
-  LuChevronRight,
   LuCircleCheck,
   LuCircleX,
   LuContainer,
@@ -25,25 +24,14 @@ import {
 import { Tile } from "@/components/dashboard/kpi-tiles";
 import { equipmentOptions, HeaderSelect, SearchInput, stateOptions } from "@/components/inbox/filter-bar";
 import { StatusIcons, statusStyle, type NetworkStatus } from "@/components/network/network-chips";
-import { StateMap } from "@/components/state-map";
-import { networkSorts, networkViews, pageSizes, type NetworkCarrier, type TowerCall, type TowerCarrierCalls, type TowerNetwork } from "@/lib/contracts";
-import { carrierName, equipmentLabel, formatDateTime, formatTimeAgo } from "@/lib/format";
-import {
-  callOutcome,
-  callsWindow,
-  defaultPageSize,
-  defaultSort,
-  inboxHref,
-  networkPaging,
-  networkQuery,
-  shortReason,
-  networkFilterKeys,
-  sortChange,
-  type CallOutcome,
-  type NetworkSort,
-} from "@/lib/network";
+import { ErrorBanner, iconButton, numberDirections, onSortClick, sortOrder, TablePager, textDirections } from "@/components/paged-table";
+import { RankedMapPanel } from "@/components/ranked-map-panel";
+import { networkSorts, networkViews, type NetworkCarrier, type TowerCall, type TowerCarrierCalls, type TowerNetwork } from "@/lib/contracts";
+import { carrierName, equipmentLabel, formatDateTime, formatTimeAgo, plural } from "@/lib/format";
+import { paging } from "@/lib/list-query";
+import { callOutcome, callsWindow, defaultSort, inboxHref, networkFilterKeys, networkQuery, shortReason, type CallOutcome, type NetworkSort } from "@/lib/network";
 import { useNow } from "@/lib/use-now";
-import { updateSearch } from "@/lib/use-paged-list";
+import { updateSearch } from "@/lib/url-search";
 import { usePoll } from "@/lib/use-poll";
 
 // The network changes with calls, not by the second, and each read also checks the TMS board. An
@@ -52,8 +40,6 @@ const networkPollMs = 30_000;
 const callsPollMs = 15_000;
 // A timeline shows the latest calls; the rest wait behind "Show N more".
 const shownCalls = 8;
-
-const plural = (n: number, one: string) => `${n} ${n === 1 ? one : `${one}s`}`;
 
 // Every filter "Clear filters" resets; any change to them goes back to page 1.
 const filterKeys = ["view", ...networkFilterKeys] as const;
@@ -142,16 +128,7 @@ function CarrierCalls({ carrier, now }: { carrier: NetworkCarrier; now: number }
   );
 }
 
-const iconButton =
-  "grid size-7 cursor-pointer place-items-center rounded-md text-fg-muted outline-none transition-colors hover:bg-panel-raised hover:text-fg focus-visible:ring-2 focus-visible:ring-accent/40";
-
-type AntdOrder = "ascend" | "descend";
-
-// Text sorts A to Z first, numbers and dates most first. Neither direction clears the sort, so a
-// header click always shows a sorted list.
-const textDirections: AntdOrder[] = ["ascend", "descend", "ascend"];
-const numberDirections: AntdOrder[] = ["descend", "ascend", "descend"];
-
+// Lanes open now: carriers per origin state on the map, the top lanes below it.
 function SidePanel({
   data,
   view,
@@ -166,64 +143,40 @@ function SidePanel({
   onPick: (origin: string, equipment: string | null) => void;
 }) {
   const origins = useMemo(() => (data?.openOrigins ?? []).map((row) => ({ state: row.originState, count: row.carriers })), [data?.openOrigins]);
-  // The adapter lists open lanes most carriers first.
-  const lanes = (data?.openLanes ?? []).slice(0, 5);
-  const maxCarriers = lanes[0]?.carriers ?? 1;
   const growth = view === "growth";
   // A second click on the picked state lets it go.
   const onState = useCallback((state: string) => onPick(growth && state === origin ? "" : state, null), [growth, origin, onPick]);
+  // The adapter lists open lanes most carriers first.
+  const rows = (data?.openLanes ?? []).map((lane) => ({
+    key: `${lane.originState}|${lane.equipment}`,
+    label: `${lane.originState} · ${equipmentLabel(lane.equipment)}`,
+    count: lane.carriers,
+    countLabel: plural(lane.carriers, "carrier"),
+    picked: growth && lane.originState === origin && lane.equipment === equipment,
+    onClick: () => onPick(lane.originState, lane.equipment),
+  }));
 
   return (
-    <aside aria-label="Lanes open now" className="overflow-hidden rounded-lg border border-line bg-panel">
-      <div className="flex items-center gap-2 border-b border-line px-4 py-3 text-sm font-semibold text-fg">
-        <LuTrendingUp size={15} className="text-tone-emerald" aria-hidden />
-        Lanes open now
-        <span className="ml-auto text-xs font-normal text-fg-muted">Top 5</span>
-      </div>
-      {data && !data.boardAvailable && (
-        <p role="status" className="flex items-center gap-1.5 border-b border-line px-4 py-2 text-xs text-warn">
-          <LuTriangleAlert size={12} className="shrink-0" aria-hidden />
-          The TMS board is unavailable, so no lane shows as open
-        </p>
-      )}
-      <div className="h-56 border-b border-line">
-        <StateMap counts={origins} selected={growth && origin ? origin : null} onSelect={onState} tone="ok" label="Carriers with an open lane, by origin state" unit="carrier" />
-      </div>
-      {lanes.length === 0 ? (
-        <p className="px-4 py-6 text-center text-sm text-fg-muted">{data === null ? "Loading open lanes..." : "No lane a listed carrier ran is open right now."}</p>
-      ) : (
-        <ul className="divide-y divide-line">
-          {lanes.map((lane) => {
-            const picked = growth && lane.originState === origin && lane.equipment === equipment;
-            return (
-              <li key={`${lane.originState}|${lane.equipment}`}>
-                <button
-                  type="button"
-                  aria-pressed={picked}
-                  onClick={() => onPick(lane.originState, lane.equipment)}
-                  className={`flex w-full cursor-pointer items-center gap-3 px-4 py-2.5 text-left outline-none transition-colors hover:bg-panel-raised focus-visible:bg-panel-raised focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:ring-inset ${picked ? "bg-panel-raised" : ""}`}
-                >
-                  <LuContainer size={14} className="shrink-0 text-fg-faint" aria-hidden />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-medium text-fg">
-                      {lane.originState} · {equipmentLabel(lane.equipment)}
-                    </span>
-                    <span className="mt-1 block h-1.5 overflow-hidden rounded-full bg-panel-raised" aria-hidden>
-                      <span className="block h-full rounded-full bg-tone-emerald" style={{ width: `${(lane.carriers / maxCarriers) * 100}%` }} />
-                    </span>
-                  </span>
-                  <span className="tabular shrink-0 text-xs text-fg-muted">{plural(lane.carriers, "carrier")}</span>
-                  <LuChevronRight size={14} className="shrink-0 text-fg-faint" aria-hidden />
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-      <p className="border-t border-line px-4 py-3 text-xs text-fg-faint">
-        Carriers who ran a lane that has a load on the board now. Click a state or a lane to list them.
-      </p>
-    </aside>
+    <RankedMapPanel
+      title="Lanes open now"
+      icon={LuTrendingUp}
+      tone="ok"
+      badge="Top 5"
+      notice={
+        data &&
+        !data.boardAvailable && (
+          <p role="status" className="flex items-center gap-1.5 border-b border-line px-4 py-2 text-xs text-warn">
+            <LuTriangleAlert size={12} className="shrink-0" aria-hidden />
+            The TMS board is unavailable, so no lane shows as open
+          </p>
+        )
+      }
+      map={{ counts: origins, selected: growth && origin ? origin : null, onSelect: onState, label: "Carriers with an open lane, by origin state", unit: "carrier" }}
+      rowIcon={LuContainer}
+      rows={rows}
+      empty={data === null ? "Loading open lanes..." : "No lane a listed carrier ran is open right now."}
+      footer="Carriers who ran a lane that has a load on the board now. Click a state or a lane to list them."
+    />
   );
 }
 
@@ -235,7 +188,7 @@ export function Network() {
   const [openKeys, setOpenKeys] = useState<string[]>([]);
 
   const query = useMemo(() => networkQuery(searchParams), [searchParams]);
-  const { sort, dir, page, pageSize } = networkPaging(searchParams);
+  const { sort, dir, page, pageSize } = paging(searchParams, networkSorts, defaultSort);
   const { data, error, loading } = usePoll<TowerNetwork>(`/api/network${query ? `?${query}` : ""}`, networkPollMs, "carrier network");
 
   const view = networkViews.find((v) => v === searchParams.get("view")) ?? "all";
@@ -256,20 +209,7 @@ export function Network() {
     [],
   );
 
-  const onTable: TableProps<NetworkCarrier>["onChange"] = (_pagination, _filters, sorter) => {
-    const picked = Array.isArray(sorter) ? sorter[0] : sorter;
-    // The table's column keys are the adapter's sort names.
-    const next = picked?.order ? networkSorts.find((s) => s === picked.columnKey) : undefined;
-    updateSearch(next ? sortChange(next, picked?.order === "ascend" ? "asc" : "desc") : sortChange(defaultSort, "desc"));
-  };
-  const onPage = (nextPage: number, nextSize: number) =>
-    updateSearch(
-      nextSize !== pageSize
-        ? { pageSize: nextSize === defaultPageSize ? null : String(nextSize), page: null }
-        : { page: nextPage === 1 ? null : String(nextPage) },
-    );
-
-  const sorted = (key: NetworkSort): AntdOrder | null => (sort === key ? (dir === "asc" ? "ascend" : "descend") : null);
+  const sorted = (key: NetworkSort) => sortOrder(key, sort, dir);
   const toggle = (key: string) => setOpenKeys((keys) => (keys.includes(key) ? keys.filter((k) => k !== key) : [...keys, key]));
 
   const columns: TableColumnsType<NetworkCarrier> = [
@@ -443,12 +383,7 @@ export function Network() {
               </div>
             </ConfigProvider>
 
-            {error && data && (
-              <p role="status" className="flex items-center gap-1.5 border-b border-line px-4 py-2 text-xs text-risk">
-                <LuTriangleAlert size={12} className="shrink-0" aria-hidden />
-                <span className="truncate">{error}</span>
-              </p>
-            )}
+            <ErrorBanner error={data ? error : null} />
 
             <Table<NetworkCarrier>
               rowKey="key"
@@ -457,7 +392,7 @@ export function Network() {
               dataSource={data?.rows ?? []}
               loading={loading && data === null}
               pagination={false}
-              onChange={onTable}
+              onChange={onSortClick<NetworkCarrier, NetworkSort>(networkSorts, defaultSort)}
               locale={{ emptyText: <span className="block py-8 text-sm text-fg-muted">{empty}</span> }}
               expandable={{
                 expandedRowKeys: openKeys,
@@ -465,20 +400,7 @@ export function Network() {
                 expandedRowRender: (carrier) => <CarrierCalls carrier={carrier} now={now} />,
               }}
             />
-            {data !== null && data.total > 0 && (
-              <div className="flex justify-end border-t border-line px-4 py-3">
-                <Pagination
-                  size="small"
-                  current={page}
-                  pageSize={pageSize}
-                  total={data.total}
-                  pageSizeOptions={pageSizes.map(String)}
-                  showSizeChanger
-                  showTotal={(total, [from, to]) => `${from}-${to} of ${total}`}
-                  onChange={onPage}
-                />
-              </div>
-            )}
+            <TablePager page={page} pageSize={pageSize} total={data?.total ?? 0} />
           </section>
 
           <SidePanel data={data} view={view} origin={origin} equipment={equipment} onPick={onPick} />

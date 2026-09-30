@@ -1,8 +1,6 @@
-import { demandSorts, pageSizes, type DemandCarrier, type DemandLane, type TowerDemand } from "./contracts.ts";
-import { equipmentLabel } from "./format.ts";
-import { defaultPageSize, type SortDir } from "./network.ts";
-
-const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+import { demandSorts, type DemandCarrier, type DemandLane, type TowerDemand } from "./contracts.ts";
+import { equipmentLabel, plural } from "./format.ts";
+import { paging, setPaging } from "./list-query.ts";
 
 type LaneId = Pick<DemandLane, "originState" | "destinationState" | "equipment">;
 
@@ -24,31 +22,8 @@ export function demandQuery(search: Pick<URLSearchParams, "get">): string {
   }
   const next = search.get("next");
   if (demandNextSteps.some((step) => step === next)) query.set("next", next!);
-  const { sort, dir, page, pageSize } = demandPaging(search);
-  if (sort !== defaultDemandSort) query.set("sort", sort);
-  if (dir === "asc") query.set("dir", "asc");
-  if (page > 1) query.set("page", String(page));
-  if (pageSize !== defaultPageSize) query.set("pageSize", String(pageSize));
+  setPaging(query, paging(search, demandSorts, defaultDemandSort), defaultDemandSort);
   return query.toString();
-}
-
-// Sort and paging as the URL holds them, defaults filled in.
-export function demandPaging(search: Pick<URLSearchParams, "get">): { sort: DemandSort; dir: SortDir; page: number; pageSize: number } {
-  const sort = demandSorts.find((s) => s === search.get("sort")) ?? defaultDemandSort;
-  const dir: SortDir = search.get("dir") === "asc" ? "asc" : "desc";
-  const page = Number(search.get("page"));
-  const pageSize = Number(search.get("pageSize"));
-  return {
-    sort,
-    dir,
-    page: Number.isInteger(page) && page > 1 ? page : 1,
-    pageSize: (pageSizes as readonly number[]).includes(pageSize) ? pageSize : defaultPageSize,
-  };
-}
-
-// The URL changes for a new sort; defaults are dropped and the list starts again at page 1.
-export function demandSortChange(sort: DemandSort, dir: SortDir): Record<string, string | null> {
-  return { sort: sort === defaultDemandSort ? null : sort, dir: dir === "asc" ? "asc" : null, page: null };
 }
 
 // A row's identity: the adapter groups by origin, destination and equipment, null being "Any".
@@ -112,12 +87,6 @@ export function nextStepHref(lane: Pick<DemandLane, "originState" | "equipment">
   const params = new URLSearchParams({ origin: lane.originState });
   if (lane.equipment) params.set("equipment", lane.equipment);
   return `/?${params.toString()}`;
-}
-
-// The origins with the most unmet asks; the adapter already lists them most first. A state with none
-// is not a place carriers wait.
-export function topOrigins(origins: TowerDemand["origins"], limit = 5): TowerDemand["origins"] {
-  return origins.filter((row) => row.unmet > 0).slice(0, limit);
 }
 
 // The query for one row's carriers. Leaving destination or equipment out selects the row the

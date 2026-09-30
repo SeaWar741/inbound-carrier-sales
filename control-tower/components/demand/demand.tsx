@@ -1,36 +1,34 @@
 "use client";
 
-import { ConfigProvider, Pagination, Table, Tooltip, type TableColumnsType, type TableProps } from "antd";
+import { ConfigProvider, Table, Tooltip, type TableColumnsType } from "antd";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useMemo, useState } from "react";
-import { LuBadgeDollarSign, LuChevronDown, LuChevronRight, LuContainer, LuFlag, LuRadar, LuRoute, LuSearchX, LuTriangleAlert, LuUsers } from "react-icons/lu";
+import { LuBadgeDollarSign, LuChevronDown, LuContainer, LuFlag, LuRadar, LuRoute, LuSearchX, LuUsers } from "react-icons/lu";
 import { Tile } from "@/components/dashboard/kpi-tiles";
 import { DemandCarriers } from "@/components/demand/demand-carriers";
 import { EquipmentTag, nextStyle, trendStyle } from "@/components/demand/demand-parts";
 import { equipmentOptions, HeaderSelect, SearchInput, stateOptions } from "@/components/inbox/filter-bar";
-import { StateMap } from "@/components/state-map";
-import { demandSorts, pageSizes, type DemandLane, type TowerDemand } from "@/lib/contracts";
+import { ErrorBanner, iconButton, numberDirections, onSortClick, sortOrder, TablePager, textDirections } from "@/components/paged-table";
+import { RankedMapPanel } from "@/components/ranked-map-panel";
+import { demandSorts, type DemandLane, type TowerDemand } from "@/lib/contracts";
 import {
   defaultDemandSort,
   demandKey,
   demandFilterKeys,
-  demandPaging,
   demandQuery,
   demandSaid,
-  demandSortChange,
   demandTrend,
   demandUnmet,
   laneLabel,
   nextOf,
   nextStepHref,
-  topOrigins,
   unmetBarPercent,
   weekChange,
   type DemandSort,
 } from "@/lib/demand";
-import { defaultPageSize } from "@/lib/network";
-import { updateSearch } from "@/lib/use-paged-list";
+import { paging } from "@/lib/list-query";
+import { updateSearch } from "@/lib/url-search";
 import { usePoll } from "@/lib/use-poll";
 
 // Demand builds up over days, not seconds.
@@ -44,64 +42,33 @@ const nextOptions = [
   { value: "rate", label: nextStyle.rate.label },
 ];
 
-const iconButton =
-  "grid size-7 cursor-pointer place-items-center rounded-md text-fg-muted outline-none transition-colors hover:bg-panel-raised hover:text-fg focus-visible:ring-2 focus-visible:ring-accent/40";
-
-type AntdOrder = "ascend" | "descend";
-
-// Text sorts A to Z first, numbers most first. Neither direction clears the sort, so a header click
-// always shows a sorted list.
-const textDirections: AntdOrder[] = ["ascend", "descend", "ascend"];
-const numberDirections: AntdOrder[] = ["descend", "ascend", "descend"];
-
+// Where carriers wait: unmet asks per origin state on the map, the top origins below it. The adapter
+// lists only origins with unmet asks, most first.
 function SidePanel({ data, origin, onPick }: { data: TowerDemand | null; origin: string; onPick: (origin: string) => void }) {
-  const counts = useMemo(() => (data?.origins ?? []).filter((row) => row.unmet > 0).map((row) => ({ state: row.originState, count: row.unmet })), [data?.origins]);
-  const top = topOrigins(data?.origins ?? []);
-  const maxUnmet = top[0]?.unmet ?? 1;
+  const counts = useMemo(() => (data?.origins ?? []).map((row) => ({ state: row.originState, count: row.unmet })), [data?.origins]);
   // A second click on the picked state lets it go.
   const onState = useCallback((state: string) => onPick(state === origin ? "" : state), [origin, onPick]);
+  const rows = (data?.origins ?? []).map((row) => ({
+    key: row.originState,
+    label: row.originState,
+    count: row.unmet,
+    countLabel: `${row.unmet} unmet`,
+    picked: row.originState === origin,
+    onClick: () => onState(row.originState),
+  }));
 
   return (
-    <aside aria-label="Where carriers wait" className="overflow-hidden rounded-lg border border-line bg-panel">
-      <div className="flex items-center gap-2 border-b border-line px-4 py-3 text-sm font-semibold text-fg">
-        <LuRoute size={15} className="text-warn" aria-hidden />
-        Where carriers wait
-        <span className="ml-auto text-xs font-normal text-fg-muted">Top 5 origins</span>
-      </div>
-      <div className="h-56 border-b border-line">
-        <StateMap counts={counts} selected={origin || null} onSelect={onState} tone="warn" label="Unmet asks by origin state" unit="unmet ask" />
-      </div>
-      {top.length === 0 ? (
-        <p className="px-4 py-6 text-center text-sm text-fg-muted">{data === null ? "Loading origins..." : "No origin has unmet asks."}</p>
-      ) : (
-        <ul className="divide-y divide-line">
-          {top.map((row) => {
-            const picked = row.originState === origin;
-            return (
-              <li key={row.originState}>
-                <button
-                  type="button"
-                  aria-pressed={picked}
-                  onClick={() => onState(row.originState)}
-                  className={`flex w-full cursor-pointer items-center gap-3 px-4 py-2.5 text-left outline-none transition-colors hover:bg-panel-raised focus-visible:bg-panel-raised focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:ring-inset ${picked ? "bg-panel-raised" : ""}`}
-                >
-                  <LuRoute size={14} className="shrink-0 text-fg-faint" aria-hidden />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-medium text-fg">{row.originState}</span>
-                    <span className="mt-1 block h-1.5 overflow-hidden rounded-full bg-panel-raised" aria-hidden>
-                      <span className="block h-full rounded-full bg-warn" style={{ width: `${(row.unmet / maxUnmet) * 100}%` }} />
-                    </span>
-                  </span>
-                  <span className="tabular shrink-0 text-xs text-fg-muted">{row.unmet} unmet</span>
-                  <LuChevronRight size={14} className="shrink-0 text-fg-faint" aria-hidden />
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-      <p className="border-t border-line px-4 py-3 text-xs text-fg-faint">Unmet asks by origin state, over every lane. Click a state to filter the lanes.</p>
-    </aside>
+    <RankedMapPanel
+      title="Where carriers wait"
+      icon={LuRoute}
+      tone="warn"
+      badge="Top 5 origins"
+      map={{ counts, selected: origin || null, onSelect: onState, label: "Unmet asks by origin state", unit: "unmet ask" }}
+      rowIcon={LuRoute}
+      rows={rows}
+      empty={data === null ? "Loading origins..." : "No origin has unmet asks."}
+      footer="Unmet asks by origin state, over every lane. Click a state to filter the lanes."
+    />
   );
 }
 
@@ -113,7 +80,7 @@ export function Demand() {
   const [openKeys, setOpenKeys] = useState<string[]>([]);
 
   const query = useMemo(() => demandQuery(searchParams), [searchParams]);
-  const { sort, dir, page, pageSize } = demandPaging(searchParams);
+  const { sort, dir, page, pageSize } = paging(searchParams, demandSorts, defaultDemandSort);
   const { data, error, loading } = usePoll<TowerDemand>(`/api/demand${query ? `?${query}` : ""}`, demandPollMs, "demand data");
 
   const q = searchParams.get("q") ?? "";
@@ -127,20 +94,7 @@ export function Demand() {
   const onPick = useCallback((picked: string) => onFilter("origin", picked), [onFilter]);
   const onClearFilters = useCallback(() => updateSearch({ ...Object.fromEntries(filterKeys.map((key) => [key, null])), page: null }), []);
 
-  const onTable: TableProps<DemandLane>["onChange"] = (_pagination, _filters, sorter) => {
-    const picked = Array.isArray(sorter) ? sorter[0] : sorter;
-    // The table's column keys are the adapter's sort names.
-    const nextSort = picked?.order ? demandSorts.find((s) => s === picked.columnKey) : undefined;
-    updateSearch(nextSort ? demandSortChange(nextSort, picked?.order === "ascend" ? "asc" : "desc") : demandSortChange(defaultDemandSort, "desc"));
-  };
-  const onPage = (nextPage: number, nextSize: number) =>
-    updateSearch(
-      nextSize !== pageSize
-        ? { pageSize: nextSize === defaultPageSize ? null : String(nextSize), page: null }
-        : { page: nextPage === 1 ? null : String(nextPage) },
-    );
-
-  const sorted = (key: DemandSort): AntdOrder | null => (sort === key ? (dir === "asc" ? "ascend" : "descend") : null);
+  const sorted = (key: DemandSort) => sortOrder(key, sort, dir);
   const toggle = (key: string) => setOpenKeys((keys) => (keys.includes(key) ? keys.filter((k) => k !== key) : [...keys, key]));
   // The bars compare the lanes on screen.
   const largest = (data?.rows ?? []).reduce((max, lane) => Math.max(max, demandUnmet(lane)), 0);
@@ -320,12 +274,7 @@ export function Demand() {
               </div>
             </ConfigProvider>
 
-            {error && data && (
-              <p role="status" className="flex items-center gap-1.5 border-b border-line px-4 py-2 text-xs text-risk">
-                <LuTriangleAlert size={12} className="shrink-0" aria-hidden />
-                <span className="truncate">{error}</span>
-              </p>
-            )}
+            <ErrorBanner error={data ? error : null} />
 
             <Table<DemandLane>
               rowKey={demandKey}
@@ -334,7 +283,7 @@ export function Demand() {
               dataSource={data?.rows ?? []}
               loading={loading && data === null}
               pagination={false}
-              onChange={onTable}
+              onChange={onSortClick<DemandLane, DemandSort>(demandSorts, defaultDemandSort)}
               locale={{ emptyText: <span className="block py-8 text-sm text-fg-muted">{empty}</span> }}
               expandable={{
                 expandedRowKeys: openKeys,
@@ -342,20 +291,7 @@ export function Demand() {
                 expandedRowRender: (lane) => <DemandCarriers lane={lane} />,
               }}
             />
-            {data !== null && data.total > 0 && (
-              <div className="flex justify-end border-t border-line px-4 py-3">
-                <Pagination
-                  size="small"
-                  current={page}
-                  pageSize={pageSize}
-                  total={data.total}
-                  pageSizeOptions={pageSizes.map(String)}
-                  showSizeChanger
-                  showTotal={(total, [from, to]) => `${from}-${to} of ${total}`}
-                  onChange={onPage}
-                />
-              </div>
-            )}
+            <TablePager page={page} pageSize={pageSize} total={data?.total ?? 0} />
           </section>
 
           <SidePanel data={data} origin={origin} onPick={onPick} />

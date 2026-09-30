@@ -117,6 +117,11 @@ const equipmentLabels: Record<string, string> = {
   POWER_ONLY: "Power only",
 };
 
+// "1 call", "2 calls"; `many` for the irregular ones ("searches").
+export function plural(n: number, one: string, many = `${one}s`): string {
+  return `${n} ${n === 1 ? one : many}`;
+}
+
 export function equipmentLabel(code: string): string {
   return equipmentLabels[code] ?? code;
 }
