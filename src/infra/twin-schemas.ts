@@ -73,6 +73,23 @@ export const tableDdl = {
     value text NOT NULL,
     updated_at timestamp NOT NULL DEFAULT now()
   )`,
+  // One row per search that reached the board, as the carrier asked it (NULL equipment means any),
+  // so the demand radar can show lanes carriers ask for that the board does not cover.
+  load_searches: `CREATE TABLE IF NOT EXISTS load_searches (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    call_id text NOT NULL,
+    origin_city text,
+    origin_state text,
+    origin_zip text,
+    destination_city text,
+    destination_state text,
+    destination_zip text,
+    equipment text,
+    pickup_date text,
+    results int8 NOT NULL,
+    dropped_impossible int8 NOT NULL DEFAULT 0,
+    created_at timestamp NOT NULL DEFAULT now()
+  )`,
 } as const;
 
 // Changes to tables that already exist; each statement is idempotent and runs on every bootstrap.

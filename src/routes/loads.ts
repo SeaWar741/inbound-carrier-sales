@@ -1,4 +1,4 @@
-import type { FastifyPluginAsync } from "fastify";
+import type { FastifyBaseLogger, FastifyPluginAsync } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { loadsPitchedPerSearch, searchCandidateFactor } from "../constants.ts";
@@ -69,6 +69,20 @@ function toFilters(body: SearchLoadsBody): LoadQueryFilters {
     equipmentType: body.equipmentType,
     pickupDate: body.pickupDate,
   };
+}
+
+// What the carrier asked for and what the board answered, for the operator's demand radar. Fire and forget:
+// the answer to the carrier never waits on it, and only a search that reached the board is recorded, so an
+// outage never reads as unmet demand.
+function recordSearch(twin: TwinClient, body: SearchLoadsBody, results: number, droppedImpossible: number, log: FastifyBaseLogger) {
+  const { origin, destination } = body;
+  void twin
+    .query(
+      sql`INSERT INTO load_searches (call_id, origin_city, origin_state, origin_zip, destination_city, destination_state, destination_zip, equipment, pickup_date, results, dropped_impossible)
+          VALUES (${body.callId}, ${origin.city ?? null}, ${origin.state ?? null}, ${origin.zip ?? null}, ${destination?.city ?? null}, ${destination?.state ?? null}, ${destination?.zip ?? null}, ${body.equipmentType ?? null}, ${body.pickupDate ?? null}, ${results}, ${droppedImpossible})`,
+      z.unknown(),
+    )
+    .catch((error: unknown) => log.warn({ err: error }, "load search not recorded"));
 }
 
 // Picks fields explicitly so the max buy on LoadDetail can never reach a response.
@@ -143,6 +157,7 @@ export function loadRoutes(deps: LoadRouteDeps): FastifyPluginAsync {
           if (noneRead && details.includes("unavailable")) {
             return noLoads("tms_unavailable", messages.tmsUnavailable);
           }
+          recordSearch(deps.twin, request.body, loads.length, candidates.length - deliverable.length, request.log);
           if (loads.length === 0) {
             return noLoads("no_loads", candidates.length > 0 ? messages.windowsTooTight : messages.noLoads);
           }
