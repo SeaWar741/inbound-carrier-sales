@@ -157,7 +157,10 @@ export function loadRoutes(deps: LoadRouteDeps): FastifyPluginAsync {
           if (noneRead && details.includes("unavailable")) {
             return noLoads("tms_unavailable", messages.tmsUnavailable);
           }
-          recordSearch(deps.twin, request.body, loads.length, candidates.length - deliverable.length, request.log);
+          // A search that found nothing only because some details could not be read is not demand the board missed.
+          if (loads.length > 0 || !details.includes("unavailable")) {
+            recordSearch(deps.twin, request.body, loads.length, candidates.length - deliverable.length, request.log);
+          }
           if (loads.length === 0) {
             return noLoads("no_loads", candidates.length > 0 ? messages.windowsTooTight : messages.noLoads);
           }

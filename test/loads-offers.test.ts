@@ -385,6 +385,23 @@ describe("POST /v1/loads/search", () => {
     expect(res.json().loads.map((l: { loadId: string }) => l.loadId)).toEqual(["LD2"]);
   });
 
+  it("records no search when nothing was pitched and some details could not be read", async () => {
+    const tms = {
+      queryLoads: vi.fn(async () => [summary("LD1", "OPEN"), summary("LD2", "OPEN")]),
+      getLoad: vi.fn(async (loadId: string) => {
+        if (loadId === "LD1") throw new TmsUnavailableError("LOAD_GET", 3, false, "timeout");
+        return detail(loadId, "OPEN");
+      }),
+    };
+    // The one load that was read cannot be delivered on time, so nothing is pitched.
+    const target = serverWith(tms, { estimate: async () => ({ feasibility: "impossible" }) as TripSnapshot });
+    const res = await search({ callId: "call-ok", originState: "GA" }, target);
+    await target.close();
+    expect(res.json()).toMatchObject({ status: "no_loads" });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(searchInserts).toEqual([]);
+  });
+
   it("answers tms_unavailable when no load detail could be read", async () => {
     const tms = {
       queryLoads: vi.fn(async () => [summary("LD1", "OPEN"), summary("LD2", "OPEN")]),

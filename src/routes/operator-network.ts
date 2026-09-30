@@ -1,4 +1,4 @@
-import type { FastifyPluginAsync } from "fastify";
+import type { FastifyBaseLogger, FastifyPluginAsync } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import {
@@ -20,6 +20,7 @@ import {
 import {
   inboxPageSize,
   openLanesCacheMs,
+  openLanesPerEquipment,
   operatorTimeZone,
   segmentNewMaxCalls,
   segmentRecentDays,
@@ -35,9 +36,13 @@ export type OperatorNetworkDeps = { twin: Pick<TwinClient, "query">; tms: Pick<T
 
 // The board's open lanes as `STATE|EQUIPMENT`, one LOAD_QUERY per equipment type. Null when any
 // query fails: a partial board would tag growth on some lanes and silently not on others.
-export async function openLanes(tms: Pick<TmsClient, "queryLoads">): Promise<Set<string> | null> {
+export async function openLanes(tms: Pick<TmsClient, "queryLoads">, log: Pick<FastifyBaseLogger, "warn">): Promise<Set<string> | null> {
   try {
-    const boards = await Promise.all(equipmentTypes.map((equipmentType) => tms.queryLoads({ equipmentType, maxResults: 50 })));
+    const boards = await Promise.all(
+      equipmentTypes.map((equipmentType) => tms.queryLoads({ equipmentType, maxResults: openLanesPerEquipment })),
+    );
+    // LOAD_QUERY has no status filter, so a full answer may have left open loads out.
+    if (boards.some((board) => board.length === openLanesPerEquipment)) log.warn("open lanes may be partial: an equipment type filled the TMS cap");
     return new Set(boards.flat().filter((load) => load.status === "OPEN").map((load) => `${load.origState}|${load.equipmentType}`));
   } catch {
     return null;
@@ -83,7 +88,7 @@ export function networkQuery(params: OperatorNetworkQuery, lanes: ReadonlySet<st
         ` + carrierKey("c") + ` AS carrier_key,
         ` + windowCondition(params) + ` AS in_window,
         EXISTS (SELECT 1 FROM offers o WHERE o.call_id = c.call_id) AS negotiable,
-        (SELECT count(*) FROM holds h WHERE h.call_id = c.call_id AND h.status = 'booked') AS booked,
+        (SELECT count(*) FROM holds h WHERE h.call_id = c.call_id AND h.status IN ('booked', 'booked_unconfirmed')) AS booked,
         (SELECT count(*) FROM load_searches ls WHERE ls.call_id = c.call_id) AS searched
       FROM calls c
     ), facts AS (
@@ -296,8 +301,7 @@ export function demandQuery(params: OperatorDemandQuery): SqlStatement {
         ORDER BY g.unmet DESC, g.searches DESC, g.origin_state, g.destination_state NULLS LAST, g.equipment NULLS LAST
       ) AS ord
       FROM grouped g
-      WHERE (g.unmet > 0 OR g.searches > 0)
-        AND ` +
+      WHERE ` +
     (filters.length > 0 ? filters.join("\n        AND ") : "TRUE") +
     `
     )
@@ -337,7 +341,7 @@ export function demandCarriersQuery(params: OperatorDemandCarriersQuery): SqlSta
       GROUP BY a.carrier_key
     ), ordered AS (
       SELECT g.*, row_number() OVER (ORDER BY g.asks DESC, g.carrier_key) AS ord
-      FROM grouped g WHERE g.asks > 0
+      FROM grouped g
     )
     SELECT (SELECT count(*) FROM ordered) AS total,
       COALESCE((SELECT json_agg(r ORDER BY r.ord) FROM (
@@ -397,9 +401,9 @@ export function operatorNetworkRoutes(deps: OperatorNetworkDeps): FastifyPluginA
     // Only a board that was read is kept; after a TMS failure the next request tries again.
     let board: { lanes: Set<string>; readAt: number } | undefined;
 
-    async function currentLanes(): Promise<Set<string> | null> {
+    async function currentLanes(log: FastifyBaseLogger): Promise<Set<string> | null> {
       if (board && Date.now() - board.readAt < openLanesCacheMs) return board.lanes;
-      const lanes = await openLanes(deps.tms);
+      const lanes = await openLanes(deps.tms, log);
       if (lanes) board = { lanes, readAt: Date.now() };
       return lanes;
     }
@@ -409,7 +413,7 @@ export function operatorNetworkRoutes(deps: OperatorNetworkDeps): FastifyPluginA
       { schema: { querystring: operatorNetworkQuery, response: { 200: operatorNetworkResponse, 503: operatorWallUnavailableResponse } } },
       async (request, reply) => {
         const params = request.query;
-        const lanes = await currentLanes();
+        const lanes = await currentLanes(request.log);
         if (!lanes) request.log.warn("open lanes unavailable, growth tags skipped");
         try {
           const [row] = await deps.twin.query(networkQuery(params, lanes), networkResult);

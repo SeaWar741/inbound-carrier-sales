@@ -74,6 +74,8 @@ export const segmentTopMinRate = 0.5;
 // Open lanes change as loads are booked, but the growth tag is a hint, not a quote; ten minutes
 // keeps the network page to five LOAD_QUERY calls per ten minutes.
 export const openLanesCacheMs = 10 * 60 * 1000;
+// LOAD_QUERY's own cap on results per query.
+export const openLanesPerEquipment = 50;
 
 // Trip estimate. Class 8 tractor-trailers average 6.3 mpg (AFDC data/10310, from FHWA VM-1 2024).
 export const truckMpg = 6.3;

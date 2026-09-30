@@ -180,8 +180,9 @@ describe("GET /v1/operator/network", () => {
     expect(relationship).not.toContain("bookings >= 2");
     expect(text).toContain("(f.bookings >= 2 AND f.bookings >= 0.5 * f.negotiable_calls) AS top");
     expect(text).toContain("count(*) FILTER (WHERE k.in_window AND k.negotiable) AS negotiable_calls");
+    // A booking whose TMS confirmation is pending is still a booking, as in the inbox and the dashboard.
+    expect(text).toContain("h.status IN ('booked', 'booked_unconfirmed')) AS booked");
     expect(text).toContain("EXISTS (SELECT 1 FROM offers o WHERE o.call_id = c.call_id) AS negotiable");
-    expect(text).toContain("h.status = 'booked') AS booked");
     expect(text).toContain("c.created_at >= (now() - interval '30 days')::timestamp AS in_window");
   });
 
@@ -357,19 +358,18 @@ describe("GET /v1/operator/demand", () => {
     expect(text).toContain("count(DISTINCT a.carrier_key) AS carriers");
   });
 
-  it("orders by unmet then searches then lane, keeps only lanes with demand, and pages", () => {
+  it("orders by unmet then searches then lane, and pages", () => {
     const text = demandQuery(operatorDemandQuery.parse({ page: "3" })).text;
     expect(text).toContain(
       "ORDER BY g.unmet DESC, g.searches DESC, g.origin_state, g.destination_state NULLS LAST, g.equipment NULLS LAST",
     );
-    expect(text).toContain("WHERE (g.unmet > 0 OR g.searches > 0)");
     expect(text).toContain("GROUP BY a.origin_state, a.destination_state, a.equipment");
     expect(text).toContain("p.ord > 50 AND p.ord <= 75");
   });
 
   it("renders the equipment and origin filters as escaped SQL", () => {
     const text = demandQuery(operatorDemandQuery.parse({ equipment: ["reefer", "dry van"], origin: "tx" })).text;
-    expect(text).toContain("AND g.equipment IN (E'REEFER', E'DRY_VAN')");
+    expect(text).toContain("WHERE g.equipment IN (E'REEFER', E'DRY_VAN')");
     expect(text).toContain("AND g.origin_state = E'TX'");
   });
 
