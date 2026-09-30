@@ -91,9 +91,9 @@ const views: Record<OperatorNetworkQuery["view"], string> = {
 // applies the bar filters, the counts and KPIs group it by view, and the total and page add the chosen
 // view; the open lane panel reads `listed`, before the filters.
 export function networkQuery(params: OperatorNetworkQuery, lanes: ReadonlySet<string> | null): SqlStatement {
-  const triples = [...(lanes ?? [])].map((lane) => lane.split("|") as [string, string, string]);
+  const tripleKeys = [...(lanes ?? [])];
+  const triples = tripleKeys.map((lane) => lane.split("|") as [string, string, string]);
   const unique = (values: string[]) => [...new Set(values)];
-  const tripleKeys = triples.map(([origin, destination, equipment]) => `${origin}|${destination}|${equipment}`);
   const pairs = unique(triples.map(([origin, , equipment]) => `${origin}|${equipment}`));
   const routes = unique(triples.map(([origin, destination]) => `${origin}|${destination}`));
   const states = unique(triples.map(([origin]) => origin));
@@ -104,6 +104,9 @@ export function networkQuery(params: OperatorNetworkQuery, lanes: ReadonlySet<st
   const laneFilters: string[] = [];
   if (params.equipment.length > 0) laneFilters.push(sql`l.equipment IN (${params.equipment})`.text);
   if (params.origin) laneFilters.push(sql`l.origin_state = ${params.origin}`.text);
+  // The side panel counts carriers per open lane; clicking it asks for the growth view, so the lane
+  // filter then reads the same open lanes and the table total matches the number clicked.
+  if (laneFilters.length > 0 && params.view === "growth") laneFilters.push("l.open");
   if (laneFilters.length > 0) {
     filters.push(`EXISTS (SELECT 1 FROM lanes l WHERE l.carrier_key = c.carrier_key AND ${laneFilters.join(" AND ")})`);
   }
@@ -202,7 +205,7 @@ export function networkQuery(params: OperatorNetworkQuery, lanes: ReadonlySet<st
       COALESCE((SELECT json_agg(o ORDER BY o.carriers DESC, o.origin_state, o.equipment NULLS LAST) FROM (
         SELECT l.origin_state, l.equipment, count(DISTINCT l.carrier_key) AS carriers
         FROM lanes l JOIN listed c ON c.carrier_key = l.carrier_key
-        WHERE l.open GROUP BY l.origin_state, l.equipment
+        WHERE l.open AND l.equipment IS NOT NULL GROUP BY l.origin_state, l.equipment
       ) o), '[]'::json) AS open_lanes,
       COALESCE((SELECT json_agg(o ORDER BY o.carriers DESC, o.origin_state) FROM (
         SELECT l.origin_state, count(DISTINCT l.carrier_key) AS carriers
@@ -275,7 +278,7 @@ export const networkResult = z.object({
   called_kpi: count,
   booked_kpi: count,
   negotiated_kpi: count,
-  open_lanes: z.array(z.object({ origin_state: z.string(), equipment: z.string().nullable(), carriers: count })),
+  open_lanes: z.array(z.object({ origin_state: z.string(), equipment: z.string(), carriers: count })),
   open_origins: z.array(z.object({ origin_state: z.string(), carriers: count })),
   rows: z.array(networkRow),
 });

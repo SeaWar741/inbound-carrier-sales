@@ -79,7 +79,7 @@ const networkRow = {
   negotiated_kpi: "3",
   open_lanes: [
     { origin_state: "GA", equipment: "DRY_VAN", carriers: "1" },
-    { origin_state: "TX", equipment: null, carriers: "1" },
+    { origin_state: "TX", equipment: "REEFER", carriers: "1" },
   ],
   open_origins: [
     { origin_state: "GA", carriers: "1" },
@@ -160,7 +160,7 @@ describe("GET /v1/operator/network", () => {
     expect(body.kpis).toEqual({ called: 2, booked: 2, negotiated: 3 });
     expect(body.openLanes).toEqual([
       { originState: "GA", equipment: "DRY_VAN", carriers: 1 },
-      { originState: "TX", equipment: null, carriers: 1 },
+      { originState: "TX", equipment: "REEFER", carriers: 1 },
     ]);
     expect(body.openOrigins).toEqual([
       { originState: "GA", carriers: 1 },
@@ -255,7 +255,7 @@ describe("GET /v1/operator/network", () => {
     expect(text).toContain("(SELECT COALESCE(sum(bookings), 0) FROM filtered) AS booked_kpi");
     expect(text).toContain("(SELECT COALESCE(sum(loads_negotiated), 0) FROM filtered) AS negotiated_kpi");
     expect(text).toContain("listed AS (\n      SELECT c.* FROM classified c WHERE c.calls > 0 OR c.relationship = 'at_risk'");
-    expect(text).toContain("FROM lanes l JOIN listed c ON c.carrier_key = l.carrier_key\n        WHERE l.open GROUP BY l.origin_state, l.equipment");
+    expect(text).toContain("FROM lanes l JOIN listed c ON c.carrier_key = l.carrier_key\n        WHERE l.open AND l.equipment IS NOT NULL GROUP BY l.origin_state, l.equipment");
     expect(text).toContain("WHERE l.open GROUP BY l.origin_state\n");
   });
 
@@ -265,6 +265,18 @@ describe("GET /v1/operator/network", () => {
     expect(filtered).toContain("EXISTS (SELECT 1 FROM lanes l WHERE l.carrier_key = c.carrier_key AND l.equipment IN (E'REEFER') AND l.origin_state = E'GA')");
     expect(filtered).toContain("c.carrier_name ILIKE E'%50\\\\%\\\\_o''k%'");
     expect(text).toContain("c.created_at >= (now() - interval '7 days')::timestamp AS in_window");
+    expect(filtered).not.toContain("l.open");
+  });
+
+  it("narrows the lane filter to open lanes on the growth view, so a panel click keeps the panel's count", () => {
+    const text = networkQuery(operatorNetworkQuery.parse({ view: "growth", equipment: ["reefer"], origin: "ga" }), new Set()).text;
+    const filtered = text.slice(text.indexOf("filtered AS ("), text.indexOf("ordered AS ("));
+    expect(filtered).toContain("l.equipment IN (E'REEFER') AND l.origin_state = E'GA' AND l.open)");
+  });
+
+  it("accepts only the listed page sizes", () => {
+    expect(operatorNetworkQuery.parse({ pageSize: "10" }).pageSize).toBe(10);
+    expect(operatorNetworkQuery.safeParse({ pageSize: "30" }).success).toBe(false);
   });
 
   it("matches growth against the open board lanes, reading them once per cache period", async () => {

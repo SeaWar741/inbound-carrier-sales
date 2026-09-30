@@ -559,11 +559,7 @@ export const demandSorts = ["lane", "equipment", "unmet", "thisWeek", "carriers"
 export const pageSizes = [10, 25, 50] as const;
 
 const sortDir = z.enum(["asc", "desc"]).default("desc");
-const pageSize = z.coerce
-  .number()
-  .int()
-  .refine((size) => (pageSizes as readonly number[]).includes(size), { message: "pageSize must be 10, 25 or 50" })
-  .default(25);
+const pageSize = z.coerce.number().pipe(z.literal(pageSizes)).default(25);
 
 // The inbox window (30 days by default, long enough to see a carrier's pattern), the bar filters and a view.
 export const operatorNetworkQuery = withDayRange(
@@ -634,7 +630,7 @@ export const operatorNetworkResponse = z.object({
   kpis: z.object({ called: z.number().int(), booked: z.number().int(), negotiated: z.number().int() }),
   // Distinct listed carriers per open lane and per origin state with one, without the filters or the
   // view, so the side panel keeps its shape while the list narrows. A null equipment is a search for any.
-  openLanes: z.array(z.object({ originState: z.string(), equipment: z.string().nullable(), carriers: z.number().int() })),
+  openLanes: z.array(z.object({ originState: z.string(), equipment: z.string(), carriers: z.number().int() })),
   openOrigins: z.array(z.object({ originState: z.string(), carriers: z.number().int() })),
   // False when the TMS board could not be read; growth is then false for every carrier.
   boardAvailable: z.boolean(),
