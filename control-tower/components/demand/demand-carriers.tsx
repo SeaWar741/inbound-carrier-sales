@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { LuLoaderCircle, LuTriangleAlert, LuTruck } from "react-icons/lu";
+import { LuChevronRight, LuLoaderCircle, LuTriangleAlert, LuUserRound, LuUsers } from "react-icons/lu";
+import { Section } from "@/components/section";
 import type { DemandCarrier, DemandLane, TowerDemandCarriers } from "@/lib/contracts";
 import { carrierName } from "@/lib/format";
 import { asksLabel, carrierSearchHref, demandCarriersQuery } from "@/lib/demand";
@@ -10,14 +11,16 @@ import { fetchTower } from "@/lib/use-poll";
 
 type Loaded = { rows: DemandCarrier[]; total: number; page: number };
 
+// One carrier; the whole row opens it on the Carriers page, searched by MC or name.
 function CarrierRow({ carrier }: { carrier: DemandCarrier }) {
   const href = carrierSearchHref(carrier);
   const body = (
     <>
-      <LuTruck size={14} className="shrink-0 text-fg-faint" aria-hidden />
+      <LuUserRound size={14} className="shrink-0 text-fg-faint" aria-hidden />
       <span className="min-w-0 truncate font-medium text-fg">{carrierName({ ...carrier, dotNumber: null })}</span>
-      {carrier.carrierName && carrier.mcNumber && <span className="tabular shrink-0 text-xs text-fg-muted">MC {carrier.mcNumber}</span>}
+      {carrier.carrierName && carrier.mcNumber && <span className="shrink-0 font-mono text-xs text-fg-muted">MC {carrier.mcNumber}</span>}
       <span className="tabular ml-auto shrink-0 text-fg-muted">{asksLabel(carrier.asks)}</span>
+      {href && <LuChevronRight size={14} className="shrink-0 text-fg-faint" aria-hidden />}
     </>
   );
   const row = "flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-sm";
@@ -34,9 +37,9 @@ function CarrierRow({ carrier }: { carrier: DemandCarrier }) {
   );
 }
 
-// The carriers behind one expanded row, most asks first as the adapter sends them. Read once when
-// the row opens; "Load more" appends the next page.
-export function DemandCarriers({ lane }: { lane: DemandLane }) {
+// The carriers behind the selected lane, most asks first as the adapter sends them. Read once per
+// lane (the panel is keyed by it); "Load more" appends the next page.
+export function DemandCarriers({ lane }: { lane: Pick<DemandLane, "originState" | "destinationState" | "equipment"> }) {
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [page, setPage] = useState(1);
   const [attempt, setAttempt] = useState(0);
@@ -67,7 +70,7 @@ export function DemandCarriers({ lane }: { lane: DemandLane }) {
 
   const rows = loaded?.rows ?? [];
   return (
-    <div className="border-t border-line bg-bg px-4 py-3 pl-10">
+    <Section icon={LuUsers} title="Who asked" aside={loaded && <span className="tabular text-xs text-fg-faint">{loaded.total}</span>}>
       {error && (
         <p role="status" className="mb-2 flex items-center gap-1 text-xs text-risk">
           <LuTriangleAlert size={12} className="shrink-0" aria-hidden />
@@ -92,7 +95,7 @@ export function DemandCarriers({ lane }: { lane: DemandLane }) {
       )}
       {loaded !== null && rows.length === 0 && <p className="text-sm text-fg-muted">No carriers recorded on this lane</p>}
       {rows.length > 0 && (
-        <ul aria-label="Carriers who asked" className="max-w-2xl">
+        <ul aria-label="Carriers who asked" className="-mx-2">
           {rows.map((carrier) => (
             <CarrierRow key={carrier.key} carrier={carrier} />
           ))}
@@ -114,6 +117,6 @@ export function DemandCarriers({ lane }: { lane: DemandLane }) {
           Load more ({rows.length} of {loaded.total})
         </button>
       )}
-    </div>
+    </Section>
   );
 }

@@ -1,101 +1,130 @@
 "use client";
 
+import { useRef } from "react";
 import type { IconType } from "react-icons";
-import { LuArrowDownRight, LuArrowRight, LuArrowUpRight, LuChevronDown, LuChevronRight, LuContainer, LuLoaderCircle, LuTriangleAlert } from "react-icons/lu";
-import { DemandCarriers } from "@/components/demand/demand-carriers";
-import { Count, SkeletonRows, useLoadMore } from "@/components/paged-list";
+import { LuArrowDown, LuArrowUp, LuContainer, LuEqual, LuLoaderCircle, LuSnowflake } from "react-icons/lu";
+import { SkeletonRows, useLoadMore } from "@/components/paged-list";
 import type { DemandLane, TowerDemand } from "@/lib/contracts";
-import { demandKey, demandSignal, demandTrend, laneLabel, type DemandTrend } from "@/lib/demand";
+import { demandKey, demandSignal, demandTrend, demandUnmet, laneLabel, unmetBarPercent, type DemandTrend } from "@/lib/demand";
 import { equipmentLabel } from "@/lib/format";
 
-// Lane and sentence take the room left; every count column is the same narrow width.
-const columns = "grid grid-cols-[minmax(0,1fr)_repeat(4,5.5rem)_12rem] items-center gap-3";
+// The equipment as the row and the panel show it: an icon and the words, "Any equipment" when the
+// carriers did not say.
+export function EquipmentTag({ equipment, className = "" }: { equipment: string | null; className?: string }) {
+  const Icon = equipment === "REEFER" ? LuSnowflake : LuContainer;
+  return (
+    <span className={`flex min-w-0 items-center gap-1 text-sm text-fg-muted ${className}`}>
+      <Icon size={13} className={`shrink-0 ${equipment ? "text-accent" : "text-fg-faint"}`} aria-hidden />
+      <span className="truncate">{equipment ? equipmentLabel(equipment) : "Any equipment"}</span>
+    </span>
+  );
+}
 
 // More unmet asks this week is a gap growing, so it reads amber; fewer reads green.
-const trendStyle: Record<DemandTrend, { icon: IconType; tone: string; word: string }> = {
-  up: { icon: LuArrowUpRight, tone: "text-warn", word: "More this week" },
-  down: { icon: LuArrowDownRight, tone: "text-ok", word: "Fewer this week" },
-  flat: { icon: LuArrowRight, tone: "text-fg-faint", word: "Same as last week" },
+export const trendStyle: Record<DemandTrend, { icon: IconType; tone: string; word: string }> = {
+  up: { icon: LuArrowUp, tone: "text-warn", word: "More this week" },
+  down: { icon: LuArrowDown, tone: "text-ok", word: "Fewer this week" },
+  flat: { icon: LuEqual, tone: "text-fg-faint", word: "Same as last week" },
 };
 
 function Trend({ lane }: { lane: DemandLane }) {
   const { trend, text } = demandTrend(lane);
   const { icon: Icon, tone, word } = trendStyle[trend];
   return (
-    <span title={`${word}: ${text} (searches with no match and offers with no booking)`} className="flex items-center justify-end gap-1.5">
-      <Icon size={16} className={`shrink-0 ${tone}`} aria-label={word} />
-      <span className="tabular truncate text-xs text-fg-muted">{text}</span>
+    <span title="Unmet this week vs last week" className={`flex w-20 shrink-0 items-center justify-end gap-1 text-xs ${tone}`}>
+      <Icon size={13} className="shrink-0" aria-label={word} />
+      <span className="tabular">{text}</span>
     </span>
   );
 }
 
-function DemandRow({ lane, expanded, onToggle }: { lane: DemandLane; expanded: boolean; onToggle: () => void }) {
-  const Chevron = expanded ? LuChevronDown : LuChevronRight;
+// Two lines: rank, lane, equipment, the unmet bar and the week trend; then the signal in words.
+// The lane and equipment widths are fixed so the bars start in one column down the list.
+function DemandRow({
+  lane,
+  rank,
+  largest,
+  selected,
+  onSelect,
+  buttonRef,
+}: {
+  lane: DemandLane;
+  rank: number;
+  largest: number;
+  selected: boolean;
+  onSelect: () => void;
+  buttonRef: (node: HTMLButtonElement | null) => void;
+}) {
+  const unmet = demandUnmet(lane);
   return (
     <li>
       <button
+        ref={buttonRef}
         type="button"
-        onClick={onToggle}
-        aria-expanded={expanded}
-        className={`${columns} w-full cursor-pointer px-4 py-3 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:ring-inset ${
-          expanded ? "bg-accent-soft" : "hover:bg-panel-raised"
+        onClick={onSelect}
+        aria-pressed={selected}
+        className={`w-full cursor-pointer px-4 py-2.5 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:ring-inset ${
+          selected ? "bg-accent-soft" : "hover:bg-panel-raised"
         }`}
       >
-        <span className="flex min-w-0 items-start gap-2">
-          <Chevron size={14} className="mt-1 shrink-0 text-fg-faint" aria-hidden />
-          <span className="min-w-0">
-            <span className="flex min-w-0 items-center gap-2">
-              <span className="shrink-0 font-medium text-fg">{laneLabel(lane)}</span>
-              <span className="flex min-w-0 items-center gap-1 text-sm text-fg-muted">
-                <LuContainer size={13} className="shrink-0 text-accent" aria-hidden />
-                <span className="truncate">{lane.equipment ? equipmentLabel(lane.equipment) : "Any"}</span>
-              </span>
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="tabular w-6 shrink-0 text-right text-sm text-fg-faint">{rank}</span>
+          <span className="w-20 shrink-0 truncate font-semibold text-fg">{laneLabel(lane)}</span>
+          <EquipmentTag equipment={lane.equipment} className="w-32 shrink-0" />
+          <span className="flex min-w-0 flex-1 items-center gap-2" title={`${unmet} unmet: searches with no match plus offers with no booking`}>
+            <span className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-panel-raised">
+              <span className="block h-full rounded-full bg-tone-amber/70" style={{ width: `${unmetBarPercent(unmet, largest)}%` }} />
             </span>
-            <span className="mt-1 block truncate text-sm text-fg-muted">{demandSignal(lane)}</span>
+            <span className="w-20 shrink-0 text-sm text-fg-muted"><span className="font-semibold tabular-nums text-fg">{unmet}</span> unmet</span>
           </span>
-        </span>
-        <Count value={lane.searches} label="searches" />
-        <Count value={lane.noMatch} label="searches with no match" />
-        <Count value={lane.offeredNoBooking} label="offered, no booking" />
-        <Count value={lane.carriers} label="carriers" />
-        <Trend lane={lane} />
+          <Trend lane={lane} />
+        </div>
+        <p className="mt-0.5 truncate pl-9 text-sm text-fg-muted">{demandSignal(lane)}</p>
       </button>
-      {expanded && <DemandCarriers lane={lane} />}
     </li>
   );
 }
 
 // The lanes carriers asked for and the board did not cover, most unmet first as the adapter sends
-// them, with the next page loading as the list nears its end.
+// them, with the next page loading as the list nears its end. Arrow keys move the selection.
 export function DemandList({
   data,
   loading,
-  error,
-  header,
   filtered,
-  expandedKey,
+  selectedKey,
   loadingMore,
   hasMore,
   onLoadMore,
-  onToggle,
+  onSelect,
   onClearFilters,
 }: {
   data: TowerDemand | null;
   loading: boolean;
-  error: string | null;
-  // The title and the filter bar.
-  header: React.ReactNode;
   filtered: boolean;
-  expandedKey: string | null;
+  selectedKey: string | null;
   loadingMore: boolean;
   hasMore: boolean;
   onLoadMore: () => void;
-  onToggle: (key: string) => void;
+  onSelect: (key: string) => void;
   onClearFilters: () => void;
 }) {
+  const buttons = useRef(new Map<string, HTMLButtonElement>());
   const rows = data?.rows ?? [];
   const total = data?.total ?? 0;
+  const largest = rows.reduce((max, lane) => Math.max(max, demandUnmet(lane)), 0);
   const { scroller, sentinel } = useLoadMore(hasMore, rows.length, onLoadMore);
+
+  function onKeyDown(event: React.KeyboardEvent<HTMLUListElement>) {
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    event.preventDefault();
+    const index = rows.findIndex((lane) => demandKey(lane) === selectedKey);
+    const step = event.key === "ArrowDown" ? 1 : -1;
+    const next = rows[index === -1 ? 0 : Math.min(rows.length - 1, Math.max(0, index + step))];
+    if (next === undefined) return;
+    const key = demandKey(next);
+    onSelect(key);
+    buttons.current.get(key)?.focus();
+  }
 
   let body: React.ReactNode;
   if (data === null) {
@@ -109,10 +138,23 @@ export function DemandList({
     );
   } else if (rows.length > 0) {
     body = (
-      <ul aria-label="Lanes" className="divide-y divide-line">
-        {rows.map((lane) => {
+      <ul aria-label="Lanes, most unmet first" onKeyDown={onKeyDown} className="divide-y divide-line">
+        {rows.map((lane, i) => {
           const key = demandKey(lane);
-          return <DemandRow key={key} lane={lane} expanded={key === expandedKey} onToggle={() => onToggle(key)} />;
+          return (
+            <DemandRow
+              key={key}
+              lane={lane}
+              rank={i + 1}
+              largest={largest}
+              selected={key === selectedKey}
+              onSelect={() => onSelect(key)}
+              buttonRef={(node) => {
+                if (node) buttons.current.set(key, node);
+                else buttons.current.delete(key);
+              }}
+            />
+          );
         })}
       </ul>
     );
@@ -139,34 +181,14 @@ export function DemandList({
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-panel">
-      <div className="shrink-0 border-b border-line">
-        {header}
-        {error && data && (
-          <p role="status" className="flex items-center gap-1 px-4 pb-2 text-xs text-risk">
-            <LuTriangleAlert size={12} className="shrink-0" aria-hidden />
-            <span className="truncate">{error}</span>
-          </p>
-        )}
-        <div className={`${columns} border-t border-line px-4 py-1.5 text-[11px] font-semibold tracking-wide text-fg-faint uppercase`}>
-          <span>{data ? `${total} ${total === 1 ? "lane" : "lanes"}` : "Lane"}</span>
-          <span className="text-right">Searches</span>
-          <span className="text-right" title="Searches that found no load">No match</span>
-          <span className="text-right" title="Loads offered that ended without a booking">Offered, no booking</span>
-          <span className="text-right">Carriers</span>
-          <span className="text-right" title="Searches with no match plus offers with no booking, this week vs last">This week</span>
+    <div ref={scroller} className="h-full min-h-0 overflow-y-auto bg-panel">
+      {body}
+      {hasMore && rows.length > 0 && (
+        <div ref={sentinel} role="status" className="flex items-center justify-center gap-2 border-t border-line px-4 py-3 text-xs text-fg-faint">
+          {loadingMore && <LuLoaderCircle size={14} className="animate-spin" aria-hidden />}
+          {loadingMore ? "Loading more lanes..." : `${rows.length} of ${total}`}
         </div>
-      </div>
-
-      <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto">
-        {body}
-        {hasMore && rows.length > 0 && (
-          <div ref={sentinel} role="status" className="flex items-center justify-center gap-2 border-t border-line px-4 py-3 text-xs text-fg-faint">
-            {loadingMore && <LuLoaderCircle size={14} className="animate-spin" aria-hidden />}
-            {loadingMore ? "Loading more lanes..." : `${rows.length} of ${total}`}
-          </div>
-        )}
-      </div>
+      )}
     </div>
   );
 }

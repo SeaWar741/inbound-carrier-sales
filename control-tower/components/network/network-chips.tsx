@@ -2,7 +2,7 @@ import type { IconType } from "react-icons";
 import { LuActivity, LuArrowDownRight, LuArrowRight, LuArrowUpRight, LuClockAlert, LuSparkles, LuTrendingUp, LuTrophy } from "react-icons/lu";
 import { Badge } from "@/components/inbox/stage-pill";
 import type { CarrierRelationship, NetworkCarrier } from "@/lib/contracts";
-import { callsTrend, recentDays, type CallsTrend } from "@/lib/network";
+import { callsTrend, recentDays, type CallsTrend, type NetworkReason } from "@/lib/network";
 
 export type ChipStyle = { label: string; icon: IconType; iconTone: string; pill: string };
 
@@ -15,6 +15,19 @@ export const relationshipStyle: Record<CarrierRelationship, ChipStyle> = {
 };
 export const topStyle: ChipStyle = { label: "Top", icon: LuTrophy, iconTone: "text-tone-amber", pill: "bg-tone-amber-soft text-tone-amber" };
 export const growthStyle: ChipStyle = { label: "Growth", icon: LuTrendingUp, iconTone: "text-tone-emerald", pill: "bg-tone-emerald-soft text-tone-emerald" };
+
+// Each panel reason line wears the icon of the relationship or tag it explains.
+export const reasonStyle: Record<NetworkReason["kind"], ChipStyle> = { ...relationshipStyle, top: topStyle, growth: growthStyle };
+
+// A bare icon in its tone, named for screen readers and on hover: the row's status and tag marks.
+export function StyleIcon({ style, size = 14 }: { style: ChipStyle; size?: number }) {
+  const Icon = style.icon;
+  return (
+    <span role="img" aria-label={style.label} title={style.label} className={`flex shrink-0 ${style.iconTone}`}>
+      <Icon size={size} aria-hidden />
+    </span>
+  );
+}
 
 function Chip({ style, size = "sm" }: { style: ChipStyle; size?: "sm" | "md" }) {
   const Icon = style.icon;

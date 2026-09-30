@@ -7,9 +7,9 @@ import {
   LuChartColumn,
   LuCircleCheck,
   LuClock,
-  LuExternalLink,
   LuHandshake,
   LuHistory,
+  LuLightbulb,
   LuPhone,
   LuRoute,
   LuSearch,
@@ -17,11 +17,13 @@ import {
   LuShieldX,
 } from "react-icons/lu";
 import { Badge } from "@/components/inbox/stage-pill";
-import { growthStyle, NetworkChips, TrendArrow } from "@/components/network/network-chips";
+import { growthStyle, NetworkChips, reasonStyle, TrendArrow } from "@/components/network/network-chips";
 import { Section } from "@/components/section";
 import type { NetworkCarrier } from "@/lib/contracts";
 import { carrierName, equipmentLabel, formatDateTime, formatTimeAgo } from "@/lib/format";
-import { inboxHref, networkReason, windowPhrase, type NetworkWindow } from "@/lib/network";
+import { inboxHref, networkReasons, windowPhrase, type NetworkWindow } from "@/lib/network";
+
+const plural = (n: number, one: string) => `${n} ${n === 1 ? one : `${one}s`}`;
 
 function Fact({ icon: Icon, label, children }: { icon: IconType; label: string; children: React.ReactNode }) {
   return (
@@ -35,19 +37,24 @@ function Fact({ icon: Icon, label, children }: { icon: IconType; label: string; 
   );
 }
 
-// The selected carrier, read from its list row: nothing here fetches.
+// The selected carrier, read from its list row: nothing here fetches. Attio's order: who it is, the
+// one action, why it is on the list, then the numbers behind it.
 export function NetworkDetail({ carrier, now, dateWindow }: { carrier: NetworkCarrier; now: number; dateWindow: NetworkWindow }) {
   const { facts } = carrier;
-  const numbers = [carrier.mcNumber && `MC ${carrier.mcNumber}`, carrier.dotNumber && `DOT ${carrier.dotNumber}`].filter(Boolean).join(" · ");
+  const name = carrierName(carrier);
+  // The numbers line never repeats what the name already says.
+  const numbers = [carrier.mcNumber && `MC ${carrier.mcNumber}`, carrier.dotNumber && `DOT ${carrier.dotNumber}`]
+    .filter((part) => part && part !== name)
+    .join(" · ");
   const when = windowPhrase(dateWindow);
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-y-auto bg-bg">
-      <div className="border-b border-line bg-panel px-5 py-4">
+    <aside aria-label="Carrier" className="flex h-full min-h-0 flex-col overflow-y-auto border-l border-line bg-panel pb-6">
+      <div className="border-b border-line p-4">
         <div className="flex min-w-0 items-start justify-between gap-3">
           <div className="min-w-0">
-            <h2 className="truncate text-lg font-semibold text-fg">{carrierName(carrier)}</h2>
-            {numbers && <p className="tabular mt-0.5 truncate text-sm text-fg-muted">{numbers}</p>}
+            <h2 className="truncate text-lg font-semibold text-fg">{name}</h2>
+            {numbers && <p className="tabular mt-0.5 truncate font-mono text-xs text-fg-muted">{numbers}</p>}
           </div>
           {carrier.eligible ? (
             <Badge tone="bg-ok-soft text-ok" size="md">
@@ -64,63 +71,81 @@ export function NetworkDetail({ carrier, now, dateWindow }: { carrier: NetworkCa
         <div className="mt-3">
           <NetworkChips carrier={carrier} size="md" />
         </div>
-        <p className="mt-2 text-sm text-fg">{networkReason(carrier, now, dateWindow)}</p>
         <Link
           href={inboxHref(carrier, now)}
-          className="mt-4 inline-flex h-8 items-center gap-1.5 rounded-md border border-line bg-panel px-3 text-sm font-medium text-fg shadow-xs outline-none hover:bg-panel-raised focus-visible:ring-2 focus-visible:ring-accent/40"
+          className="mt-4 flex h-9 w-full items-center justify-center gap-1.5 rounded-lg bg-accent px-3 text-sm font-semibold text-white outline-none transition-colors hover:bg-accent/90 focus-visible:ring-2 focus-visible:ring-accent/40"
         >
-          <LuExternalLink size={14} aria-hidden />
-          Open in Inbox
+          <LuPhone size={14} aria-hidden />
+          Open call history
+          <LuArrowRight size={14} aria-hidden />
         </Link>
       </div>
 
-      <div className="flex flex-col gap-4 p-5">
-        <Section icon={LuChartColumn} title={`Activity ${when}`}>
-          <div className="grid grid-cols-2 gap-x-3 gap-y-3 text-xs">
-            <Fact icon={LuPhone} label="Calls">{facts.calls}</Fact>
-            <Fact icon={LuSearch} label="Load searches">{facts.searches}</Fact>
-            <Fact icon={LuHandshake} label="Loads negotiated">{facts.loadsNegotiated}</Fact>
-            <Fact icon={LuCircleCheck} label="Bookings">{facts.bookings}</Fact>
-          </div>
-        </Section>
+      <Section icon={LuLightbulb} title="Why it's here">
+        <ul className="flex flex-col gap-2 text-sm text-fg">
+          {networkReasons(carrier, now, dateWindow).map((reason) => {
+            const { icon: Icon, iconTone, label } = reasonStyle[reason.kind];
+            return (
+              <li key={reason.kind} className="flex min-w-0 items-start gap-2">
+                <Icon size={15} className={`mt-0.5 shrink-0 ${iconTone}`} aria-hidden />
+                <span className="min-w-0">
+                  <span className="sr-only">{label}: </span>
+                  {reason.text}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      </Section>
 
-        <Section icon={LuHistory} title="All time">
-          <div className="grid grid-cols-2 gap-x-3 gap-y-3 text-xs">
-            <Fact icon={LuPhone} label="Calls">{facts.lifetimeCalls}</Fact>
-            <Fact icon={LuCircleCheck} label="Bookings">{facts.lifetimeBookings}</Fact>
-            <Fact icon={LuClock} label="Last call">
-              {formatDateTime(facts.lastCallAt)} <span className="font-normal text-fg-muted">({formatTimeAgo(facts.lastCallAt, now)} ago)</span>
-            </Fact>
-          </div>
-          <div className="mt-3 text-xs">
-            <TrendArrow carrier={carrier} withText />
-          </div>
-        </Section>
+      <Section icon={LuChartColumn} title={`Activity ${when}`}>
+        <div className="grid grid-cols-2 gap-x-3 gap-y-3 text-xs">
+          <Fact icon={LuPhone} label="Calls">{facts.calls}</Fact>
+          <Fact icon={LuSearch} label="Load searches">{facts.searches}</Fact>
+          <Fact icon={LuHandshake} label="Loads negotiated">{facts.loadsNegotiated}</Fact>
+          <Fact icon={LuCircleCheck} label="Booked">{facts.bookings}</Fact>
+        </div>
+        <div className="mt-3 flex flex-col gap-2 text-xs">
+          <p className="flex min-w-0 items-center gap-1.5 text-fg-muted">
+            <LuClock size={13} className="shrink-0" aria-hidden />
+            <span className="truncate">
+              Last call <span className="tabular font-semibold text-fg">{formatTimeAgo(facts.lastCallAt, now)} ago</span> ({formatDateTime(facts.lastCallAt)})
+            </span>
+          </p>
+          <p className="flex min-w-0 items-center gap-1.5 text-fg-muted">
+            <LuHistory size={13} className="shrink-0" aria-hidden />
+            <span className="tabular truncate">
+              All time: {plural(facts.lifetimeCalls, "call")} · {facts.lifetimeBookings} booked
+            </span>
+          </p>
+          <TrendArrow carrier={carrier} withText />
+        </div>
+      </Section>
 
-        <Section icon={LuRoute} title={`Lanes seen ${when}`}>
-          {carrier.lanes.length === 0 ? (
-            <p className="text-sm text-fg-muted">No searches or negotiated loads {when}.</p>
-          ) : (
-            <ul className="divide-y divide-line text-sm">
-              {carrier.lanes.map((lane) => (
-                <li
-                  key={`${lane.originState}|${lane.destinationState}|${lane.equipment}`}
-                  className="flex min-w-0 items-center gap-2 py-1.5"
-                >
-                  <span className="font-medium text-fg">{lane.originState ?? "Any"}</span>
-                  <LuArrowRight size={12} className="shrink-0 text-fg-faint" aria-hidden />
-                  <span className="font-medium text-fg">{lane.destinationState ?? "Any"}</span>
-                  <span className="min-w-0 truncate text-fg-muted">· {lane.equipment ? equipmentLabel(lane.equipment) : "Any equipment"}</span>
-                  {lane.open && <Badge tone={growthStyle.pill}>Open from {lane.originState}</Badge>}
-                  <span className="tabular ml-auto shrink-0 text-fg-muted" title={`On ${lane.count} ${lane.count === 1 ? "call" : "calls"}`}>
-                    {lane.count}×
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Section>
-      </div>
-    </div>
+      <Section icon={LuRoute} title="Lanes it runs">
+        {carrier.lanes.length === 0 ? (
+          <p className="text-sm text-fg-muted">No searches or negotiated loads {when}.</p>
+        ) : (
+          <ul className="divide-y divide-line text-sm">
+            {carrier.lanes.map((lane) => (
+              <li key={`${lane.originState}|${lane.destinationState}|${lane.equipment}`} className="flex min-w-0 items-center gap-2 py-1.5">
+                <span className="min-w-0 truncate font-medium text-fg">
+                  {lane.originState ?? "Any"} → {lane.destinationState ?? "Any"}
+                  <span className="font-normal text-fg-muted"> · {lane.equipment ? equipmentLabel(lane.equipment) : "Any equipment"}</span>
+                </span>
+                <span className="min-w-0 flex-1" />
+                <span className="tabular shrink-0 text-xs text-fg-muted">{plural(lane.count, "call")}</span>
+                {lane.open && (
+                  <Badge tone={growthStyle.pill}>
+                    <span className="size-1.5 rounded-full bg-current" aria-hidden />
+                    Open now
+                  </Badge>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </Section>
+    </aside>
   );
 }

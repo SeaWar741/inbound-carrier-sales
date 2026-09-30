@@ -1,11 +1,16 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { NetworkCarrier } from "./contracts.ts";
-import { callsTrend, fromInboxWindow, inboxHref, networkReason, toInboxWindow, windowPhrase } from "./network.ts";
+import { callsTrend, fromInboxWindow, inboxHref, networkReasons, shortReason, toInboxWindow, windowPhrase, type NetworkWindow } from "./network.ts";
 
 const now = Date.parse("2026-09-30T17:00:00Z");
 const daysAgo = (days: number) => new Date(now - days * 86_400_000).toISOString();
 const thirtyDays = { since: "", from: "", to: "" };
+// The panel's lines joined, so each case reads as one string.
+const networkReason = (c: NetworkCarrier, at: number, dateWindow: NetworkWindow) =>
+  networkReasons(c, at, dateWindow)
+    .map((reason) => reason.text)
+    .join(". ");
 
 function carrier(overrides: Partial<Omit<NetworkCarrier, "facts">> & { facts?: Partial<NetworkCarrier["facts"]> } = {}): NetworkCarrier {
   const { facts, ...rest } = overrides;
@@ -36,7 +41,7 @@ function carrier(overrides: Partial<Omit<NetworkCarrier, "facts">> & { facts?: P
   };
 }
 
-describe("networkReason", () => {
+describe("networkReasons", () => {
   it("counts a new carrier's calls, singular and plural", () => {
     assert.equal(networkReason(carrier({ relationship: "new", facts: { lifetimeCalls: 2 } }), now, thirtyDays), "2 calls so far");
     assert.equal(networkReason(carrier({ relationship: "new", facts: { lifetimeCalls: 1 } }), now, thirtyDays), "1 call so far");
@@ -106,10 +111,72 @@ describe("networkReason", () => {
     );
   });
 
-  it("calls an untagged active carrier Active, and leaves it out when tagged", () => {
-    assert.equal(networkReason(carrier(), now, thirtyDays), "Active");
+  it("gives one line per reason, each with its kind", () => {
+    const both = carrier({ relationship: "new", growth: true, facts: { lifetimeCalls: 2 } });
+    assert.deepEqual(
+      networkReasons(both, now, thirtyDays).map((reason) => reason.kind),
+      ["new", "growth"],
+    );
+  });
+
+  it("calls an untagged active carrier active with nothing to flag, and leaves it out when tagged", () => {
+    assert.deepEqual(networkReasons(carrier(), now, thirtyDays), [{ kind: "active", text: "Active, nothing to flag" }]);
     assert.equal(networkReason(carrier({ top: true, facts: { bookings: 3, negotiableCalls: 3 } }), now, thirtyDays), "3 of 3 negotiated calls booked in 30 d");
     assert.equal(networkReason(carrier({ top: true, facts: { bookings: 1, negotiableCalls: 1 } }), now, thirtyDays), "1 of 1 negotiated call booked in 30 d");
+  });
+});
+
+describe("shortReason", () => {
+  it("says how long a silent at-risk carrier has been quiet and what it booked before", () => {
+    const quiet = carrier({ relationship: "at_risk", facts: { lastCallAt: daysAgo(37.2), callsRecent: 0, lifetimeBookings: 2 } });
+    assert.equal(shortReason(quiet, now), "No call in 37 d · 2 bookings before");
+    const once = carrier({ relationship: "at_risk", facts: { lastCallAt: daysAgo(20), callsRecent: 0, lifetimeBookings: 1 } });
+    assert.equal(shortReason(once, now), "No call in 20 d · 1 booking before");
+  });
+
+  it("compares an at-risk carrier's recent calls with the span before", () => {
+    const fading = carrier({ relationship: "at_risk", facts: { lastCallAt: daysAgo(3), callsRecent: 1, callsPrior: 6 } });
+    assert.equal(shortReason(fading, now), "Calls down 1 vs 6");
+  });
+
+  it("counts a new carrier's calls", () => {
+    assert.equal(shortReason(carrier({ relationship: "new", facts: { lifetimeCalls: 2 } }), now), "2 calls so far");
+    assert.equal(shortReason(carrier({ relationship: "new", facts: { lifetimeCalls: 1 } }), now), "1 call so far");
+  });
+
+  it("words a top carrier's booked offers, never more booked than offered", () => {
+    assert.equal(shortReason(carrier({ top: true, facts: { bookings: 3, negotiableCalls: 4 } }), now), "3 of 4 offers booked");
+    assert.equal(shortReason(carrier({ top: true, facts: { bookings: 1, negotiableCalls: 1 } }), now), "1 of 1 offer booked");
+    assert.equal(shortReason(carrier({ top: true, facts: { bookings: 2, negotiableCalls: 1 } }), now), "2 bookings on 1 offer");
+  });
+
+  it("names the open lane's origin and equipment for growth", () => {
+    const growth = carrier({
+      growth: true,
+      lanes: [
+        { originState: "CA", destinationState: "AZ", equipment: "DRY_VAN", count: 4, open: false },
+        { originState: "PA", destinationState: "PA", equipment: "REEFER", count: 7, open: true },
+      ],
+    });
+    assert.equal(shortReason(growth, now), "PA Reefer open now");
+    const anyEquipment = carrier({ growth: true, lanes: [{ originState: "GA", destinationState: null, equipment: null, count: 1, open: true }] });
+    assert.equal(shortReason(anyEquipment, now), "GA open now");
+    assert.equal(shortReason(carrier({ growth: true }), now), "A lane it runs is open now");
+  });
+
+  it("joins the relationship and every tag with a dot", () => {
+    const fading = carrier({
+      relationship: "at_risk",
+      top: true,
+      growth: true,
+      lanes: [{ originState: "PA", destinationState: "PA", equipment: "REEFER", count: 7, open: true }],
+      facts: { lastCallAt: daysAgo(3), callsRecent: 1, callsPrior: 6, bookings: 1, negotiableCalls: 2 },
+    });
+    assert.equal(shortReason(fading, now), "Calls down 1 vs 6 · 1 of 2 offers booked · PA Reefer open now");
+  });
+
+  it("says an untagged active carrier has nothing to flag", () => {
+    assert.equal(shortReason(carrier(), now), "Active, nothing to flag");
   });
 });
 

@@ -1,33 +1,32 @@
 "use client";
 
 import { useRef } from "react";
-import { LuLoaderCircle, LuTriangleAlert } from "react-icons/lu";
-import { NetworkChips, TrendArrow } from "@/components/network/network-chips";
-import { Count, SkeletonRows, useLoadMore } from "@/components/paged-list";
+import { LuCircleCheck, LuLoaderCircle, LuPhone, LuTriangleAlert } from "react-icons/lu";
+import { growthStyle, relationshipStyle, StyleIcon, topStyle } from "@/components/network/network-chips";
+import { SkeletonRows, useLoadMore } from "@/components/paged-list";
 import type { NetworkCarrier, TowerNetwork } from "@/lib/contracts";
 import { carrierName, formatTimeAgo } from "@/lib/format";
-import { networkReason, type NetworkWindow } from "@/lib/network";
+import { shortReason } from "@/lib/network";
 
-// Name and reason take the room left; every count column is the same narrow width.
-const columns = "grid grid-cols-[minmax(0,1fr)_repeat(4,5rem)_4rem_2.5rem] items-center gap-3";
-
+// Two lines, like the inbox row: status, name, MC and tag icons over the one-line reason, with the
+// last call and lifetime bookings on the right.
 function NetworkRow({
   carrier,
   now,
-  dateWindow,
   selected,
   onSelect,
   buttonRef,
 }: {
   carrier: NetworkCarrier;
   now: number;
-  dateWindow: NetworkWindow;
   selected: boolean;
   onSelect: () => void;
   buttonRef: (node: HTMLButtonElement | null) => void;
 }) {
   const { facts } = carrier;
-  const numbers = [carrier.mcNumber && `MC ${carrier.mcNumber}`, carrier.dotNumber && `DOT ${carrier.dotNumber}`].filter(Boolean).join(" · ");
+  // The name falls back to the MC, which then is not repeated beside it.
+  const mc = carrier.carrierName && carrier.mcNumber ? `MC ${carrier.mcNumber}` : null;
+  const reason = shortReason(carrier, now);
   return (
     <li>
       <button
@@ -35,29 +34,28 @@ function NetworkRow({
         type="button"
         onClick={onSelect}
         aria-pressed={selected}
-        className={`${columns} w-full cursor-pointer px-4 py-3 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:ring-inset ${
+        className={`w-full cursor-pointer px-4 py-2 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:ring-inset ${
           selected ? "bg-accent-soft" : "hover:bg-panel-raised"
         }`}
       >
-        <span className="min-w-0">
-          <span className="flex min-w-0 items-baseline gap-2">
-            <span className="min-w-0 truncate font-medium text-fg">{carrierName(carrier)}</span>
-            {carrier.carrierName && numbers && <span className="tabular shrink-0 text-xs text-fg-muted">{numbers}</span>}
+        <span className="flex min-w-0 items-center gap-2">
+          <StyleIcon style={relationshipStyle[carrier.relationship]} size={16} />
+          <span className="min-w-0 truncate text-sm font-semibold text-fg">{carrierName(carrier)}</span>
+          {mc && <span className="shrink-0 font-mono text-xs text-fg-muted">{mc}</span>}
+          {carrier.top && <StyleIcon style={topStyle} />}
+          {carrier.growth && <StyleIcon style={growthStyle} />}
+          <span className="min-w-0 flex-1" />
+          <span className="flex shrink-0 items-center gap-1 text-xs text-fg-muted" title={`Last call ${facts.lastCallAt}`}>
+            <LuPhone size={12} className="text-fg-faint" aria-hidden />
+            <span className="tabular-nums">{formatTimeAgo(facts.lastCallAt, now)}</span>
           </span>
-          <span className="mt-1 flex min-w-0 items-center gap-2">
-            <NetworkChips carrier={carrier} />
-            <span className="min-w-0 truncate text-sm text-fg-muted">{networkReason(carrier, now, dateWindow)}</span>
+          <span className="flex w-20 shrink-0 items-center justify-end gap-1 text-xs text-fg-muted" title={`${facts.lifetimeBookings} bookings all time`}>
+            <LuCircleCheck size={12} className="text-tone-green" aria-hidden />
+            <span className="tabular-nums">{facts.lifetimeBookings} booked</span>
           </span>
         </span>
-        <Count value={facts.calls} label="calls" />
-        <Count value={facts.searches} label="searches" />
-        <Count value={facts.loadsNegotiated} label="loads negotiated" />
-        <Count value={facts.bookings} label="bookings" />
-        <span className="tabular text-right text-sm text-fg-muted" title={facts.lastCallAt}>
-          {formatTimeAgo(facts.lastCallAt, now)}
-        </span>
-        <span className="flex justify-end">
-          <TrendArrow carrier={carrier} />
+        <span className="mt-0.5 block truncate pl-6 text-xs text-fg-muted" title={reason}>
+          {reason}
         </span>
       </button>
     </li>
@@ -70,7 +68,7 @@ export function NetworkList({
   loading,
   error,
   now,
-  dateWindow,
+  title,
   header,
   filtered,
   selectedKey,
@@ -84,8 +82,9 @@ export function NetworkList({
   loading: boolean;
   error: string | null;
   now: number;
-  dateWindow: NetworkWindow;
-  // The view chips and the filter bar.
+  // The selected view's label.
+  title: string;
+  // The search and filters.
   header: React.ReactNode;
   // Any filter other than the view narrows the list.
   filtered: boolean;
@@ -130,7 +129,6 @@ export function NetworkList({
             key={carrier.key}
             carrier={carrier}
             now={now}
-            dateWindow={dateWindow}
             selected={carrier.key === selectedKey}
             onSelect={() => onSelect(carrier.key)}
             buttonRef={(node) => {
@@ -154,34 +152,34 @@ export function NetworkList({
         </button>
       </div>
     );
+  } else if (data.counts.all === 0) {
+    body = (
+      <div className="p-8 text-center text-fg-muted">
+        <p>No carriers yet</p>
+        <p className="mt-1 text-xs text-fg-faint">Carriers show up here after their first call</p>
+      </div>
+    );
   } else {
     body = (
       <div className="p-8 text-center text-fg-muted">
-        <p>No carriers here</p>
-        <p className="mt-1 text-xs text-fg-faint">Carriers show up here after their first call</p>
+        <p>No carriers in {title}</p>
       </div>
     );
   }
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden border-r border-line bg-panel">
-      <div className="shrink-0 border-b border-line">
+      <div className="shrink-0 border-b border-line px-4 py-3">
         {header}
+        <p className="tabular mt-2 truncate text-xs text-fg-muted">
+          {data ? `${total} ${total === 1 ? "carrier" : "carriers"}` : "-"} · {title}
+        </p>
         {error && data && (
-          <p role="status" className="flex items-center gap-1 px-4 pb-2 text-xs text-risk">
+          <p role="status" className="mt-1 flex items-center gap-1 text-xs text-risk">
             <LuTriangleAlert size={12} className="shrink-0" aria-hidden />
             <span className="truncate">{error}</span>
           </p>
         )}
-        <div className={`${columns} border-t border-line px-4 py-1.5 text-[11px] font-semibold tracking-wide text-fg-faint uppercase`}>
-          <span>{data ? `${total} ${total === 1 ? "carrier" : "carriers"}` : "Carrier"}</span>
-          <span className="text-right">Calls</span>
-          <span className="text-right">Searches</span>
-          <span className="text-right" title="Loads negotiated">Negotiated</span>
-          <span className="text-right">Booked</span>
-          <span className="text-right">Last call</span>
-          <span className="text-right">Trend</span>
-        </div>
       </div>
 
       <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto">

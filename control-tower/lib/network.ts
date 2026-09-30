@@ -1,4 +1,4 @@
-import type { NetworkCarrier } from "./contracts";
+import type { CarrierRelationship, NetworkCarrier } from "./contracts";
 import { deskDayKey, equipmentLabel } from "./format.ts";
 
 // Mirrors the adapter's segmentRecentDays, only to word the span the at-risk sentence compares.
@@ -71,14 +71,53 @@ function growthSentence(carrier: NetworkCarrier): string {
   return `Has run ${lane.originState} · ${equipmentLabel(lane.equipment)}, open on the board now`;
 }
 
-// Why the carrier sits where it does: the relationship sentence, then one per tag. A plain active
-// carrier with no tag is just "Active".
-export function networkReason(carrier: NetworkCarrier, now: number, dateWindow: NetworkWindow): string {
-  const parts = [relationshipSentence(carrier, now)];
-  if (carrier.top) parts.push(topSentence(carrier, dateWindow));
-  if (carrier.growth) parts.push(growthSentence(carrier));
-  const sentences = parts.filter((part): part is string => part !== null);
-  return sentences.length > 0 ? sentences.join(". ") : "Active";
+// A plain active carrier with no tag has nothing to explain, in the row or the panel.
+const nothingToFlag = "Active, nothing to flag";
+
+export type NetworkReason = { kind: CarrierRelationship | "top" | "growth"; text: string };
+
+// Why the carrier sits where it does, one full sentence per line for the panel: the relationship
+// sentence, then one per tag.
+export function networkReasons(carrier: NetworkCarrier, now: number, dateWindow: NetworkWindow): NetworkReason[] {
+  const reasons: NetworkReason[] = [];
+  const relationship = relationshipSentence(carrier, now);
+  if (relationship !== null) reasons.push({ kind: carrier.relationship, text: relationship });
+  if (carrier.top) reasons.push({ kind: "top", text: topSentence(carrier, dateWindow) });
+  if (carrier.growth) reasons.push({ kind: "growth", text: growthSentence(carrier) });
+  return reasons.length > 0 ? reasons : [{ kind: "active", text: nothingToFlag }];
+}
+
+function shortRelationship(carrier: NetworkCarrier, now: number): string | null {
+  const { facts } = carrier;
+  if (carrier.relationship === "new") return `${plural(facts.lifetimeCalls, "call")} so far`;
+  if (carrier.relationship === "at_risk") {
+    if (facts.callsRecent === 0) return `No call in ${daysSinceLastCall(carrier, now)} d · ${plural(facts.lifetimeBookings, "booking")} before`;
+    return `Calls down ${facts.callsRecent} vs ${facts.callsPrior}`;
+  }
+  return null;
+}
+
+// Top counts offers as the calls that had one, so "3 of 4 offers booked" reads the same facts as the panel.
+function shortTop(carrier: NetworkCarrier): string {
+  const { bookings, negotiableCalls } = carrier.facts;
+  if (bookings > negotiableCalls) return `${plural(bookings, "booking")} on ${plural(negotiableCalls, "offer")}`;
+  return `${bookings} of ${plural(negotiableCalls, "offer")} booked`;
+}
+
+function shortGrowth(carrier: NetworkCarrier): string {
+  const lane = carrier.lanes.find((l) => l.open);
+  if (!lane?.originState) return "A lane it runs is open now";
+  if (!lane.equipment) return `${lane.originState} open now`;
+  return `${lane.originState} ${equipmentLabel(lane.equipment)} open now`;
+}
+
+// The list row's one-line reason: signal and number, joined with " · ", short enough for one line.
+export function shortReason(carrier: NetworkCarrier, now: number): string {
+  const parts = [shortRelationship(carrier, now)];
+  if (carrier.top) parts.push(shortTop(carrier));
+  if (carrier.growth) parts.push(shortGrowth(carrier));
+  const phrases = parts.filter((part): part is string => part !== null);
+  return phrases.length > 0 ? phrases.join(" · ") : nothingToFlag;
 }
 
 export type CallsTrend = "up" | "down" | "flat";
