@@ -157,7 +157,7 @@ export const tripSnapshot = z.object({
   deliveryAt: z.iso.datetime().nullable().default(null),
   netPerHour: z.number().int(),
   dieselPerGal: z.number(),
-  tollShare: z.number(),
+  tollShare: z.number().nullable(),
 }) satisfies z.ZodType<Omit<TripSnapshot, "deliveryAt"> & { deliveryAt: string | null }>;
 
 // Only what the agent speaks from: the message, the net and whether the window needs a team.

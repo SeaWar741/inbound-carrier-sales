@@ -104,12 +104,12 @@ What each result does:
 - For a `team` load, the agent asks whether the carrier runs team.
 - A failed estimate never blocks a load or a hold.
 
-Measured on this board: in the 2026-09-28 snapshot, the 50 OPEN loads split 25 solo, 11 team, 7 impossible (never pitched), and 7 with no estimate (ORS finds no route).
+Measured on this board: in the 2026-09-28 snapshot, the 50 OPEN loads split 25 solo, 11 team, 7 impossible (never pitched), and 7 that ORS could not route (they now use the fallback speed).
 
 Vendor latency: 5 calls from a laptop took 254 to 1,577 ms for ORS and 111 to 1,331 ms for EIA. The 4.5 s timeout is about 3x the slowest call.
 
 Known limits:
-- Rural centroids can be too far from a road for ORS (error 2010, e.g. Anchorage and Eugene). Routes over 6,000 km fail (error 2004, e.g. Honolulu). Those loads get no estimate.
+- When ORS cannot route a lane (quota exceeded, a rural centroid too far from a road, error 2010, or a route over 6,000 km, error 2004), the estimate falls back to 45 mph of pure driving and leaves tolls out ("before any tolls"), so the window check never switches off.
 - Diesel is the regional retail average, not a fleet card price.
 - Tolls use one national rate.
 - The hold snapshot is not refreshed before pickup.

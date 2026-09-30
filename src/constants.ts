@@ -48,8 +48,13 @@ export const maxAuthorizationUsd = 1_000;
 export const tmsHealthLatencySamples = 500;
 
 // Trip ETA: there is no delivery time in the TMS, so ETA = pickup + miles at a long-haul average
-// that already absorbs stops and hours-of-service breaks. Cycle 4 replaces it with a routed time.
+// that already absorbs stops and hours-of-service breaks. The dashboard and map still use it; a held
+// load's legal ETA comes from the trip estimate instead.
 export const avgTransitMph = 50;
+// Driving speed when ORS cannot route a lane (quota, off-road centroid, route too long), so the HOS
+// check still runs. Pure driving, rests are added by the HOS math: ORS driving-hgv gave 41.8 mph
+// (Chicago to Newark) and 45.4 mph (Tacoma to Baltimore).
+export const fallbackDriveMph = 45;
 // Operator inbox: one screen of carriers at 1280 px; the page size is not a parameter.
 export const inboxPageSize = 25;
 // The dashboard's booked loads: a week of pickups is far below this; it only bounds a runaway result.

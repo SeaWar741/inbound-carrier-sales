@@ -33,9 +33,16 @@ function feasibilityNote(trip: TripSnapshot): string {
 }
 
 function messageFor(trip: TripSnapshot): string {
-  const tolls = trip.tollsUsd < tollsSpokenFloorUsd ? "next to nothing in tolls" : `about ${dollars(trip.tollsUsd)} in tolls`;
+  const diesel = `about ${dollars(trip.dieselUsd)} in diesel`;
+  // No route means tolls were left out, and the carrier hears that rather than a guess.
+  const costs =
+    trip.tollShare === null
+      ? `${diesel}, before any tolls`
+      : trip.tollsUsd < tollsSpokenFloorUsd
+        ? `${diesel} and next to nothing in tolls`
+        : `${diesel} and about ${dollars(trip.tollsUsd)} in tolls`;
   return (
-    `At ${dollars(trip.rate)}, after about ${dollars(trip.dieselUsd)} in diesel and ${tolls}, ` +
+    `At ${dollars(trip.rate)}, after ${costs}, ` +
     `you'd keep about ${dollars(trip.carrierNetUsd)}.${feasibilityNote(trip)}`
   );
 }

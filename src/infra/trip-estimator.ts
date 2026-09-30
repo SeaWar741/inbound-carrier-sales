@@ -1,7 +1,7 @@
 // Same table the control tower draws with, so the estimate and the map agree on where a ZIP3 is.
 import zip3CentroidsJson from "../../control-tower/lib/zip3-centroids.json" with { type: "json" };
 import type { Config } from "../config.ts";
-import { dieselCacheMs } from "../constants.ts";
+import { dieselCacheMs, fallbackDriveMph } from "../constants.ts";
 import { tmsWallClockToDate } from "../domain/trip.ts";
 import { estimateTrip, laneDieselPerGal, type TripSnapshot } from "../domain/trip-estimate.ts";
 import { EiaClient } from "./eia-client.ts";
@@ -65,15 +65,21 @@ export class TripEstimator {
     const destinationZip3 = trip.destination.zip.slice(0, 3);
     const from = this.#centroids.get(originZip3);
     const to = this.#centroids.get(destinationZip3);
-    if (!from || !to) {
-      log.warn({ originZip3, destinationZip3 }, "trip estimate skipped: unknown ZIP3");
-      return null;
-    }
+    const ors = this.#ors;
+    // Without a route the HOS check still runs at a fixed driving speed and tolls are left out, so an
+    // ORS quota or an unroutable lane never switches the window check off.
+    const routed = (from && to
+      ? this.#route(ors, `${originZip3}-${destinationZip3}`, from, to)
+      : Promise.reject(new Error(`unknown ZIP3 ${originZip3}-${destinationZip3}`))
+    ).then(
+      (route) => ({ avgMph: route.distanceMi / (route.durationS / 3600), tollShare: route.tollShare as number | null }),
+      (error: unknown) => {
+        log.warn({ err: error, originZip3, destinationZip3 }, "trip route unavailable, using the fallback speed");
+        return { avgMph: fallbackDriveMph, tollShare: null };
+      },
+    );
     try {
-      const [route, prices] = await Promise.all([
-        this.#route(this.#ors, `${originZip3}-${destinationZip3}`, from, to),
-        this.#dieselPrices(this.#eia),
-      ]);
+      const [route, prices] = await Promise.all([routed, this.#dieselPrices(this.#eia)]);
       const dieselPerGal = laneDieselPerGal(prices, trip.origin.state, trip.destination.state);
       if (dieselPerGal === undefined) {
         log.warn({ origin: trip.origin.state, destination: trip.destination.state }, "trip estimate skipped: no diesel price");
@@ -84,7 +90,7 @@ export class TripEstimator {
         rate: trip.rate,
         pickupAt: trip.pickupAt,
         deliveryAt: trip.deliveryAt,
-        avgMph: route.distanceMi / (route.durationS / 3600),
+        avgMph: route.avgMph,
         tollShare: route.tollShare,
         dieselPerGal,
       });

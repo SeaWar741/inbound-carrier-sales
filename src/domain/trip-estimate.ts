@@ -61,7 +61,8 @@ export type TripEstimateInput = {
   pickupAt: Date;
   deliveryAt: Date;
   avgMph: number;
-  tollShare: number;
+  // Null when no route was found: tolls are then left out.
+  tollShare: number | null;
   dieselPerGal: number;
 };
 
@@ -81,9 +82,10 @@ export type TripSnapshot = {
   // The TMS delivery appointment, echoed so the snapshot can show it next to the legal ETA.
   deliveryAt: string;
   netPerHour: number;
-  // The diesel price and toll share the estimate used.
+  // The diesel price and toll share the estimate used; tollShare is null when no route was found,
+  // and then tolls are left out rather than guessed.
   dieselPerGal: number;
-  tollShare: number;
+  tollShare: number | null;
 };
 
 const msPerHour = 3_600_000;
@@ -105,7 +107,7 @@ export function estimateTrip(input: TripEstimateInput): TripSnapshot {
   const crewHours = feasibility === "solo" ? soloHours : teamHours;
 
   const dieselUsd = Math.round((input.miles / truckMpg) * input.dieselPerGal);
-  const tollsUsd = Math.round(input.miles * input.tollShare * tollUsdPerMile);
+  const tollsUsd = input.tollShare === null ? 0 : Math.round(input.miles * input.tollShare * tollUsdPerMile);
   const carrierNetUsd = input.rate - dieselUsd - tollsUsd;
 
   return {
@@ -120,6 +122,6 @@ export function estimateTrip(input: TripEstimateInput): TripSnapshot {
     deliveryAt: input.deliveryAt.toISOString(),
     netPerHour: crewHours > 0 ? Math.round(carrierNetUsd / crewHours) : 0,
     dieselPerGal: roundTo(input.dieselPerGal, 3),
-    tollShare: roundTo(input.tollShare, 4),
+    tollShare: input.tollShare === null ? null : roundTo(input.tollShare, 4),
   };
 }

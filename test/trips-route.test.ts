@@ -119,6 +119,12 @@ describe("POST /v1/trips/estimate", () => {
     });
   });
 
+  it("says tolls are left out when no route was found", async () => {
+    estimate.mockImplementationOnce(async (trip) => ({ ...estimateAt(trip.rate), tollsUsd: 0, tollShare: null }));
+    const body = (await post({ callId: "call-ok", loadId: "LD00879" })).json();
+    expect(body.message).toMatch(/in diesel, before any tolls, you'd keep/);
+  });
+
   it("speaks a few dollars of tolls as next to nothing", async () => {
     estimate.mockImplementationOnce(async (trip) => ({ ...estimateAt(trip.rate), tollsUsd: 3 }));
     const body = (await post({ callId: "call-ok", loadId: "LD00879" })).json();

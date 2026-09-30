@@ -53,7 +53,7 @@ const tripSnapshot = z.object({
   netPerHour: z.number().int(),
   dieselPerGal: z.number(),
   // 0..1: the share of the route on toll roads.
-  tollShare: z.number(),
+  tollShare: z.number().nullable(),
 });
 export type TripSnapshot = z.infer<typeof tripSnapshot>;
 

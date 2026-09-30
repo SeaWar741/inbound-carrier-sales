@@ -196,15 +196,18 @@ describe("TripEstimator", () => {
     expect(calls(fetchMock, "api.eia.gov")).toBe(2);
   });
 
-  it("answers null and warns on a vendor error, then retries on the next call", async () => {
-    let orsStatus = 429;
+  it("falls back to a fixed speed with no tolls when ORS fails, then routes again on the next call", async () => {
+    let orsStatus = 403;
     const fetchMock = vendorFetch({ ors: () => (orsStatus === 200 ? jsonResponse(fixture("ors/tacoma-baltimore")) : jsonResponse({}, orsStatus)) });
     const estimator = estimatorWith(fetchMock);
     const warnLog = log();
-    expect(await estimator.estimate(ld00879, warnLog)).toBeNull();
-    expect(warnLog.warn).toHaveBeenCalledWith(expect.objectContaining({ err: expect.any(Error) }), "trip estimate unavailable");
+    const fallback = await estimator.estimate(ld00879, warnLog);
+    // The HOS check still runs: 2335 mi at the fallback speed, and tolls are left out, not guessed.
+    expect(fallback).toMatchObject({ tollShare: null, tollsUsd: 0 });
+    expect(fallback?.feasibility).toBeDefined();
+    expect(warnLog.warn).toHaveBeenCalledWith(expect.objectContaining({ err: expect.any(Error) }), "trip route unavailable, using the fallback speed");
     orsStatus = 200;
-    expect(await estimator.estimate(ld00879, log())).not.toBeNull();
+    expect(await estimator.estimate(ld00879, log())).toMatchObject({ tollShare: expect.any(Number) });
     expect(calls(fetchMock, "api.openrouteservice.org")).toBe(2);
   });
 
@@ -215,13 +218,13 @@ describe("TripEstimator", () => {
     expect(warnLog.warn).toHaveBeenCalledOnce();
   });
 
-  it("answers null without a vendor call for a ZIP3 it cannot place", async () => {
+  it("uses the fallback speed without an ORS call for a ZIP3 it cannot place", async () => {
     const fetchMock = vendorFetch();
     const warnLog = log();
     const estimate = await estimatorWith(fetchMock).estimate({ ...ld00879, destination: { zip: "00000", state: "MD" } }, warnLog);
-    expect(estimate).toBeNull();
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(warnLog.warn).toHaveBeenCalledWith({ originZip3: "984", destinationZip3: "000" }, "trip estimate skipped: unknown ZIP3");
+    expect(estimate).toMatchObject({ tollShare: null, tollsUsd: 0 });
+    expect(calls(fetchMock, "api.openrouteservice.org")).toBe(0);
+    expect(warnLog.warn).toHaveBeenCalledWith(expect.objectContaining({ originZip3: "984", destinationZip3: "000" }), "trip route unavailable, using the fallback speed");
   });
 
   it("is off without both vendor keys", async () => {

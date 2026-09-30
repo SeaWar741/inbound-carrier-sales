@@ -78,7 +78,7 @@ function TripBlock({ trip, miles }: { trip: TripSnapshot; miles: number | null }
       </h4>
       <dl className="flex flex-col gap-1.5 text-xs">
         <Line label="Diesel (est.)" hint="Fuel for the route at the lane's diesel price" value={formatUsd(trip.dieselUsd)} note={`$${trip.dieselPerGal.toFixed(2)}/gal`} />
-        <Line label="Tolls (est.)" hint="Tolls on the route" value={formatUsd(trip.tollsUsd)} note={`${Math.round(trip.tollShare * 100)}% toll`} />
+        <Line label="Tolls (est.)" hint="Tolls on the route" value={formatUsd(trip.tollsUsd)} note={trip.tollShare === null ? "no route" : `${Math.round(trip.tollShare * 100)}% toll`} />
         <Line
           label="Carrier net"
           hint="Agreed rate minus diesel and tolls"
