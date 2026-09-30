@@ -2,7 +2,7 @@ import { z } from "zod";
 import { maxAuthorizationUsd, otpDigits } from "./constants.ts";
 import { callRisks, callStages } from "./domain/call-stage.ts";
 import { tripStatuses } from "./domain/trip.ts";
-import { feasibilities } from "./domain/trip-estimate.ts";
+import { feasibilities, type TripSnapshot } from "./domain/trip-estimate.ts";
 import { cityInput, equipmentInput, loadIdInput, stateInput, zipInput } from "./infra/tms/codec.ts";
 import { autonomyModes, holdStatuses } from "./infra/twin-schemas.ts";
 
@@ -142,10 +142,9 @@ export type EvaluateOfferResponse = z.infer<typeof evaluateOfferResponse>;
 export const tripEstimateBody = z.object({ callId, loadId: loadIdInput });
 export type TripEstimateBody = z.output<typeof tripEstimateBody>;
 
-// What the carrier keeps at a rate after diesel and tolls. Stored on the hold as is; never carries the max buy.
-// legalHours is the chosen crew's (solo, else team); dieselPerGal and tollShare are the inputs the estimate used.
-// lateHours is how far past the delivery appointment (deliveryAt) that crew lands; holds stored before
-// those two fields existed read back as on time with no appointment, so the wall never fails on them.
+// The stored trip snapshot as the wall reads it back (the estimator writes domain TripSnapshot). Holds
+// stored before lateHours and deliveryAt existed read back as on time with no appointment, so the wall
+// never fails on them; that is the one way this schema is wider than the domain type.
 export const tripSnapshot = z.object({
   rate: z.number().int(),
   dieselUsd: z.number().int(),
@@ -159,9 +158,9 @@ export const tripSnapshot = z.object({
   netPerHour: z.number().int(),
   dieselPerGal: z.number(),
   tollShare: z.number(),
-});
-export type TripSnapshot = z.infer<typeof tripSnapshot>;
+}) satisfies z.ZodType<Omit<TripSnapshot, "deliveryAt"> & { deliveryAt: string | null }>;
 
+// Only what the agent speaks from: the message, the net and whether the window needs a team.
 export const tripEstimateResponse = z.object({
   status: z.enum([
     "ok",
@@ -173,13 +172,8 @@ export const tripEstimateResponse = z.object({
     "invalid_request",
   ]),
   message: z.string(),
-  rate: tripSnapshot.shape.rate.nullable(),
-  dieselUsd: tripSnapshot.shape.dieselUsd.nullable(),
-  tollsUsd: tripSnapshot.shape.tollsUsd.nullable(),
   carrierNetUsd: tripSnapshot.shape.carrierNetUsd.nullable(),
   feasibility: tripSnapshot.shape.feasibility.nullable(),
-  legalEtaAt: tripSnapshot.shape.legalEtaAt.nullable(),
-  netPerHour: tripSnapshot.shape.netPerHour.nullable(),
 });
 export type TripEstimateResponse = z.infer<typeof tripEstimateResponse>;
 

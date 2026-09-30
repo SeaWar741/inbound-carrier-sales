@@ -14,13 +14,15 @@ import {
   type CreateHoldResponse,
   type ReleaseHoldResponse,
 } from "../contract.ts";
+import { operatorTimeZone } from "../constants.ts";
 import { resolveBooking, type BookingAttempt } from "../domain/holds.ts";
 import { dollars } from "../domain/negotiation.ts";
+import { tmsWallClockToDate } from "../domain/trip.ts";
 import type { CarrierMessage, OtpDeliveryClient } from "../infra/otp-delivery-client.ts";
 import type { BookingRequest } from "../infra/tms/codec.ts";
 import { TmsBusinessError, TmsUnavailableError } from "../infra/tms/errors.ts";
 import type { TmsClient } from "../infra/tms/tms-client.ts";
-import { estimateLoadTrip, tripSnapshotFor, type Log, type TripEstimates } from "../infra/trip-estimator.ts";
+import { estimateLoadTrip, type Log, type TripEstimates } from "../infra/trip-estimator.ts";
 import { sql, TwinError, type TwinClient } from "../infra/twin-client.ts";
 import { autonomyModes, holdRowSchema, type HoldRow } from "../infra/twin-schemas.ts";
 import { invalidRequestHandler } from "../plugins/invalid-request.ts";
@@ -88,20 +90,23 @@ const noticeRow = z.object({
 });
 type NoticeRow = z.output<typeof noticeRow>;
 
-// Offers store the TMS wall clock (YYYYMMDDHHMMSS); it is shown as written, with no timezone invented.
-const readablePickup = (wire: string) =>
-  new Date(Date.UTC(+wire.slice(0, 4), +wire.slice(4, 6) - 1, +wire.slice(6, 8), +wire.slice(8, 10), +wire.slice(10, 12))).toLocaleString(
-    "en-US",
-    { timeZone: "UTC", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" },
-  );
-
 function holdNotice(hold: HoldRow, row: NoticeRow): CarrierMessage {
   const lane =
     row.origin_city && row.destination_city
       ? ` ${row.origin_city}, ${row.origin_state} to ${row.destination_city}, ${row.destination_state}`
       : "";
   if (hold.status === "booked") {
-    const pickup = row.pickup_at ? ` Pickup ${readablePickup(row.pickup_at)}.` : "";
+    // Offers store the TMS wall clock, which is desk time, so it is read and shown in the desk's zone.
+    const pickupAt = row.pickup_at
+      ? tmsWallClockToDate(row.pickup_at).toLocaleString("en-US", {
+          timeZone: operatorTimeZone,
+          month: "short",
+          day: "numeric",
+          hour: "numeric",
+          minute: "2-digit",
+        })
+      : null;
+    const pickup = pickupAt ? ` Pickup ${pickupAt}.` : "";
     return { subject: `Load ${hold.loadId} confirmed`, body: `${hold.loadId}${lane} confirmed at ${dollars(hold.agreedRate)}.${pickup}` };
   }
   return { subject: `Load ${hold.loadId} released`, body: `${hold.loadId}${lane} was released. Call us anytime for other loads.` };
@@ -142,8 +147,10 @@ function noticeCarrier(deps: NoticeDeps, hold: HoldRow, log: Log): void {
 
 // Autonomous mode books the new hold at once through the operator's own confirm path. Anything
 // short of a clean booking leaves the hold for a rep, so the carrier is never told more than is true.
+// Only a booking is notified: a release here is of a hold the carrier never heard about, and the
+// agent tells them on the call that the load is gone.
 async function autoBook(deps: HoldRouteDeps, hold: HoldRow, log: Log): Promise<CreateHoldResponse> {
-  const result = await confirmBooking(deps, hold.holdId, `autonomous-${hold.holdId}`, log);
+  const result = await confirmBooking(deps, hold.holdId, `autonomous-${hold.holdId}`, log, ["booked"]);
   if (result === "conflict") return holdPlaced(hold);
   if (result.status === "booked") return bookedNow({ ...hold, status: "booked" });
   if (result.status === "released") return noHold("load_unavailable", createMessages.loadUnavailable);
@@ -200,8 +207,7 @@ export function holdRoutes(deps: HoldRouteDeps): FastifyPluginAsync {
         if (estimate?.feasibility === "impossible") {
           return noHold("window_too_tight", windowTooTight(estimate.lateHours));
         }
-        if (!estimate) request.log.warn({ loadId }, "hold placed without a trip estimate");
-        const trip = estimate ? JSON.stringify(tripSnapshotFor(agreedRate, estimate)) : null;
+        const trip = estimate ? JSON.stringify(estimate) : null;
         try {
           const [hold] = await deps.twin.query(
             sql`INSERT INTO holds (call_id, load_id, mc_number, agreed_rate, posted_rate, max_buy, trip)
@@ -301,6 +307,7 @@ export async function confirmBooking(
   holdId: string,
   key: string,
   log: Log,
+  notifyOn: readonly HoldRow["status"][] = ["booked", "released"],
 ): Promise<ConfirmHoldResponse | "conflict"> {
   try {
     const rows = await deps.twin.query(sql`SELECT * FROM holds WHERE hold_id = ${holdId} OR idempotency_key = ${key}`, holdRowSchema);
@@ -344,7 +351,7 @@ export async function confirmBooking(
     );
     if (!resolved) throw new Error("hold left 'confirming' before the booking outcome was stored");
     // booked_unconfirmed waits for a human to check the TMS; held means nothing changed for the carrier.
-    if (resolved.status === "booked" || resolved.status === "released") noticeCarrier(deps, resolved, log);
+    if (notifyOn.includes(resolved.status)) noticeCarrier(deps, resolved, log);
     return resultFor(resolved);
   } catch (error) {
     // A hold left in 'confirming' is never booked twice; an operator checks it by hand.

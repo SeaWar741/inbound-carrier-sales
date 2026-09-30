@@ -171,19 +171,11 @@ const toolLabels: Record<string, string> = {
   request_human: "Asked for a human",
   hangup: "Call ended by agent",
   get_trip_estimate: "Estimated trip",
-  hold_notice: "Notified carrier",
-};
-
-// The same tools when their event is recorded with status "failed".
-const failedToolLabels: Record<string, string> = {
-  hold_notice: "Carrier not notified",
 };
 
 // An agent tool call as the transcript words it; an unknown tool reads as its name in words.
-// A failed event of a tool without its own failed wording reads as its label plus "failed".
-export function toolLabel(name: string, status?: string | null): string {
+export function toolLabel(name: string): string {
   const key = toolKey(name);
-  if (status === "failed") return failedToolLabels[key] ?? `${toolLabel(name)} failed`;
   const known = toolLabels[key];
   if (known) return known;
   const words = key.replaceAll("_", " ").trim();

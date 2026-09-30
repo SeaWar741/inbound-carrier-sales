@@ -104,7 +104,7 @@ What each result does:
 - For a `team` load, the agent asks whether the carrier runs team.
 - A failed estimate never blocks a load or a hold.
 
-Measured on this board: in the 2026-09-28 snapshot, the 50 OPEN loads split 25 solo, 8 team, 10 impossible, and 7 with no estimate (before the 2 h tolerance).
+Measured on this board: in the 2026-09-28 snapshot, the 50 OPEN loads split 25 solo, 11 team, 7 impossible (never pitched), and 7 with no estimate (ORS finds no route).
 
 Vendor latency: 5 calls from a laptop took 254 to 1,577 ms for ORS and 111 to 1,331 ms for EIA. The 4.5 s timeout is about 3x the slowest call.
 
@@ -113,7 +113,8 @@ Known limits:
 - Diesel is the regional retail average, not a fleet card price.
 - Tolls use one national rate.
 - The hold snapshot is not refreshed before pickup.
-- The dashboard and map ETA still use the 50 mph estimate.
+- The dashboard and map ETA still use the 50 mph estimate. The inbox load panel and carrier header show the legal ETA once the load has a hold with an estimate.
+- A booking the TMS did not confirm (`booked_unconfirmed`) sends no notice to the carrier. A rep checks the TMS and calls the carrier.
 
 ## Deploy
 

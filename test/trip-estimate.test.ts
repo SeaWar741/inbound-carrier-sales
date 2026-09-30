@@ -76,6 +76,7 @@ describe("estimateTrip", () => {
     // 1,000 / 6.3 mpg x $6.30 = $1,000; 1,000 x 0.2 x $0.226 = $45.2.
     expect(estimate.dieselUsd).toBe(1000);
     expect(estimate.tollsUsd).toBe(45);
+    expect(estimate.rate).toBe(3000);
     expect(estimate.carrierNetUsd).toBe(1955);
     expect(estimate.dieselPerGal).toBe(6.3);
     expect(estimate.tollShare).toBe(0.2);
@@ -84,14 +85,14 @@ describe("estimateTrip", () => {
   it("is solo when a single driver fits the window", () => {
     const estimate = estimateTrip({ ...base, deliveryAt: new Date("2026-10-02T19:00:00Z") });
     expect(estimate).toMatchObject({ legalHours: 31, feasibility: "solo" });
-    expect(estimate.legalEtaAt).toEqual(new Date("2026-10-02T19:00:00Z"));
+    expect(estimate.legalEtaAt).toBe("2026-10-02T19:00:00.000Z");
     expect(estimate.netPerHour).toBe(Math.round(1955 / 31));
   });
 
   it("is team when only a team fits the window", () => {
     const estimate = estimateTrip({ ...base, deliveryAt: new Date("2026-10-02T10:00:00Z") });
     expect(estimate).toMatchObject({ legalHours: 21.8, feasibility: "team" });
-    expect(estimate.legalEtaAt).toEqual(new Date("2026-10-02T09:49:05.454Z"));
+    expect(estimate.legalEtaAt).toBe("2026-10-02T09:49:05.454Z");
     expect(estimate.netPerHour).toBe(Math.round(1955 / ((20 * 24) / 22)));
   });
 
@@ -99,8 +100,8 @@ describe("estimateTrip", () => {
     const deliveryAt = new Date("2026-10-02T06:00:00Z");
     const estimate = estimateTrip({ ...base, deliveryAt });
     expect(estimate.feasibility).toBe("impossible");
-    expect(estimate.legalEtaAt).toEqual(new Date("2026-10-02T09:49:05.454Z"));
-    expect(estimate.deliveryAt).toEqual(deliveryAt);
+    expect(estimate.legalEtaAt).toBe("2026-10-02T09:49:05.454Z");
+    expect(estimate.deliveryAt).toBe(deliveryAt.toISOString());
     // Team ETA 09:49 against a 06:00 appointment.
     expect(estimate.lateHours).toBe(3.8);
   });

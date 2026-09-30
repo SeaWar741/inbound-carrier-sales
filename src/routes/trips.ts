@@ -2,11 +2,12 @@ import type { FastifyPluginAsync } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { tollsSpokenFloorUsd } from "../constants.ts";
-import { tripEstimateBody, tripEstimateResponse, type TripEstimateResponse, type TripSnapshot } from "../contract.ts";
+import { tripEstimateBody, tripEstimateResponse, type TripEstimateResponse } from "../contract.ts";
 import { dollars } from "../domain/negotiation.ts";
+import type { TripSnapshot } from "../domain/trip-estimate.ts";
 import { TmsBusinessError, TmsUnavailableError } from "../infra/tms/errors.ts";
 import type { TmsClient } from "../infra/tms/tms-client.ts";
-import { estimateLoadTrip, tripSnapshotFor, type TripEstimates } from "../infra/trip-estimator.ts";
+import { estimateLoadTrip, type TripEstimates } from "../infra/trip-estimator.ts";
 import { sql, type TwinClient } from "../infra/twin-client.ts";
 import { invalidRequestHandler } from "../plugins/invalid-request.ts";
 
@@ -42,13 +43,8 @@ function messageFor(trip: TripSnapshot): string {
 const noEstimate = (status: Exclude<TripEstimateResponse["status"], "ok">, message: string): TripEstimateResponse => ({
   status,
   message,
-  rate: null,
-  dieselUsd: null,
-  tollsUsd: null,
   carrierNetUsd: null,
   feasibility: null,
-  legalEtaAt: null,
-  netPerHour: null,
 });
 
 // The rate on the table is our latest round on this load, as create_hold reads it. A reject says no
@@ -83,17 +79,11 @@ export function tripRoutes(deps: TripRouteDeps): FastifyPluginAsync {
           const estimate = await estimateLoadTrip(deps.trips, load, rate, request.log);
           if (!estimate) return noEstimate("estimate_unavailable", messages.estimateUnavailable);
 
-          const trip = tripSnapshotFor(rate, estimate);
           return {
             status: "ok" as const,
-            message: messageFor(trip),
-            rate: trip.rate,
-            dieselUsd: trip.dieselUsd,
-            tollsUsd: trip.tollsUsd,
-            carrierNetUsd: trip.carrierNetUsd,
-            feasibility: trip.feasibility,
-            legalEtaAt: trip.legalEtaAt,
-            netPerHour: trip.netPerHour,
+            message: messageFor(estimate),
+            carrierNetUsd: estimate.carrierNetUsd,
+            feasibility: estimate.feasibility,
           };
         } catch (error) {
           request.log.warn({ err: error }, "trip estimate unavailable");

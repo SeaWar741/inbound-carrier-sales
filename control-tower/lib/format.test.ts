@@ -32,11 +32,8 @@ describe("toolLabel", () => {
     assert.equal(toolLabel("_"), "_");
   });
 
-  it("words the trip estimate and the carrier's hold notice, and a failed notice as failed", () => {
+  it("words the trip estimate", () => {
     assert.equal(toolLabel("get_trip_estimate"), "Estimated trip");
-    assert.equal(toolLabel("hold_notice", "sent"), "Notified carrier");
-    assert.equal(toolLabel("hold_notice", "failed"), "Carrier not notified");
-    assert.equal(toolLabel("create_hold", "failed"), "Placed hold failed");
   });
 });
 

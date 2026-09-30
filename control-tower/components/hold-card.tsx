@@ -106,8 +106,11 @@ export function HoldCard({ call, hold }: { call: TowerCall; hold: Hold }) {
   const lane = hold.lane;
   const margin = hold.maxBuy === null ? null : hold.maxBuy - hold.agreedRate;
   const actionable = status === "held" && pending === null;
-  // Events come newest first; the adapter writes one when it tells the carrier how the hold ended.
-  const notice = call.events.find((event) => event.tool === "hold_notice");
+  // While the hold waits on the desk the card is the action: the amount, the load, and the buttons.
+  const open = status === "held" || status === "confirming";
+  // Events come oldest first. The adapter writes a hold_notice when it tells the carrier how a hold
+  // ended, so an open hold has none yet, and the latest one naming this load is the one that counts.
+  const notice = open ? undefined : call.events.findLast((event) => event.tool === "hold_notice" && event.summary?.includes(hold.loadId));
 
   const settle = (answer: ConfirmHoldResponse | ReleaseHoldResponse | null) => {
     if (!answer) return;
@@ -156,8 +159,6 @@ export function HoldCard({ call, hold }: { call: TowerCall; hold: Hold }) {
   };
 
   const chipEl = <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium leading-none ${chip.tone}`}>{chip.text}</span>;
-  // While the hold waits on the desk the card is the action: the amount, the load, and the buttons.
-  const open = status === "held" || status === "confirming";
 
   const content = (
     <>

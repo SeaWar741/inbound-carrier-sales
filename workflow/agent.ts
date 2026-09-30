@@ -96,7 +96,7 @@ const tools: ToolSpec[] = [
   },
   {
     name: "get_trip_estimate",
-    exposedFields: ["status", "message", "carrierNetUsd", "feasibility", "netPerHour"],
+    exposedFields: ["status", "message", "carrierNetUsd", "feasibility"],
     description:
       "Estimate what the carrier keeps on a load after diesel and tolls, at the rate on the table, and whether the window needs a team. Call it when the carrier asks what they'd clear, what fuel or tolls run, or pushes on the rate.",
     path: "/v1/trips/estimate",

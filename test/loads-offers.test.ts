@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Config } from "../src/config.ts";
 import { testConfig } from "./test-config.ts";
-import type { TripEstimate } from "../src/domain/trip-estimate.ts";
+import type { TripSnapshot } from "../src/domain/trip-estimate.ts";
 import type { LoadDetail, LoadSummary } from "../src/infra/tms/codec.ts";
 import { TmsBusinessError, TmsUnavailableError } from "../src/infra/tms/errors.ts";
 import { TmsClient } from "../src/infra/tms/tms-client.ts";
@@ -233,7 +233,7 @@ describe("POST /v1/loads/search", () => {
     let started = 0;
     let allStarted: () => void = () => {};
     const together = new Promise<void>((resolve) => (allStarted = resolve));
-    const outcomes = [async () => ({ feasibility: "team" }) as TripEstimate, async () => null, async () => ({ feasibility: "solo" }) as TripEstimate];
+    const outcomes = [async () => ({ feasibility: "team" }) as TripSnapshot, async () => null, async () => ({ feasibility: "solo" }) as TripSnapshot];
     const estimate = vi.fn<TripEstimates["estimate"]>(async () => {
       const outcome = outcomes[started] ?? (async () => null);
       started += 1;
@@ -286,7 +286,7 @@ describe("POST /v1/loads/search", () => {
       queryLoads: vi.fn(async () => ids.map((id) => summary(id, "OPEN"))),
       getLoad: vi.fn(async (loadId: string) => detail(loadId, "OPEN")),
     };
-    const outcomes: Record<string, TripEstimate["feasibility"] | null> = {
+    const outcomes: Record<string, TripSnapshot["feasibility"] | null> = {
       LD1: "impossible",
       LD2: null,
       LD3: "impossible",
@@ -298,7 +298,7 @@ describe("POST /v1/loads/search", () => {
     let started = 0;
     const estimate = vi.fn<TripEstimates["estimate"]>(async () => {
       const feasibility = outcomes[ids[started++] ?? ""] ?? null;
-      return feasibility === null ? null : ({ feasibility } as TripEstimate);
+      return feasibility === null ? null : ({ feasibility } as TripSnapshot);
     });
     const target = serverWith(tms, { estimate });
     const res = await search({ callId: "call-ok", originState: "GA" }, target);
@@ -317,7 +317,7 @@ describe("POST /v1/loads/search", () => {
       queryLoads: vi.fn(async () => ["LD1", "LD2"].map((id) => summary(id, "OPEN"))),
       getLoad: vi.fn(async (loadId: string) => detail(loadId, "OPEN")),
     };
-    const estimate = vi.fn<TripEstimates["estimate"]>(async () => ({ feasibility: "impossible" }) as TripEstimate);
+    const estimate = vi.fn<TripEstimates["estimate"]>(async () => ({ feasibility: "impossible" }) as TripSnapshot);
     const target = serverWith(tms, { estimate });
     const res = await search({ callId: "call-ok", originState: "GA" }, target);
     await target.close();

@@ -2,9 +2,8 @@
 import zip3CentroidsJson from "../../control-tower/lib/zip3-centroids.json" with { type: "json" };
 import type { Config } from "../config.ts";
 import { dieselCacheMs } from "../constants.ts";
-import type { TripSnapshot } from "../contract.ts";
 import { tmsWallClockToDate } from "../domain/trip.ts";
-import { estimateTrip, laneDieselPerGal, type TripEstimate } from "../domain/trip-estimate.ts";
+import { estimateTrip, laneDieselPerGal, type TripSnapshot } from "../domain/trip-estimate.ts";
 import { EiaClient } from "./eia-client.ts";
 import { OrsClient, type LngLat, type OrsRoute } from "./ors-client.ts";
 import type { LoadDetail } from "./tms/codec.ts";
@@ -60,7 +59,7 @@ export class TripEstimator {
     return new TripEstimator({ eia: new EiaClient({ apiKey: eiaKey }), ors: new OrsClient({ apiKey: orsKey }), centroids });
   }
 
-  async estimate(trip: TripRequest, log: Log): Promise<TripEstimate | null> {
+  async estimate(trip: TripRequest, log: Log): Promise<TripSnapshot | null> {
     if (!this.#eia || !this.#ors) return null;
     const originZip3 = trip.origin.zip.slice(0, 3);
     const destinationZip3 = trip.destination.zip.slice(0, 3);
@@ -122,7 +121,7 @@ export class TripEstimator {
 export type TripEstimates = Pick<TripEstimator, "estimate">;
 
 // The load's own lane and TMS window, at whatever rate is on the table.
-export function estimateLoadTrip(trips: TripEstimates, load: LoadDetail, rate: number, log: Log): Promise<TripEstimate | null> {
+export function estimateLoadTrip(trips: TripEstimates, load: LoadDetail, rate: number, log: Log): Promise<TripSnapshot | null> {
   return trips.estimate(
     {
       origin: { zip: load.origZip, state: load.origState },
@@ -134,22 +133,4 @@ export function estimateLoadTrip(trips: TripEstimates, load: LoadDetail, rate: n
     },
     log,
   );
-}
-
-// Picks fields explicitly: this is what the hold stores and the agent route reads from.
-export function tripSnapshotFor(rate: number, estimate: TripEstimate): TripSnapshot {
-  return {
-    rate,
-    dieselUsd: estimate.dieselUsd,
-    tollsUsd: estimate.tollsUsd,
-    carrierNetUsd: estimate.carrierNetUsd,
-    feasibility: estimate.feasibility,
-    legalEtaAt: estimate.legalEtaAt.toISOString(),
-    legalHours: estimate.legalHours,
-    lateHours: estimate.lateHours,
-    deliveryAt: estimate.deliveryAt.toISOString(),
-    netPerHour: estimate.netPerHour,
-    dieselPerGal: estimate.dieselPerGal,
-    tollShare: estimate.tollShare,
-  };
 }

@@ -65,19 +65,23 @@ export type TripEstimateInput = {
   dieselPerGal: number;
 };
 
-export type TripEstimate = {
+// What the carrier keeps at a rate after diesel and tolls, and whether the window is legal. The hold
+// stores it as is; it never carries the max buy. Times are ISO strings so it serializes unchanged.
+export type TripSnapshot = {
+  rate: number;
   dieselUsd: number;
   tollsUsd: number;
   carrierNetUsd: number;
+  feasibility: Feasibility;
+  legalEtaAt: string;
   // Hours the chosen crew needs by law: solo when one driver makes the appointment, else a team.
   legalHours: number;
-  feasibility: Feasibility;
-  legalEtaAt: Date;
-  // The TMS delivery appointment, echoed so the snapshot can show it next to the legal ETA.
-  deliveryAt: Date;
   // How far past the appointment the chosen crew lands; 0 when on time.
   lateHours: number;
+  // The TMS delivery appointment, echoed so the snapshot can show it next to the legal ETA.
+  deliveryAt: string;
   netPerHour: number;
+  // The diesel price and toll share the estimate used.
   dieselPerGal: number;
   tollShare: number;
 };
@@ -90,7 +94,7 @@ const roundTo = (n: number, digits: number) => Math.round(n * 10 ** digits) / 10
 
 // Miles are the TMS load miles, the ones the agent pitches; the route only lends its speed and toll share.
 // Dollars are whole ("about $1,800" on the phone) and the net is built from the rounded parts so they add up.
-export function estimateTrip(input: TripEstimateInput): TripEstimate {
+export function estimateTrip(input: TripEstimateInput): TripSnapshot {
   const driveHours = input.miles / input.avgMph;
   const soloHours = soloLegalHours(driveHours);
   const teamHours = teamLegalHours(driveHours);
@@ -105,14 +109,15 @@ export function estimateTrip(input: TripEstimateInput): TripEstimate {
   const carrierNetUsd = input.rate - dieselUsd - tollsUsd;
 
   return {
+    rate: input.rate,
     dieselUsd,
     tollsUsd,
     carrierNetUsd,
-    legalHours: tenths(crewHours),
     feasibility,
-    legalEtaAt: new Date(input.pickupAt.getTime() + crewHours * msPerHour),
-    deliveryAt: input.deliveryAt,
+    legalEtaAt: new Date(input.pickupAt.getTime() + crewHours * msPerHour).toISOString(),
+    legalHours: tenths(crewHours),
     lateHours: tenths(Math.max(0, crewHours - windowHours)),
+    deliveryAt: input.deliveryAt.toISOString(),
     netPerHour: crewHours > 0 ? Math.round(carrierNetUsd / crewHours) : 0,
     dieselPerGal: roundTo(input.dieselPerGal, 3),
     tollShare: roundTo(input.tollShare, 4),

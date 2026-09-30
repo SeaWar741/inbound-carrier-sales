@@ -12,7 +12,6 @@ import {
   LuHand,
   LuKeyRound,
   LuLock,
-  LuMail,
   LuMessageCircleMore,
   LuMic,
   LuPhoneOff,
@@ -144,7 +143,6 @@ const toolIcons: Record<string, IconType> = {
   request_human: LuHand,
   hangup: LuPhoneOff,
   get_trip_estimate: LuRoute,
-  hold_notice: LuMail,
 };
 
 const avatar = "flex size-8 shrink-0 items-center justify-center rounded-full";

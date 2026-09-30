@@ -3,7 +3,7 @@ import { setImmediate as yieldTurn } from "node:timers/promises";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { z } from "zod";
 import { resolveBooking } from "../src/domain/holds.ts";
-import type { TripEstimate } from "../src/domain/trip-estimate.ts";
+import type { TripSnapshot } from "../src/domain/trip-estimate.ts";
 import { TmsClient } from "../src/infra/tms/tms-client.ts";
 import type { CarrierMessage } from "../src/infra/otp-delivery-client.ts";
 import type { TripEstimates } from "../src/infra/trip-estimator.ts";
@@ -277,18 +277,19 @@ describe("hold routes", () => {
 
     it("stores the trip at the agreed rate with the hold, and never speaks it", async () => {
       trips.estimate.mockResolvedValue({
+        rate: 2300,
         dieselUsd: 1100,
         tollsUsd: 40,
         carrierNetUsd: 1160,
         legalHours: 30.9,
         feasibility: "solo",
-        legalEtaAt: new Date("2026-10-05T02:07:00.000Z"),
-        deliveryAt: new Date("2026-10-05T04:00:00.000Z"),
+        legalEtaAt: "2026-10-05T02:07:00.000Z",
+        deliveryAt: "2026-10-05T04:00:00.000Z",
         lateHours: 0,
         netPerHour: 38,
         dieselPerGal: 6.944,
         tollShare: 0.2074,
-      } satisfies TripEstimate);
+      } satisfies TripSnapshot);
       accept("call-a", "LD00881", 2300);
       const res = await createHold({ callId: "call-a", loadId: "LD00881", agreedRate: 2300 });
       expect(res.json()).toMatchObject({ status: "ok", holdStatus: "held" });
@@ -312,18 +313,19 @@ describe("hold routes", () => {
 
     it("refuses a load no crew can deliver on time and inserts nothing", async () => {
       trips.estimate.mockResolvedValue({
+        rate: 2300,
         dieselUsd: 1100,
         tollsUsd: 40,
         carrierNetUsd: 1160,
         legalHours: 21.8,
         feasibility: "impossible",
-        legalEtaAt: new Date("2026-10-05T12:10:00.000Z"),
-        deliveryAt: new Date("2026-10-05T04:00:00.000Z"),
+        legalEtaAt: "2026-10-05T12:10:00.000Z",
+        deliveryAt: "2026-10-05T04:00:00.000Z",
         lateHours: 8.2,
         netPerHour: 53,
         dieselPerGal: 6.944,
         tollShare: 0.2074,
-      } satisfies TripEstimate);
+      } satisfies TripSnapshot);
       accept("call-a", "LD00881", 2300);
       const res = await createHold({ callId: "call-a", loadId: "LD00881", agreedRate: 2300 });
       expect(res.json()).toEqual({
@@ -469,6 +471,19 @@ describe("hold routes", () => {
       expect(body.message).toMatch(/senior rep/);
       expect(body.message).not.toMatch(/\bbooked\b/i);
       expect(state.holds[0]).toMatchObject({ status: "held" });
+    });
+
+    it("sends no release notice when LOAD_BOOK is cleanly rejected, since the carrier never heard of the hold", async () => {
+      await start(["ok", { errorCode: "ALREADY_BOOKED" }]);
+      state.settings.autonomy = "autonomous";
+      state.contacts.set("call-a", { channel: "email", destination: "demo@example.com" });
+      accept("call-a", "LD00881", 2300);
+      const body = (await createHold({ callId: "call-a", loadId: "LD00881", agreedRate: 2300 })).json();
+      expect(body).toMatchObject({ status: "load_unavailable" });
+      expect(state.holds[0]).toMatchObject({ status: "released" });
+      for (let i = 0; i < 20; i += 1) await yieldTurn();
+      expect(delivery.send).not.toHaveBeenCalled();
+      expect(state.events.filter((e) => e.tool === "hold_notice")).toEqual([]);
     });
 
     it("never books in human mode", async () => {

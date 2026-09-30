@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { z } from "zod";
-import type { TripEstimate } from "../src/domain/trip-estimate.ts";
+import type { TripSnapshot } from "../src/domain/trip-estimate.ts";
 import type { LoadDetail } from "../src/infra/tms/codec.ts";
 import { TmsBusinessError, TmsUnavailableError } from "../src/infra/tms/errors.ts";
 import type { SqlStatement } from "../src/infra/twin-client.ts";
@@ -51,14 +51,15 @@ const load: LoadDetail = {
   maxBuy: 8123,
 };
 
-const estimateAt = (rate: number, feasibility: TripEstimate["feasibility"] = "solo"): TripEstimate => ({
+const estimateAt = (rate: number, feasibility: TripSnapshot["feasibility"] = "solo"): TripSnapshot => ({
+  rate,
   dieselUsd: 2573,
   tollsUsd: 109,
   carrierNetUsd: rate - 2573 - 109,
   legalHours: 97.4,
   feasibility,
-  legalEtaAt: new Date("2026-10-07T20:37:00.000Z"),
-  deliveryAt: new Date("2026-10-06T16:13:00.000Z"),
+  legalEtaAt: "2026-10-07T20:37:00.000Z",
+  deliveryAt: "2026-10-06T16:13:00.000Z",
   lateHours: feasibility === "impossible" ? 7.6 : 0,
   netPerHour: 50,
   dieselPerGal: 6.944,
@@ -103,13 +104,8 @@ describe("POST /v1/trips/estimate", () => {
     expect(res.json()).toEqual({
       status: "ok",
       message: "At $7,600, after about $2,573 in diesel and about $109 in tolls, you'd keep about $4,918.",
-      rate: 7600,
-      dieselUsd: 2573,
-      tollsUsd: 109,
       carrierNetUsd: 4918,
       feasibility: "solo",
-      legalEtaAt: "2026-10-07T20:37:00.000Z",
-      netPerHour: 50,
     });
     expect(res.body).not.toMatch(/max_?buy|8123/i);
     expect(tms.getLoad).toHaveBeenCalledWith("LD00879");
@@ -127,7 +123,6 @@ describe("POST /v1/trips/estimate", () => {
     estimate.mockImplementationOnce(async (trip) => ({ ...estimateAt(trip.rate), tollsUsd: 3 }));
     const body = (await post({ callId: "call-ok", loadId: "LD00879" })).json();
     expect(body.message).toMatch(/in diesel and next to nothing in tolls, you'd keep/);
-    expect(body.tollsUsd).toBe(3);
   });
 
   it("estimates at our latest round on this load, not an earlier one or another load's", async () => {
@@ -137,7 +132,7 @@ describe("POST /v1/trips/estimate", () => {
       { callId: "call-ok", loadId: "LD00848", round: 1, decision: "accept", rateToSay: 9000 },
     ];
     const res = await post({ callId: "call-ok", loadId: "LD00879" });
-    expect(res.json()).toMatchObject({ status: "ok", rate: 7500, carrierNetUsd: 7500 - 2573 - 109 });
+    expect(res.json()).toMatchObject({ status: "ok", carrierNetUsd: 7500 - 2573 - 109 });
     expect(res.json().message).toMatch(/^At \$7,500,/);
     expect(estimate.mock.calls[0]?.[0].rate).toBe(7500);
   });
@@ -147,7 +142,9 @@ describe("POST /v1/trips/estimate", () => {
       { callId: "call-ok", loadId: "LD00879", round: 1, decision: "counter", rateToSay: 7500 },
       { callId: "call-ok", loadId: "LD00879", round: 2, decision: "reject", rateToSay: null },
     ];
-    expect((await post({ callId: "call-ok", loadId: "LD00879" })).json()).toMatchObject({ status: "ok", rate: 7600 });
+    const res = await post({ callId: "call-ok", loadId: "LD00879" });
+    expect(res.json()).toMatchObject({ status: "ok", carrierNetUsd: 7600 - 2573 - 109 });
+    expect(res.json().message).toMatch(/^At \$7,600,/);
     expect(estimate.mock.calls[0]?.[0].rate).toBe(7600);
   });
 
@@ -168,13 +165,8 @@ describe("POST /v1/trips/estimate", () => {
       expect(res.json()).toEqual({
         status: "not_verified",
         message: "I need to verify your carrier before I can go over trip costs.",
-        rate: null,
-        dieselUsd: null,
-        tollsUsd: null,
         carrierNetUsd: null,
         feasibility: null,
-        legalEtaAt: null,
-        netPerHour: null,
       });
     }
     expect(tms.getLoad).not.toHaveBeenCalled();
@@ -183,7 +175,7 @@ describe("POST /v1/trips/estimate", () => {
 
   it("answers estimate_unavailable when the estimator has nothing", async () => {
     estimate.mockResolvedValueOnce(null);
-    expect((await post({ callId: "call-ok", loadId: "LD00879" })).json()).toMatchObject({ status: "estimate_unavailable", rate: null, feasibility: null });
+    expect((await post({ callId: "call-ok", loadId: "LD00879" })).json()).toMatchObject({ status: "estimate_unavailable", carrierNetUsd: null, feasibility: null });
   });
 
   it("answers load_unavailable for a load that is not OPEN or not found", async () => {
@@ -205,7 +197,7 @@ describe("POST /v1/trips/estimate", () => {
     for (const payload of [{ callId: "call-ok" }, { callId: "call-ok", loadId: "LD-879" }]) {
       const res = await post(payload);
       expect(res.statusCode).toBe(200);
-      expect(res.json()).toMatchObject({ status: "invalid_request", rate: null });
+      expect(res.json()).toMatchObject({ status: "invalid_request", carrierNetUsd: null });
     }
   });
 
