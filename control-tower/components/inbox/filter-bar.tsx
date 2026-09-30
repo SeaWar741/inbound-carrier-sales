@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { IconType } from "react-icons";
-import { LuArrowRight, LuArrowUpDown, LuChevronDown, LuContainer, LuRoute, LuSearch } from "react-icons/lu";
+import { Select } from "antd";
+import { LuArrowRight, LuArrowUpDown, LuChevronDown, LuContainer, LuFlag, LuRoute, LuSearch } from "react-icons/lu";
 import { equipmentLabel } from "@/components/hold-card";
 import { inboxSorts } from "@/lib/contracts";
 
@@ -13,6 +14,9 @@ export type InboxFilters = {
   origin: string;
   destination: string;
   since: string;
+  // A picked day range (YYYY-MM-DD, desk days); it replaces `since` while set.
+  from: string;
+  to: string;
   q: string;
   sort: string;
 };
@@ -23,12 +27,7 @@ const states = [
   "MD", "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI",
   "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY",
 ];
-// The adapter's `since` windows and sorts; the URL omits their defaults (7d, priority).
-export const sinceOptions = [
-  { value: "today", label: "Today" },
-  { value: "", label: "Last 7 days" },
-  { value: "30d", label: "Last 30 days" },
-];
+// The adapter's sorts; the URL omits its default (priority).
 const sortLabels: Record<(typeof inboxSorts)[number], string> = {
   priority: "Priority",
   recent: "Recent",
@@ -178,13 +177,12 @@ export function FilterSelect({
   );
 }
 
-const chipSelect =
-  "field-sizing-content h-full min-w-0 cursor-pointer appearance-none bg-transparent text-xs font-medium outline-none";
-
-// The cortex h-8 filter chip: a colored leading icon, the value, and a chevron, on a native select.
-// It shrinks and clips instead of wrapping, so the chips stay on one row.
-function ChipSelect({
+// An antd select in the list header: a colored leading icon, search by label, and a clear button.
+// An empty value shows the placeholder.
+function HeaderSelect({
   label,
+  placeholder = label,
+  grow = 1,
   icon: Icon,
   tone,
   value,
@@ -192,73 +190,41 @@ function ChipSelect({
   options,
 }: {
   label: string;
+  placeholder?: string;
+  // Its share of the row's width.
+  grow?: number;
   icon: IconType;
   tone: string;
   value: string;
   onChange: (value: string) => void;
   options: { value: string; label: string }[];
 }) {
-  const set = value !== "";
   return (
-    <label
+    <Select
+      size="small"
+      aria-label={label}
       title={label}
-      className={`relative flex h-8 min-w-0 shrink items-center rounded-lg border bg-panel transition-colors focus-within:ring-2 focus-within:ring-accent/40 hover:bg-panel-raised ${
-        set ? "border-accent/40 text-accent" : "border-line text-fg"
-      }`}
-    >
-      <Icon size={14} className={`pointer-events-none absolute left-2 ${tone}`} aria-hidden />
-      <select aria-label={label} value={value} onChange={(event) => onChange(event.target.value)} className={`${chipSelect} pr-5 pl-7`}>
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-      <LuChevronDown size={12} className="pointer-events-none absolute right-1.5 opacity-50" aria-hidden />
-    </label>
+      placeholder={placeholder}
+      value={value === "" ? undefined : value}
+      onChange={(next?: string) => onChange(next ?? "")}
+      options={options}
+      showSearch={{ optionFilterProp: "label" }}
+      allowClear
+      popupMatchSelectWidth={false}
+      prefix={<Icon size={14} className={tone} aria-hidden />}
+      // Inline, because antd's own styles outrank Tailwind's utility layer.
+      style={{ flex: `${grow} 1 0`, minWidth: 0 }}
+    />
   );
 }
 
-// Origin and destination states in one chip: route icon, origin, arrow, destination.
-function LaneChip({ origin, destination, onChange }: { origin: string; destination: string; onChange: (key: "origin" | "destination", value: string) => void }) {
-  const set = origin !== "" || destination !== "";
-  const side = (key: "origin" | "destination", value: string, any: string) => (
-    <select
-      aria-label={key === "origin" ? "Origin state" : "Destination state"}
-      value={value}
-      onChange={(event) => onChange(key, event.target.value)}
-      className={`${chipSelect} px-0.5 ${value ? "text-accent" : "text-fg"}`}
-    >
-      <option value="">{any}</option>
-      {states.map((state) => (
-        <option key={state} value={state}>
-          {state}
-        </option>
-      ))}
-    </select>
-  );
-  return (
-    <div
-      role="group"
-      aria-label="Lane"
-      title="Lane"
-      className={`flex h-8 min-w-0 shrink items-center gap-0.5 rounded-lg border bg-panel pr-1.5 pl-2 transition-colors focus-within:ring-2 focus-within:ring-accent/40 hover:bg-panel-raised ${
-        set ? "border-accent/40" : "border-line"
-      }`}
-    >
-      <LuRoute size={14} className="shrink-0 text-ok" aria-hidden />
-      {side("origin", origin, "From")}
-      <LuArrowRight size={11} className="shrink-0 text-fg-faint" aria-hidden />
-      {side("destination", destination, "To")}
-    </div>
-  );
-}
+const equipmentOptions = equipmentCodes.map((c) => ({ value: c, label: equipmentLabel(c) }));
+const stateOptions = states.map((state) => ({ value: state, label: state }));
+// Priority is the default, so picking it clears the sort back to the placeholder.
+const sortOptions = inboxSorts.map((s) => ({ value: s, label: sortLabels[s] }));
 
-const equipmentOptions = [{ value: "", label: "Equipment" }, ...equipmentCodes.map((c) => ({ value: c, label: equipmentLabel(c) }))];
-const sortOptions = inboxSorts.map((s) => ({ value: s === "priority" ? "" : s, label: sortLabels[s] }));
-
-// The list header's filters, all on screen: one row of chips (equipment, lane, sort) over the
-// search box. Stage and date live in the stage rail. Every change goes to the URL.
+// The list header's filters, all on screen: the lane and equipment on one row, then the search box
+// and the sort. Stage and date live in the stage rail. Every change goes to the URL.
 export function FilterBar({
   filters,
   onChange,
@@ -270,19 +236,31 @@ export function FilterBar({
   return (
     <div className="flex flex-col gap-2">
       <div className="flex min-w-0 items-center gap-1.5">
-        <ChipSelect
+        <HeaderSelect label="From" icon={LuRoute} tone="text-ok" value={filters.origin} onChange={(v) => onChange("origin", v)} options={stateOptions} />
+        <LuArrowRight size={12} className="shrink-0 text-fg-faint" aria-hidden />
+        <HeaderSelect label="To" icon={LuFlag} tone="text-ok" value={filters.destination} onChange={(v) => onChange("destination", v)} options={stateOptions} />
+        <HeaderSelect
           label="Equipment"
+          grow={1.5}
           icon={LuContainer}
           tone="text-accent"
           value={filters.equipment}
           onChange={(v) => onChange("equipment", v)}
           options={equipmentOptions}
         />
-        <LaneChip origin={filters.origin} destination={filters.destination} onChange={onChange} />
-        <span className="min-w-0 flex-1" />
-        <ChipSelect label="Sort" icon={LuArrowUpDown} tone="text-warn" value={filters.sort} onChange={(v) => onChange("sort", v)} options={sortOptions} />
       </div>
-      <SearchInput q={filters.q} onSearch={onSearch} placeholder="Search MC, DOT, carrier, load..." label="Search carriers" />
+      <div className="flex min-w-0 items-center gap-1.5">
+        <SearchInput q={filters.q} onSearch={onSearch} placeholder="MC, carrier or load" label="Search carriers" className="min-w-0 flex-[2]" />
+        <HeaderSelect
+          label="Sort"
+          placeholder="Priority"
+          icon={LuArrowUpDown}
+          tone="text-warn"
+          value={filters.sort}
+          onChange={(v) => onChange("sort", v === "priority" ? "" : v)}
+          options={sortOptions}
+        />
+      </div>
     </div>
   );
 }

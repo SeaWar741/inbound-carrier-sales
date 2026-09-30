@@ -1,30 +1,37 @@
 import type { IconType } from "react-icons";
 import { LuCircleCheck, LuCircleX, LuFlag, LuHand, LuHandshake, LuPhoneCall, LuTruck } from "react-icons/lu";
+import { PulseDot } from "@/components/pulse-dot";
 import type { CallStage, CarrierStage, TowerCall } from "@/lib/contracts";
 import { callStageLabel, carrierStageLabels } from "@/lib/format";
 
-// Accent means the AI is still working the carrier, amber waits on a human, green is freight moving,
-// neutral is settled.
-const carrierStageTone: Record<CarrierStage, { pill: string; dot: string }> = {
-  live: { pill: "bg-accent-soft text-accent", dot: "bg-accent" },
-  negotiating: { pill: "bg-accent-soft text-accent", dot: "bg-accent" },
-  needs_approval: { pill: "bg-warn-soft text-warn", dot: "bg-warn" },
-  booked: { pill: "bg-ok-soft text-ok", dot: "bg-ok" },
-  in_transit: { pill: "bg-ok-soft text-ok", dot: "bg-ok" },
-  arrived: { pill: "bg-panel-raised text-fg-muted", dot: "bg-line-strong" },
-  lost: { pill: "bg-panel-raised text-fg-muted", dot: "bg-line-strong" },
+// A stage's color: `icon` for a bare icon or text, `pill` for a soft badge.
+export type StageTone = { icon: string; pill: string };
+
+const tones = {
+  red: { icon: "text-tone-red", pill: "bg-tone-red-soft text-tone-red" },
+  green: { icon: "text-tone-green", pill: "bg-tone-green-soft text-tone-green" },
+  amber: { icon: "text-tone-amber", pill: "bg-tone-amber-soft text-tone-amber" },
+  emerald: { icon: "text-tone-emerald", pill: "bg-tone-emerald-soft text-tone-emerald" },
+  blue: { icon: "text-tone-blue", pill: "bg-tone-blue-soft text-tone-blue" },
+  violet: { icon: "text-tone-violet", pill: "bg-tone-violet-soft text-tone-violet" },
+  gray: { icon: "text-tone-gray", pill: "bg-tone-gray-soft text-tone-gray" },
+} satisfies Record<string, StageTone>;
+
+// The one stage language of the inbox: the rail, the list rows and the detail badge all read it.
+// Red waits on a human, green is on the phone, amber is haggling, emerald is booked, blue is
+// rolling, violet has arrived, gray is lost.
+export const carrierStageStyle: Record<CarrierStage, { label: string; icon: IconType; tone: StageTone }> = {
+  needs_approval: { label: carrierStageLabels.needs_approval, icon: LuHand, tone: tones.red },
+  live: { label: carrierStageLabels.live, icon: LuPhoneCall, tone: tones.green },
+  negotiating: { label: carrierStageLabels.negotiating, icon: LuHandshake, tone: tones.amber },
+  booked: { label: carrierStageLabels.booked, icon: LuCircleCheck, tone: tones.emerald },
+  in_transit: { label: carrierStageLabels.in_transit, icon: LuTruck, tone: tones.blue },
+  arrived: { label: carrierStageLabels.arrived, icon: LuFlag, tone: tones.violet },
+  lost: { label: carrierStageLabels.lost, icon: LuCircleX, tone: tones.gray },
 };
 
-// One icon per stage, shared by the stage rail, the list rows and the detail header.
-export const carrierStageIcon: Record<CarrierStage, IconType> = {
-  live: LuPhoneCall,
-  negotiating: LuHandshake,
-  needs_approval: LuHand,
-  booked: LuCircleCheck,
-  in_transit: LuTruck,
-  arrived: LuFlag,
-  lost: LuCircleX,
-};
+// Rail rows that are not a stage: "All carriers" is neutral.
+export const neutralTone: StageTone = tones.gray;
 
 // Same tones the call wall used for a single call's stage.
 const callStageTone: Record<CallStage, string> = {
@@ -44,29 +51,32 @@ const badgeSize = {
   sm: "h-[18px] px-1.5 text-[10px]",
   md: "px-3 py-1.5 text-xs",
 };
-export const badgeClass = "inline-flex w-fit shrink-0 items-center gap-1 whitespace-nowrap rounded-md font-medium leading-none";
+const badgeClass = "inline-flex w-fit shrink-0 items-center gap-1 whitespace-nowrap rounded-md font-medium leading-none";
 
 export function Badge({ tone, size = "sm", children }: { tone: string; size?: keyof typeof badgeSize; children: React.ReactNode }) {
   return <span className={`${badgeClass} ${badgeSize[size]} ${tone}`}>{children}</span>;
 }
 
+// The detail header's stage: icon and label in the stage's tone; a live call pulses.
 export function CarrierStagePill({ stage, size = "sm" }: { stage: CarrierStage; size?: keyof typeof badgeSize }) {
-  const Icon = carrierStageIcon[stage];
+  const { label, icon: Icon, tone } = carrierStageStyle[stage];
   return (
-    <Badge tone={carrierStageTone[stage].pill} size={size}>
+    <Badge tone={tone.pill} size={size}>
+      {stage === "live" && <PulseDot tone="live" />}
       <Icon size={size === "sm" ? 11 : 13} aria-hidden />
-      {carrierStageLabels[stage]}
+      {label}
     </Badge>
   );
 }
 
-export function CarrierStageDot({ stage }: { stage: CarrierStage }) {
+// A list row's stage: the bare icon in the stage's tone, named for screen readers and on hover.
+export function CarrierStageIcon({ stage, size = 18 }: { stage: CarrierStage; size?: number }) {
+  const { label, icon: Icon, tone } = carrierStageStyle[stage];
   return (
-    <span
-      role="img"
-      aria-label={carrierStageLabels[stage]}
-      className={`size-2.5 shrink-0 rounded-full ${carrierStageTone[stage].dot}`}
-    />
+    <span role="img" aria-label={label} title={label} className={`flex shrink-0 items-center gap-1.5 ${tone.icon}`}>
+      {stage === "live" && <PulseDot tone="live" />}
+      <Icon size={size} aria-hidden />
+    </span>
   );
 }
 

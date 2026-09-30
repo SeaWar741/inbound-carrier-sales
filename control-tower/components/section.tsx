@@ -37,3 +37,41 @@ export function Section({
     </section>
   );
 }
+
+const actionTones = {
+  red: { card: "border-tone-red/30", header: "bg-tone-red-soft text-tone-red" },
+  amber: { card: "border-tone-amber/30", header: "bg-tone-amber-soft text-tone-amber" },
+  emerald: { card: "border-tone-emerald/30", header: "bg-tone-emerald-soft text-tone-emerald" },
+  gray: { card: "border-line-strong", header: "bg-tone-gray-soft text-tone-gray" },
+};
+export type ActionTone = keyof typeof actionTones;
+
+// Something a person has to do, at the top of the detail panel: a bordered card whose tinted header
+// names the action. The caller spaces the cards.
+export function ActionCard({
+  tone,
+  icon: Icon,
+  title,
+  aside,
+  children,
+}: {
+  tone: ActionTone;
+  icon: IconType;
+  title: string;
+  aside?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  const style = actionTones[tone];
+  return (
+    <section aria-label={title} className={`overflow-hidden rounded-lg border bg-panel ${style.card}`}>
+      <div className={`flex min-w-0 items-center justify-between gap-2 px-3 py-2 ${style.header}`}>
+        <h3 className="flex min-w-0 items-center gap-1.5 text-xs font-semibold">
+          <Icon size={14} className="shrink-0" aria-hidden />
+          <span className="truncate">{title}</span>
+        </h3>
+        {aside}
+      </div>
+      <div className="p-3">{children}</div>
+    </section>
+  );
+}

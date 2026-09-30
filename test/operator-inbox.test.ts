@@ -225,6 +225,10 @@ describe("GET /v1/operator/carriers", () => {
     ["an unknown sort", "?sort=name"],
     ["a malformed state", "?origin=Georgia"],
     ["an unknown since", "?since=1y"],
+    ["a malformed from", "?from=2026-9-1&to=2026-09-03"],
+    ["from without to", "?from=2026-09-01"],
+    ["to without from", "?to=2026-09-01"],
+    ["from after to", "?from=2026-09-03&to=2026-09-01"],
     ["201 live ids", `?${Array.from({ length: 201 }, (_, i) => `live=run-${i}`).join("&")}`],
   ])("rejects %s", async (_, query) => {
     statements.length = 0;
@@ -330,6 +334,21 @@ describe("GET /v1/operator/carriers", () => {
     expect(text).toContain("(SELECT count(*) FROM ordered) AS total");
   });
 
+  it("reads a day range as whole Chicago days, from the start of from to the start of the day after to, over since", () => {
+    const text = carriersQuery(operatorCarriersQuery.parse({ since: "today", from: "2026-09-01", to: "2026-09-03" })).text;
+    expect(text).toContain(
+      "c.created_at >= ((E'2026-09-01'::date + 0)::timestamp AT TIME ZONE E'America/Chicago')::timestamp" +
+        " AND c.created_at < ((E'2026-09-03'::date + 1)::timestamp AT TIME ZONE E'America/Chicago')::timestamp",
+    );
+    expect(text).not.toContain("date_trunc('day', now()");
+  });
+
+  it("keeps the since preset when the range is blank", () => {
+    const text = carriersQuery(operatorCarriersQuery.parse({ since: "30d", from: "", to: "" })).text;
+    expect(text).toContain("c.created_at >= (now() - interval '30 days')::timestamp");
+    expect(text).not.toContain("::date");
+  });
+
   it("answers 503 when Twin fails", async () => {
     failTwin = true;
     try {
@@ -380,8 +399,20 @@ describe("GET /v1/operator/carriers/:key/calls", () => {
     expect(text).not.toContain("tabbed AS");
   });
 
-  it("rejects an unknown since", async () => {
+  it("rejects an unknown since and a half range", async () => {
     expect((await getCalls("mc:123456", "?since=1y")).statusCode).toBe(400);
+    expect((await getCalls("mc:123456", "?from=2026-09-01")).statusCode).toBe(400);
+  });
+
+  it("reads the carrier's row over the list's day range", async () => {
+    statements.length = 0;
+    const res = await getCalls("mc:123456", "?from=2026-09-01&to=2026-09-01");
+    expect(res.statusCode).toBe(200);
+    const text = statements.find((t) => t.startsWith("WITH scoped")) ?? "";
+    expect(text).toContain(
+      "c.created_at >= ((E'2026-09-01'::date + 0)::timestamp AT TIME ZONE E'America/Chicago')::timestamp" +
+        " AND c.created_at < ((E'2026-09-01'::date + 1)::timestamp AT TIME ZONE E'America/Chicago')::timestamp AND COALESCE(",
+    );
   });
 
   it("answers an empty list and no carrier for an unknown key", async () => {

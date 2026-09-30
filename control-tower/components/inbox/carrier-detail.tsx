@@ -1,13 +1,32 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { LuArrowRight, LuChevronDown, LuHand, LuIdCard, LuPackage, LuPhone, LuTriangleAlert, LuTruck } from "react-icons/lu";
+import type { IconType } from "react-icons";
+import {
+  LuArrowRight,
+  LuCalendarClock,
+  LuChevronDown,
+  LuCircleCheck,
+  LuDollarSign,
+  LuHand,
+  LuHeadset,
+  LuIdCard,
+  LuLock,
+  LuPackage,
+  LuPhone,
+  LuPiggyBank,
+  LuRepeat,
+  LuTriangleAlert,
+  LuTruck,
+} from "react-icons/lu";
 import { CallDetail } from "@/components/call-detail";
-import { equipmentLabel } from "@/components/hold-card";
-import { Badge, CarrierStagePill } from "@/components/inbox/stage-pill";
+import { equipmentLabel, HoldCard } from "@/components/hold-card";
+import type { InboxWindow } from "@/components/inbox/inbox-rail";
+import { Badge, CarrierStagePill, carrierStageStyle } from "@/components/inbox/stage-pill";
+import { VoiceControls } from "@/components/intervention-bar";
 import { LoadPanel } from "@/components/load-panel";
 import { PulseDot } from "@/components/pulse-dot";
-import { Section } from "@/components/section";
+import { ActionCard, Section } from "@/components/section";
 import type { TowerCall, TowerCarrier, TowerCarrierCalls, WallLane } from "@/lib/contracts";
 import {
   callSummary,
@@ -15,6 +34,7 @@ import {
   carrierName,
   deskDayKey,
   formatDateTime,
+  formatElapsed,
   formatDeskWhen,
   formatPercent,
   formatPerMile,
@@ -25,6 +45,7 @@ import {
 } from "@/lib/format";
 import { carrierPricing, loadOutcome, type LoadOutcome } from "@/lib/pricing";
 import { usePoll } from "@/lib/use-poll";
+import { useVoice, type Voice } from "@/lib/use-voice";
 
 const callsPollMs = 5_000;
 
@@ -40,11 +61,14 @@ function plural(count: number, word: string): string {
   return `${count} ${word}${count === 1 ? "" : "s"}`;
 }
 
-function Fact({ label, children }: { label: string; children: React.ReactNode }) {
+function Fact({ icon: Icon, label, children }: { icon: IconType; label: string; children: React.ReactNode }) {
   return (
     <div className="min-w-0">
-      <div className="text-fg-muted">{label}</div>
-      <div className="tabular truncate font-semibold text-fg">{children}</div>
+      <div className="flex items-center gap-1.5 text-fg-muted">
+        <Icon size={13} className="shrink-0" aria-hidden />
+        <span className="truncate">{label}</span>
+      </div>
+      <div className="tabular mt-0.5 truncate pl-[19px] font-semibold text-fg">{children}</div>
     </div>
   );
 }
@@ -58,15 +82,15 @@ function CarrierRecord({ carrier, calls }: { carrier: TowerCarrier | null; calls
   return (
     <Section icon={LuIdCard} title="Carrier record">
       <div className="grid grid-cols-2 gap-x-3 gap-y-3 text-xs">
-        <Fact label="Booked">
+        <Fact icon={LuCircleCheck} label="Booked">
           {pricing.booked} of {pricing.loadsOffered}
           {pricing.bookingRate !== null && <span className="font-normal text-fg-muted"> ({formatPercent(pricing.bookingRate)})</span>}
         </Fact>
-        <Fact label="Avg agreed $/mi">{orDash(pricing.avgAgreedPerMile, formatPerMile)}</Fact>
-        <Fact label="Avg margin kept">{orDash(pricing.avgMarginKept, formatUsd)}</Fact>
-        <Fact label="Avg round at agreement">{orDash(pricing.avgRoundsToAgree, (v) => `R${v.toFixed(1)}`)}</Fact>
-        <Fact label="Next pickup">{carrier?.nextTrip?.pickupAt ? formatDateTime(carrier.nextTrip.pickupAt) : "-"}</Fact>
-        <Fact label="Open hold">
+        <Fact icon={LuDollarSign} label="Avg agreed $/mi">{orDash(pricing.avgAgreedPerMile, formatPerMile)}</Fact>
+        <Fact icon={LuPiggyBank} label="Avg margin kept">{orDash(pricing.avgMarginKept, formatUsd)}</Fact>
+        <Fact icon={LuRepeat} label="Avg round at agreement">{orDash(pricing.avgRoundsToAgree, (v) => `R${v.toFixed(1)}`)}</Fact>
+        <Fact icon={LuCalendarClock} label="Next pickup">{carrier?.nextTrip?.pickupAt ? formatDateTime(carrier.nextTrip.pickupAt) : "-"}</Fact>
+        <Fact icon={LuLock} label="Open hold">
           {hold ? `${hold.loadId} at ${formatUsd(hold.agreedRate)}${hold.status === "confirming" ? ", confirming" : ""}` : "None"}
         </Fact>
       </div>
@@ -288,32 +312,104 @@ function LoadSelector({
   );
 }
 
+// The live call on which the carrier asked for a person, newest first.
+function humanRequest(calls: TowerCall[]): { call: TowerCall; reason: string } | null {
+  for (const call of calls) {
+    if (!call.live) continue;
+    const event = call.events.find((e) => e.tool === "request_human");
+    if (event) return { call, reason: event.summary ?? call.riskReason ?? "The carrier asked to speak with a person." };
+  }
+  return null;
+}
+
+// The top of the detail panel whenever a person is needed: each hold waiting on the desk and a
+// carrier asking for a person, as action cards. The voice controls act on the selected call, so a
+// request on another call offers to open it first.
+function NeedsYou({
+  calls,
+  selected,
+  voice,
+  now,
+  onSelectCall,
+}: {
+  calls: TowerCall[];
+  selected: TowerCall | null;
+  voice: Voice;
+  now: number;
+  onSelectCall: (callId: string) => void;
+}) {
+  const holds = calls.flatMap((call) => (call.hold && (call.hold.status === "held" || call.hold.status === "confirming") ? [{ call, hold: call.hold }] : []));
+  const request = humanRequest(calls);
+  if (holds.length === 0 && request === null) return null;
+  return (
+    <div className="flex flex-col gap-3 p-4">
+      {request && (
+        <ActionCard tone="red" icon={LuHeadset} title="Carrier asked for a person">
+          <p className="text-sm text-fg">{request.reason}</p>
+          <p className="tabular mt-1 text-xs text-fg-muted">
+            {carrierId(request.call)} · on the line {formatElapsed(now - Date.parse(request.call.createdAt))}
+          </p>
+          <div className="mt-3">
+            {selected?.callId === request.call.callId ? (
+              <>
+                <VoiceControls call={selected} voice={voice} />
+                {voice.error && (
+                  <p role="alert" className="mt-2 flex items-center gap-1.5 text-xs text-risk">
+                    <LuTriangleAlert size={12} aria-hidden />
+                    {voice.error}
+                  </p>
+                )}
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={() => onSelectCall(request.call.callId)}
+                className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-lg bg-accent px-3 text-sm font-semibold text-white transition-colors hover:bg-accent/90"
+              >
+                <LuPhone size={14} aria-hidden />
+                Open this call
+              </button>
+            )}
+          </div>
+        </ActionCard>
+      )}
+      {holds.map(({ call, hold }) => (
+        <HoldCard key={hold.holdId} call={call} hold={hold} />
+      ))}
+    </div>
+  );
+}
+
 // One carrier: the conversation (header, load picker, the selected call) in the middle and the
-// detail panel on the right, one scroll: hold, pricing, load, carrier record.
+// detail panel on the right, one scroll: what needs a person, the load and its map, pricing, and
+// the carrier record.
 export function CarrierDetail({
   carrierKey,
-  since,
+  dateWindow,
   selectedCallId,
   now,
   onSelectCall,
 }: {
   carrierKey: string;
-  // The list's window, so the carrier's row here matches its row there; empty for the default.
-  since: string;
+  // The list's window, so the carrier's row here matches its row there; empty values are defaults.
+  dateWindow: InboxWindow;
   selectedCallId: string | null;
   now: number;
   onSelectCall: (callId: string) => void;
 }) {
-  const url = `/api/carriers/${encodeURIComponent(carrierKey)}/calls${since ? `?since=${encodeURIComponent(since)}` : ""}`;
+  const query = new URLSearchParams(Object.entries(dateWindow).filter(([, value]) => value !== "")).toString();
+  const url = `/api/carriers/${encodeURIComponent(carrierKey)}/calls${query ? `?${query}` : ""}`;
   const { data, error, loading } = usePoll<TowerCarrierCalls>(url, callsPollMs, "call list");
-  // The call the operator is speaking on, so the load picker keeps it marked.
-  const [takenOverCallId, setTakenOverCallId] = useState<string | null>(null);
 
   const calls = data?.calls ?? [];
   // The carrier's list row; null when it has no call in the window, and the header falls back to its calls.
   const carrier = data?.carrier ?? null;
   const latest = calls[0];
   const selected = calls.find((call) => call.callId === selectedCallId) ?? latest ?? null;
+  // One voice connection to the selected call, shared by its intervention bar and the action card.
+  const voice = useVoice(selected?.callId ?? "", selected?.sessionId != null);
+  // The call the operator is speaking on, so the load picker keeps it marked.
+  const takenOverCallId = voice.mode === "takeover" && selected ? selected.callId : null;
   const name = carrier ? carrierName(carrier) : latest ? carrierId(latest) : "Carrier";
   const mc = carrier?.mcNumber ?? latest?.mcNumber ?? null;
   const dot = carrier?.dotNumber ?? latest?.dotNumber ?? null;
@@ -347,19 +443,19 @@ export function CarrierDetail({
           <div className="mt-1.5 flex min-w-0 items-center gap-2 overflow-hidden">
             {numbers && <span className="tabular min-w-0 shrink-[3] truncate text-sm text-fg-muted">{numbers}</span>}
             {carrier?.needsHuman && (
-              <Badge tone="bg-risk-soft text-risk">
+              <Badge tone={carrierStageStyle.needs_approval.tone.pill}>
                 <LuHand size={11} aria-hidden />
                 Needs human
               </Badge>
             )}
             {latest?.live && (
-              <Badge tone="bg-ok-soft text-ok">
-                <PulseDot tone="ok" />
+              <Badge tone={carrierStageStyle.live.tone.pill}>
+                <PulseDot tone="live" />
                 On a call
               </Badge>
             )}
             {eta && (
-              <Badge tone="bg-accent-soft text-accent">
+              <Badge tone={carrierStageStyle.in_transit.tone.pill}>
                 <LuTruck size={12} aria-hidden />
                 Next trip ETA {formatDateTime(eta)}
               </Badge>
@@ -379,7 +475,7 @@ export function CarrierDetail({
               <LoadSelector calls={calls} selected={selected} takenOverCallId={takenOverCallId} now={now} onSelect={onSelectCall} />
             </div>
             <section aria-label="Call" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-              <CallDetail key={selected.callId} call={selected} now={now} onTakeoverChange={setTakenOverCallId} />
+              <CallDetail key={selected.callId} call={selected} voice={voice} now={now} />
             </section>
           </>
         ) : (
@@ -388,6 +484,7 @@ export function CarrierDetail({
       </div>
 
       <aside aria-label="Carrier and load" className="h-full min-h-0 w-[340px] shrink-0 overflow-y-auto border-l border-line bg-panel pb-6">
+        <NeedsYou calls={calls} selected={selected} voice={voice} now={now} onSelectCall={onSelectCall} />
         <LoadPanel selectedCall={selected} history={calls} nextTrip={carrier?.nextTrip ?? null} />
         <CarrierRecord carrier={carrier} calls={calls} />
       </aside>

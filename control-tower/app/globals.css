@@ -46,6 +46,23 @@
   --warn-soft: oklch(0.964 0.021 67.581);
   --risk: oklch(0.621 0.192 23.042);
   --risk-soft: oklch(0.956 0.017 17.462);
+
+  /* Carrier stage tones, one hue per stage (Tailwind 600/700 on 100), so no two stages share a
+     color: a strong fg for icons and text, and a soft bg for pills. */
+  --tone-red: oklch(0.577 0.245 27.325);
+  --tone-red-soft: oklch(0.936 0.032 17.717);
+  --tone-green: oklch(0.627 0.194 149.214);
+  --tone-green-soft: oklch(0.962 0.044 156.743);
+  --tone-amber: oklch(0.666 0.179 58.318);
+  --tone-amber-soft: oklch(0.962 0.059 95.617);
+  --tone-emerald: oklch(0.508 0.118 165.612);
+  --tone-emerald-soft: oklch(0.95 0.052 163.051);
+  --tone-blue: oklch(0.546 0.245 262.881);
+  --tone-blue-soft: oklch(0.932 0.032 255.585);
+  --tone-violet: oklch(0.541 0.281 293.009);
+  --tone-violet-soft: oklch(0.943 0.029 294.588);
+  --tone-gray: oklch(0.551 0.027 264.364);
+  --tone-gray-soft: oklch(0.967 0.003 264.542);
 }
 
 @theme inline {
@@ -65,6 +82,20 @@
   --color-warn-soft: var(--warn-soft);
   --color-risk: var(--risk);
   --color-risk-soft: var(--risk-soft);
+  --color-tone-red: var(--tone-red);
+  --color-tone-red-soft: var(--tone-red-soft);
+  --color-tone-green: var(--tone-green);
+  --color-tone-green-soft: var(--tone-green-soft);
+  --color-tone-amber: var(--tone-amber);
+  --color-tone-amber-soft: var(--tone-amber-soft);
+  --color-tone-emerald: var(--tone-emerald);
+  --color-tone-emerald-soft: var(--tone-emerald-soft);
+  --color-tone-blue: var(--tone-blue);
+  --color-tone-blue-soft: var(--tone-blue-soft);
+  --color-tone-violet: var(--tone-violet);
+  --color-tone-violet-soft: var(--tone-violet-soft);
+  --color-tone-gray: var(--tone-gray);
+  --color-tone-gray-soft: var(--tone-gray-soft);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
   --radius-panel: 6px;

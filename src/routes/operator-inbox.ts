@@ -101,6 +101,22 @@ const sinceBounds: Record<OperatorCarriersQuery["since"], SqlStatement> = {
   "30d": sql`(now() - interval '30 days')::timestamp`,
 };
 
+// The window the carrier queries read, from the query's day range or else its `since` preset.
+export type InboxWindow = Pick<OperatorCarriersQuery, "since" | "from" | "to">;
+
+// Midnight at the start of a desk calendar day, on the stored session-zone clock like `today`.
+const deskDayStart = (day: string, plusDays: number) =>
+  sql`((${day}::date + ${plusDays})::timestamp AT TIME ZONE ${operatorTimeZone})::timestamp`.text;
+
+// The `created_at` condition of the window: a picked range runs from the start of `from` to the
+// start of the day after `to`, so both days are whole.
+function windowCondition(inboxWindow: InboxWindow): string {
+  if (inboxWindow.from !== undefined && inboxWindow.to !== undefined) {
+    return `c.created_at >= ` + deskDayStart(inboxWindow.from, 0) + ` AND c.created_at < ` + deskDayStart(inboxWindow.to, 1);
+  }
+  return `c.created_at >= ` + sinceBounds[inboxWindow.since].text;
+}
+
 // Every key ends with the carrier key so equal values page in a stable order.
 const sortOrders: Record<OperatorCarriersQuery["sort"], string> = {
   priority: "f.tab_rank, f.last_activity_at DESC, f.carrier_key",
@@ -113,16 +129,16 @@ const sortOrders: Record<OperatorCarriersQuery["sort"], string> = {
 const containsPattern = (q: string) => `%${q.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_")}%`;
 
 // The CTEs up to `staged`: one row per carrier with its stage. A carrier is every call sharing
-// carrierKey inside the `since` window, narrowed to one carrier when `key` is given. needs_approval
+// carrierKey inside the window (`since` or the day range), narrowed to one carrier when `key` is given. needs_approval
 // comes from an open hold on any of those calls, negotiating and live from its latest call, and
 // booked, in_transit and arrived from its latest booked hold across all those calls.
-function stagedCtes(since: OperatorCarriersQuery["since"], live: string[], key?: string): string {
+function stagedCtes(inboxWindow: InboxWindow, live: string[], key?: string): string {
   const latestLive = live.length > 0 ? sql`k.latest_call_id IN (${live})`.text : "FALSE";
   const keyFilter = key === undefined ? "" : ` AND ` + carrierKey("c") + sql` = ${key}`.text;
   return (
     `WITH scoped AS (
       SELECT c.*, ` + carrierKey("c") + ` AS carrier_key
-      FROM calls c WHERE c.created_at >= ` + sinceBounds[since].text + keyFilter + `
+      FROM calls c WHERE ` + windowCondition(inboxWindow) + keyFilter + `
     ), grouped AS (
       SELECT s.carrier_key, count(*) AS calls_count, max(s.created_at) AS last_call_at,
         (array_agg(s.call_id ORDER BY s.created_at DESC, s.call_id DESC))[1] AS latest_call_id,
@@ -218,7 +234,7 @@ export function carriersQuery(params: OperatorCarriersQuery): SqlStatement {
   const offset = (params.page - 1) * inboxPageSize;
 
   const text =
-    stagedCtes(params.since, params.live) + `, tabbed AS (
+    stagedCtes(params, params.live) + `, tabbed AS (
       SELECT st.*, CASE
           WHEN st.carrier_stage = 'needs_approval' OR st.needs_human THEN 'needs_you'
           WHEN st.carrier_stage IN ('live', 'negotiating') THEN 'live'
@@ -301,7 +317,7 @@ function toOperatorCarrier(row: CarrierRow): OperatorCarrier {
 
 // One carrier's list row, the same columns and stage the list computes, for the detail header.
 export function carrierSummaryQuery(key: string, params: OperatorCarrierCallsQuery): SqlStatement {
-  return { text: stagedCtes(params.since, params.live, key) + `
+  return { text: stagedCtes(params, params.live, key) + `
     SELECT ` + carrierColumns + `
     FROM staged p` };
 }

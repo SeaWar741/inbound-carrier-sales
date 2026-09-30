@@ -1,8 +1,9 @@
 "use client";
 
-import { LuArrowRight, LuCircleCheck, LuLock, LuTriangleAlert } from "react-icons/lu";
+import type { IconType } from "react-icons";
+import { LuArrowRight, LuCircleCheck, LuHand, LuLock, LuTriangleAlert } from "react-icons/lu";
 import { useEffect, useRef, useState } from "react";
-import { Section } from "@/components/section";
+import { ActionCard, type ActionTone, Section } from "@/components/section";
 import type { ConfirmHoldResponse, ReleaseHoldResponse, TowerCall, WallLane } from "@/lib/contracts";
 import { carrierId, formatUsd } from "@/lib/format";
 
@@ -43,6 +44,15 @@ const statusChip: Record<HoldStatus, { text: string; tone: string }> = {
   released: { text: "Released", tone: "bg-line text-fg-muted" },
 };
 
+// The action card's header for each status: red while it waits on the desk.
+const holdAction: Record<HoldStatus, { title: string; tone: ActionTone; icon: IconType }> = {
+  held: { title: "Hold waiting for your approval", tone: "red", icon: LuHand },
+  confirming: { title: "Booking with the TMS", tone: "amber", icon: LuLock },
+  booked: { title: "Booked", tone: "emerald", icon: LuCircleCheck },
+  booked_unconfirmed: { title: "Booked, unconfirmed", tone: "amber", icon: LuCircleCheck },
+  released: { title: "Hold released", tone: "gray", icon: LuLock },
+};
+
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex items-baseline justify-between gap-3 py-1">
@@ -77,8 +87,8 @@ async function postHold(url: string, headers: Record<string, string>): Promise<C
   return body;
 }
 
-// The simulated handoff: the operator books or releases the load the agent held. Rendered as a
-// section of the detail panel.
+// The simulated handoff: the operator books or releases the load the agent held. An open hold is an
+// action card at the top of the detail panel; a settled one is a section under the load.
 export function HoldCard({ call, hold }: { call: TowerCall; hold: Hold }) {
   const [armed, setArmed] = useState(false);
   const [pending, setPending] = useState<"confirm" | "release" | null>(null);
@@ -147,8 +157,8 @@ export function HoldCard({ call, hold }: { call: TowerCall; hold: Hold }) {
   // While the hold waits on the desk the card is the action: the amount, the load, and the buttons.
   const open = status === "held" || status === "confirming";
 
-  return (
-    <Section icon={LuLock} title="Hold" aside={chipEl}>
+  const content = (
+    <>
       {open ? (
         <div className="flex flex-col gap-1">
           <span className="tabular text-2xl font-semibold text-fg">{formatUsd(hold.agreedRate)}</span>
@@ -219,7 +229,7 @@ export function HoldCard({ call, hold }: { call: TowerCall; hold: Hold }) {
             onClick={() => void confirm()}
             disabled={!actionable}
             aria-live="polite"
-            className={`h-10 w-full cursor-pointer rounded-[var(--radius-panel)] px-3 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+            className={`h-11 w-full cursor-pointer rounded-lg px-3 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
               armed ? "bg-ok text-white" : "bg-accent text-white hover:bg-accent/90"
             }`}
           >
@@ -238,7 +248,7 @@ export function HoldCard({ call, hold }: { call: TowerCall; hold: Hold }) {
             type="button"
             onClick={() => void release()}
             disabled={!actionable}
-            className="h-10 w-full cursor-pointer rounded-[var(--radius-panel)] border border-line-strong bg-panel px-3 text-sm font-medium text-fg-muted transition-colors hover:bg-panel-raised hover:text-fg disabled:cursor-not-allowed disabled:opacity-60"
+            className="h-11 w-full cursor-pointer rounded-lg border border-line-strong bg-panel px-3 text-sm font-medium text-fg-muted transition-colors hover:bg-panel-raised hover:text-fg disabled:cursor-not-allowed disabled:opacity-60"
           >
             {pending === "release" ? "Releasing..." : "Release hold"}
           </button>
@@ -251,6 +261,22 @@ export function HoldCard({ call, hold }: { call: TowerCall; hold: Hold }) {
           {error}
         </p>
       )}
+    </>
+  );
+
+  // While the wall still reports the hold open it is the panel's action card, and stays one while
+  // this browser's own answer settles; a settled hold is a quiet section.
+  if (hold.status === "held" || hold.status === "confirming") {
+    const action = holdAction[status];
+    return (
+      <ActionCard tone={action.tone} icon={action.icon} title={action.title}>
+        {content}
+      </ActionCard>
+    );
+  }
+  return (
+    <Section icon={LuLock} title="Hold" aside={chipEl}>
+      {content}
     </Section>
   );
 }

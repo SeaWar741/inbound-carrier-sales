@@ -1,7 +1,8 @@
 "use client";
 
 import { useMemo } from "react";
-import { LuMap, LuMousePointerClick, LuTruck } from "react-icons/lu";
+import type { IconType } from "react-icons";
+import { LuCalendarClock, LuContainer, LuFlag, LuMap, LuMapPin, LuMousePointerClick, LuTruck } from "react-icons/lu";
 import { EmptyState } from "@/components/empty-state";
 import { equipmentLabel, formatPickup, HoldCard, LaneText } from "@/components/hold-card";
 import { MarginMeter } from "@/components/margin-meter";
@@ -27,17 +28,20 @@ function latestBookedLoad(history: TowerCall[]): string | null {
   return call?.hold?.loadId ?? null;
 }
 
-function Fact({ label, children }: { label: string; children: React.ReactNode }) {
+function Fact({ icon: Icon, label, children }: { icon: IconType; label: string; children: React.ReactNode }) {
   return (
-    <div className="flex items-baseline justify-between gap-3">
-      <dt className="shrink-0 text-fg-muted">{label}</dt>
+    <div className="flex items-center justify-between gap-3">
+      <dt className="flex shrink-0 items-center gap-1.5 text-fg-muted">
+        <Icon size={13} className="shrink-0" aria-hidden />
+        {label}
+      </dt>
       <dd className="min-w-0 truncate text-right text-fg">{children}</dd>
     </div>
   );
 }
 
-// The selected call's load as detail-panel sections, top to bottom: the hold while it waits on the
-// desk (its buttons are the main action), the pricing, the load itself, then a settled hold.
+// The selected call's load as detail-panel sections, top to bottom: the load with its map, the
+// pricing, then a settled hold. A hold still waiting on the desk is the panel's action card instead.
 export function LoadPanel({
   selectedCall,
   history,
@@ -83,52 +87,44 @@ export function LoadPanel({
   const agreedRate = hold && hold.status !== "released" && hold.loadId === offer?.loadId ? hold.agreedRate : null;
   const trip = nextTrip && loadId !== null && latestBookedLoad(history) === loadId ? nextTrip : null;
 
+  // An open hold is drawn by the action card at the top of the panel.
+  const settledHold = hold && hold.status !== "held" && hold.status !== "confirming" ? hold : null;
+
   if (selectedCall === null) {
     return <EmptyState className="py-10" icon={<LuMousePointerClick size={20} />} title="Select a call to see its load" hint="Map, pricing and hold follow the selection" />;
   }
   if (offer === null) {
     return (
       <>
-        {hold && <HoldCard key={hold.holdId} call={selectedCall} hold={hold} />}
+        {settledHold && <HoldCard key={settledHold.holdId} call={selectedCall} hold={settledHold} />}
         <EmptyState className="py-10" icon={<LuTruck size={20} />} title="No load on the table yet" hint="The lane and pricing appear with the first offer" />
       </>
     );
   }
 
-  const holdOpen = hold !== null && (hold.status === "held" || hold.status === "confirming");
-  const holdCard = hold && <HoldCard key={hold.holdId} call={selectedCall} hold={hold} />;
   const pickup = trip?.pickupAt ? formatDateTime(trip.pickupAt) : lane ? formatPickup(lane.pickupAt) : null;
 
   return (
     <>
-      {holdOpen && holdCard}
-      <MarginMeter
-        key={offer.loadId}
-        offer={offer}
-        authorizedUsd={authorizedUsd}
-        agreedRate={agreedRate}
-        path={path}
-        outcome={loadOutcome(history, offer.loadId)}
-      />
       <Section icon={LuMap} title="Load" aside={<span className="tabular truncate text-xs text-fg-muted">{offer.loadId}</span>}>
-        <div className="aspect-[16/10] overflow-hidden rounded-[var(--radius-panel)] border border-line">
+        <div className="h-[200px] overflow-hidden rounded-lg border border-line">
           <LaneMap loads={mapLoads} selectedId={loadId} />
         </div>
         {lane ? (
-          <dl className="mt-3 flex flex-col gap-1.5 text-xs">
-            <Fact label="Lane">
+          <dl className="mt-3 flex flex-col gap-2 text-xs">
+            <Fact icon={LuMapPin} label="Lane">
               <LaneText lane={lane} />
             </Fact>
-            <Fact label="Equipment">
+            <Fact icon={LuContainer} label="Equipment">
               {equipmentLabel(lane.equipment)} · <span className="tabular">{lane.miles.toLocaleString("en-US")} mi</span>
             </Fact>
             {pickup && (
-              <Fact label="Pickup">
+              <Fact icon={LuCalendarClock} label="Pickup">
                 <span className="tabular">{pickup}</span>
               </Fact>
             )}
             {trip?.etaAt && (
-              <Fact label="ETA">
+              <Fact icon={LuFlag} label="ETA">
                 <span className="tabular">{formatDateTime(trip.etaAt)}</span>
               </Fact>
             )}
@@ -137,7 +133,15 @@ export function LoadPanel({
           <p className="mt-3 text-xs text-fg-faint">Lane not recorded for this load.</p>
         )}
       </Section>
-      {!holdOpen && holdCard}
+      <MarginMeter
+        key={offer.loadId}
+        offer={offer}
+        authorizedUsd={authorizedUsd}
+        agreedRate={agreedRate}
+        path={path}
+        outcome={loadOutcome(history, offer.loadId)}
+      />
+      {settledHold && <HoldCard key={settledHold.holdId} call={selectedCall} hold={settledHold} />}
     </>
   );
 }

@@ -422,7 +422,7 @@ const listParam = <T extends z.ZodType>(item: T, max: number) =>
     z.array(item).max(max),
   );
 
-export const operatorCarriersQuery = z.object({
+const operatorCarriersFields = z.object({
   tab: z.enum(inboxTabs).default("all"),
   stage: listParam(z.enum(carrierStages), carrierStages.length),
   equipment: listParam(equipmentInput, 10),
@@ -430,6 +430,9 @@ export const operatorCarriersQuery = z.object({
   destination: optionalField(stateInput),
   // today is the desk's (Chicago) calendar day, like the wall; 7d and 30d are rolling windows.
   since: z.enum(["today", "7d", "30d"]).default("7d"),
+  // A picked range of desk (Chicago) calendar days, both inclusive; when given it replaces `since`.
+  from: optionalField(z.iso.date()),
+  to: optionalField(z.iso.date()),
   // MC, DOT, carrier name or a load id the carrier was offered.
   q: optionalField(z.string().trim().max(64)),
   sort: z.enum(inboxSorts).default("priority"),
@@ -437,6 +440,17 @@ export const operatorCarriersQuery = z.object({
   // Call ids HappyRobot reports as running; only the tower knows which calls are live.
   live: listParam(z.string().trim().min(1).max(128), 200),
 });
+
+// A range needs both ends, in order; ISO dates compare as strings.
+const withDayRange = <T extends z.ZodType<{ from?: string | undefined; to?: string | undefined }>>(schema: T) =>
+  schema
+    .refine((query) => (query.from === undefined) === (query.to === undefined), { message: "from and to go together", path: ["to"] })
+    .refine((query) => query.from === undefined || query.to === undefined || query.from <= query.to, {
+      message: "from must not be after to",
+      path: ["to"],
+    });
+
+export const operatorCarriersQuery = withDayRange(operatorCarriersFields);
 export type OperatorCarriersQuery = z.output<typeof operatorCarriersQuery>;
 
 const operatorCarrier = z.object({
@@ -476,7 +490,7 @@ export type OperatorCarriersResponse = z.infer<typeof operatorCarriersResponse>;
 
 export const operatorCarrierCallsParams = z.object({ key: z.string().trim().min(1).max(128) });
 // The carrier summary reads the same window and live calls as the list, so it matches the carrier's row.
-export const operatorCarrierCallsQuery = operatorCarriersQuery.pick({ since: true, live: true });
+export const operatorCarrierCallsQuery = withDayRange(operatorCarriersFields.pick({ since: true, from: true, to: true, live: true }));
 export type OperatorCarrierCallsQuery = z.output<typeof operatorCarrierCallsQuery>;
 // Newest call first; an unknown key answers an empty list. The carrier is its list row in the
 // `since` window, null when it has no call there.
