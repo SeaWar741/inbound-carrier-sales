@@ -162,6 +162,46 @@ There is no booked column. A search has no id that follows it to an offer and a 
 - Lanes are matched at the state level, not the city.
 - Zip-only searches have no origin state and do not appear on the Demand page.
 
+## Margin and negotiation research
+
+Researched on 2026-09-30, to answer "are our margins standard?". Figures are dated and sourced; vendor numbers are marketing claims.
+
+### What the tower can and cannot say
+
+A broker's gross margin is (shipper rate - carrier rate) / shipper rate. The TMS gives the posted rate and the max buy, never the shipper rate, so the tower cannot show margin. What it shows is headroom: max buy - agreed rate, labelled "Under our max". The max buy is usually set as the sell rate minus a minimum margin, or from a market rate engine: [Triumph](https://intelligencehelp.triumph.io/en/articles/8371238-triumph-rates-best-practices) uses its buy rate as the max buy and marks up 10% to 16% by confidence. If our TMS works that way, headroom is margin on top of that minimum, but that is not confirmed.
+
+Our real bookings on Twin (n=21, demo rows excluded): posted $4,558, agreed $4,912 (+6.9% over posted, 20 of 21 above it), max buy $5,243 (+15.3% over posted), headroom $331 (7.2% of the max). The agent gives away about 45% of the posted to max gap. No public data measures how far above posted carrier deals usually close, so this cannot be benchmarked yet.
+
+### Gross margin benchmarks
+
+| Source | Period | Gross margin |
+| --- | --- | --- |
+| TIA members, all modes ([Logistics Management](https://www.logisticsmgmt.com/article/tia_report_signals_continued_recovery_in_freight_brokerage_market)) | Q2 2026 | 17.8% (invoice $1,989 per shipment) |
+| TIA members ([FreightCaviar](https://www.freightcaviar.com/small-freight-brokers-outperform-on-volume-margin-pressure-mounting)) | Q2 2023 to Q1 2025 | from over 16% to just above 15% |
+| C.H. Robinson NAST ([8-K](https://www.sec.gov/Archives/edgar/data/0001043277/000104327726000027/ex991earningsreleaseq20630.htm)) | Q2 2026 | 13.1% (14.8% a year earlier) |
+| J.B. Hunt brokerage ([ARK TMS](https://arktms.com/blog/freight-broker-margin-compression-purchased-transportation-costs-2026)) | Q2 2026 | 12.5% (15.5% a year earlier) |
+| RXO brokerage ([release](https://investors.rxo.com/news/news-details/2026/Market-Share-Gains-and-Improved-Profitability-Drive-Strong-Second-Quarter-Results-for-RXO/default.aspx)) | Q2 2026 | 10.7% (14.4% a year earlier) |
+| Landstar, all truck ([8-K](https://www.sec.gov/Archives/edgar/data/0000853816/000119312526321050/d123956dex991.htm)) | Q2 2026 | 9.2% |
+
+A healthy range is roughly 11% to 18%, falling in 2026 as carrier costs outrun contract rates (C.H. Robinson Q2 2026: cost per mile +29.0% against price per mile +25.5%). Spot freight carries a wider dollar margin than contract. Buying above market does not by itself mean a poor margin ([TIA](https://news.tianet.org/youre-only-looking-at-half-the-rate/)).
+
+### What the negotiation literature says about our policy
+
+The agent counters at 35%, 60% and 80% of the posted to max gap and accepts any ask at or under its counter (`concessionSchedule` in `src/constants.ts`).
+- Shrinking steps (+35, +25, +20 points) signal that a floor is near, and the other side then infers a higher reservation price and gets a better deal: seven studies, 2,311 participants ([Tey et al. 2021](https://www.insead.edu/faculty-research/publications/journal-articles/impact-concession-patterns-negotiations-when-and-why)). Human negotiators, not carriers.
+- The first offer anchors the outcome, about $0.50 of final price per $1 of opening ([Orr and Guthrie 2006](https://ir.vanderbilt.edu/handle/1803/7415)). The carrier asks first, so it holds the anchor; naming our target and the carrier's alternatives weakens it ([Galinsky and Mussweiler 2001](https://pubmed.ncbi.nlm.nih.gov/11642352)).
+- Across seven field markets, splitting the difference between the last two offers is the most common move, is accepted more often and ends fewer negotiations ([Keniston et al., NBER w29111](https://ideas.repec.org/p/nbr/nberwo/29111.html)). Accepting any ask under our counter captures none of that.
+- Time-dependent tactics (Boulware vs Conceder) are the reference model for automated negotiators ([Faratin, Sierra and Jennings 1998](https://spiral.imperial.ac.uk/entities/publication/591e717c-cc0e-4d61-8c68-8925b34c4b4d)).
+- Vendor claims, no method published: Parade reports $154 saved per load with AI against $115 rep only ([Parade](https://www.parade.ai/resources/ai-amplifies-carrier-negotiation-performance)); HappyRobot reports 10% higher margins at Circle Logistics ([case study](https://happyrobot.ai/blog/circle-logistics-x-happyrobot-case-study)).
+- No published work covers dynamic reservation prices for carrier negotiation, or accept against counter on a broker desk.
+
+### Next step
+
+A negotiation cycle, tested before it ships:
+- Candidate rules: even or growing concession steps, a counter at the midpoint when an acceptable ask sits well above posted, and a first counter anchored on our target.
+- A lane signal, holding firmer where Demand shows many carriers asking.
+- Test first by replaying recorded asks and simulating carrier personas that concede fast, hold out, or probe for our floor. Then A/B test per call on booked rate, paid over posted, share of the gap used, walk-away per round, and rounds to a deal. At n=21 no difference in booked rate is detectable.
+
 ## Deploy
 
 `render.yaml` is a Render Blueprint (Docker, free plan). Secrets are entered in the Render dashboard.

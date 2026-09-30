@@ -1,11 +1,12 @@
 import type { TowerCall } from "./contracts";
 
 // Rate math for the operator's pricing views. The posted rate is the target buy (the approximate
-// cost of the load) and the max buy is the ceiling; margin is what stays under the ceiling.
+// cost of the load) and the max buy is the ceiling. What stays under the ceiling is headroom, not
+// margin: margin is the shipper's rate minus the carrier's, and the TMS does not give the shipper's.
 
 type PricedCall = Pick<TowerCall, "offers" | "hold" | "live" | "createdAt">;
 
-// Margin kept under the ceiling, in dollars and as a share of it. Negative when the rate is over.
+// Headroom kept under the ceiling, in dollars and as a share of it. Negative when the rate is over.
 export function marginKept(maxBuy: number | null, rate: number | null): { usd: number; pct: number } | null {
   if (maxBuy === null || rate === null) return null;
   const usd = maxBuy - rate;

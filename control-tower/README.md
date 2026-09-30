@@ -13,7 +13,7 @@ It is a Next.js app. Every secret stays on the server; the browser only holds a 
 - **Listen / whisper / take over**: listen plays the call audio; take over puts the rep on the line in place of the agent; a whisper sends a private instruction to the agent mid-call. Authorize +$50 lets the agent go that much higher on the current load.
 - **Lane map**: origin and destination of the load under discussion.
 - **Margin meter**: posted rate, the carrier's ask, our counter and the load's MAX_BUY, round by round. MAX_BUY is operator only: the agent never sees it.
-- **Hold card**: the load, the agreed rate and the margin kept. Confirm books the load in the TMS (two presses, so a stray click never books); Release frees it.
+- **Hold card**: the load, the agreed rate and the headroom under our max. Confirm books the load in the TMS (two presses, so a stray click never books); Release frees it.
 - **Human in the loop / Autonomous switch**: applies to every new hold. Human in the loop (the default) waits for a rep to confirm each hold in the tower. Autonomous books the load as soon as the carrier agrees, under the same MAX_BUY guard.
 
 ## Run locally

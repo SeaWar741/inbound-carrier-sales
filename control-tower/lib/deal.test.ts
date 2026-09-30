@@ -131,7 +131,7 @@ describe("priceBar", () => {
 describe("ourEarnings", () => {
   it("is our max minus the agreed rate, as a share of our max", () => {
     assert.deepEqual(ourEarnings(1125, 1100, "agreed"), {
-      lead: "We earn",
+      lead: "Under our max",
       amount: "$25",
       pct: "2%",
       note: "Our max $1,125 − agreed $1,100",
@@ -140,7 +140,7 @@ describe("ourEarnings", () => {
   });
   it("says we lose when the rate is over our max", () => {
     assert.deepEqual(ourEarnings(1000, 1050, "agreed"), {
-      lead: "We lose",
+      lead: "Over our max by",
       amount: "$50",
       pct: "5%",
       note: "Our max $1,000 − agreed $1,050",
