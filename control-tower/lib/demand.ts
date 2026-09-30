@@ -11,14 +11,14 @@ export const defaultDemandSort: DemandSort = "unmet";
 export type DemandSort = (typeof demandSorts)[number];
 export const demandNextSteps = ["source", "rate"] as const;
 
-// The filters the demand page keeps in the URL besides sort and paging.
-const filterKeys = ["q", "equipment", "origin"] as const;
+// The free filters the demand page keeps in the URL besides the next step, sort and paging.
+export const demandFilterKeys = ["q", "equipment", "origin"] as const;
 
 // The adapter query for the demand page URL. Only valid values go out, so a hand-edited URL shows the
 // default instead of an error.
 export function demandQuery(search: Pick<URLSearchParams, "get">): string {
   const query = new URLSearchParams();
-  for (const key of filterKeys) {
+  for (const key of demandFilterKeys) {
     const value = search.get(key)?.trim();
     if (value) query.set(key, value);
   }
@@ -114,12 +114,10 @@ export function nextStepHref(lane: Pick<DemandLane, "originState" | "equipment">
   return `/?${params.toString()}`;
 }
 
-// The origins with the most unmet asks, most first; a state with none is not a place carriers wait.
+// The origins with the most unmet asks; the adapter already lists them most first. A state with none
+// is not a place carriers wait.
 export function topOrigins(origins: TowerDemand["origins"], limit = 5): TowerDemand["origins"] {
-  return origins
-    .filter((row) => row.unmet > 0)
-    .sort((a, b) => b.unmet - a.unmet || a.originState.localeCompare(b.originState))
-    .slice(0, limit);
+  return origins.filter((row) => row.unmet > 0).slice(0, limit);
 }
 
 // The query for one row's carriers. Leaving destination or equipment out selects the row the

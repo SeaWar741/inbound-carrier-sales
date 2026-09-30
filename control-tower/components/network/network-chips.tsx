@@ -5,7 +5,7 @@ import type { IconType } from "react-icons";
 import { LuActivity, LuClockAlert, LuSparkles, LuTrendingUp, LuTrophy } from "react-icons/lu";
 import type { NetworkCarrier } from "@/lib/contracts";
 
-export type ChipStyle = { label: string; tip: string; icon: IconType; iconTone: string };
+type ChipStyle = { label: string; tip: string; icon: IconType; iconTone: string };
 
 // The statuses the page filters by, in the order a call is most worth making. Red is a carrier going
 // quiet, emerald an open lane, amber a top carrier, blue a new one. Top and Lane open are tags, so a
@@ -30,12 +30,12 @@ function carrierStatuses(carrier: NetworkCarrier): NetworkStatus[] {
 }
 
 // A bare icon in its tone, named for screen readers and explained on hover and focus.
-export function StyleIcon({ style, size = 15 }: { style: ChipStyle; size?: number }) {
+function StyleIcon({ style }: { style: ChipStyle }) {
   const Icon = style.icon;
   return (
     <Tooltip title={style.tip}>
       <span role="img" aria-label={style.tip} tabIndex={0} className={`flex shrink-0 rounded outline-none focus-visible:ring-2 focus-visible:ring-accent/40 ${style.iconTone}`}>
-        <Icon size={size} aria-hidden />
+        <Icon size={15} aria-hidden />
       </span>
     </Tooltip>
   );

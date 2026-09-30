@@ -1,4 +1,4 @@
-import { networkSorts, networkViews, pageSizes, type NetworkCarrier, type TowerCall, type TowerNetwork } from "./contracts.ts";
+import { networkSorts, networkViews, pageSizes, type NetworkCarrier, type TowerCall } from "./contracts.ts";
 import { deskDayKey, equipmentLabel, formatUsd } from "./format.ts";
 
 const dayMs = 86_400_000;
@@ -13,8 +13,8 @@ export const defaultPageSize = 25;
 export type NetworkSort = (typeof networkSorts)[number];
 export type SortDir = "asc" | "desc";
 
-// The filters the carriers page keeps in the URL besides sort and paging.
-const filterKeys = ["q", "equipment", "origin"] as const;
+// The filters the carriers page keeps in the URL besides the status view, sort and paging.
+export const networkFilterKeys = ["q", "equipment", "origin"] as const;
 
 // The adapter query for the carriers page URL. Only valid values go out, so a hand-edited URL shows
 // the default instead of an error; the window is the adapter's default 30 days.
@@ -22,7 +22,7 @@ export function networkQuery(search: Pick<URLSearchParams, "get">): string {
   const query = new URLSearchParams();
   const view = search.get("view");
   if (view !== "all" && networkViews.some((v) => v === view)) query.set("view", view!);
-  for (const key of filterKeys) {
+  for (const key of networkFilterKeys) {
     const value = search.get(key)?.trim();
     if (value) query.set(key, value);
   }
@@ -51,11 +51,6 @@ export function networkPaging(search: Pick<URLSearchParams, "get">): { sort: Net
 // The URL changes for a new sort; defaults are dropped and the list starts again at page 1.
 export function sortChange(sort: NetworkSort, dir: SortDir): Record<string, string | null> {
   return { sort: sort === defaultSort ? null : sort, dir: dir === "asc" ? "asc" : null, page: null };
-}
-
-// The open lanes with the most listed carriers, most first.
-export function topOpenLanes(lanes: TowerNetwork["openLanes"], limit = 5): TowerNetwork["openLanes"] {
-  return [...lanes].sort((a, b) => b.carriers - a.carriers || a.originState.localeCompare(b.originState)).slice(0, limit);
 }
 
 // Whole days since the carrier's last call.

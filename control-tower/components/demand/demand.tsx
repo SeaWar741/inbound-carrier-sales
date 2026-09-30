@@ -10,10 +10,11 @@ import { DemandCarriers } from "@/components/demand/demand-carriers";
 import { EquipmentTag, nextStyle, trendStyle } from "@/components/demand/demand-parts";
 import { equipmentOptions, HeaderSelect, SearchInput, stateOptions } from "@/components/inbox/filter-bar";
 import { StateMap } from "@/components/state-map";
-import { pageSizes, type DemandLane, type TowerDemand } from "@/lib/contracts";
+import { demandSorts, pageSizes, type DemandLane, type TowerDemand } from "@/lib/contracts";
 import {
   defaultDemandSort,
   demandKey,
+  demandFilterKeys,
   demandPaging,
   demandQuery,
   demandSaid,
@@ -36,7 +37,7 @@ import { usePoll } from "@/lib/use-poll";
 const demandPollMs = 60_000;
 
 // Every filter "Clear filters" resets; any change to them goes back to page 1.
-const filterKeys = ["q", "next", "equipment", "origin"] as const;
+const filterKeys = ["next", ...demandFilterKeys] as const;
 
 const nextOptions = [
   { value: "source", label: nextStyle.source.label },
@@ -48,8 +49,6 @@ const iconButton =
 
 type AntdOrder = "ascend" | "descend";
 
-// The columns the adapter sorts by, keyed as the table names them.
-const sortKeys: Partial<Record<string, DemandSort>> = { lane: "lane", equipment: "equipment", unmet: "unmet", thisWeek: "thisWeek", carriers: "carriers" };
 // Text sorts A to Z first, numbers most first. Neither direction clears the sort, so a header click
 // always shows a sorted list.
 const textDirections: AntdOrder[] = ["ascend", "descend", "ascend"];
@@ -130,7 +129,8 @@ export function Demand() {
 
   const onTable: TableProps<DemandLane>["onChange"] = (_pagination, _filters, sorter) => {
     const picked = Array.isArray(sorter) ? sorter[0] : sorter;
-    const nextSort = picked?.order ? sortKeys[String(picked.columnKey)] : undefined;
+    // The table's column keys are the adapter's sort names.
+    const nextSort = picked?.order ? demandSorts.find((s) => s === picked.columnKey) : undefined;
     updateSearch(nextSort ? demandSortChange(nextSort, picked?.order === "ascend" ? "asc" : "desc") : demandSortChange(defaultDemandSort, "desc"));
   };
   const onPage = (nextPage: number, nextSize: number) =>
@@ -271,7 +271,7 @@ export function Demand() {
       loading ? (
         "Loading lanes..."
       ) : (
-        "The demand data is unavailable. It retries every few seconds."
+        `The demand data is unavailable. It retries every ${demandPollMs / 1000} seconds.`
       )
     ) : filtered ? (
       <>

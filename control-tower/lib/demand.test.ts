@@ -118,15 +118,16 @@ describe("nextOf and nextStepHref", () => {
 });
 
 describe("topOrigins", () => {
-  it("keeps the five origins with the most unmet, skipping states with none", () => {
+  it("keeps the first five origins with unmet asks, in the adapter's order", () => {
+    // As the adapter sends them: unmet most first, then origin.
     const origins = [
-      { originState: "GA", unmet: 3 },
       { originState: "TX", unmet: 9 },
-      { originState: "CA", unmet: 0 },
-      { originState: "AL", unmet: 3 },
       { originState: "IL", unmet: 5 },
-      { originState: "OH", unmet: 1 },
+      { originState: "AL", unmet: 3 },
+      { originState: "GA", unmet: 3 },
       { originState: "NY", unmet: 2 },
+      { originState: "OH", unmet: 1 },
+      { originState: "CA", unmet: 0 },
     ];
     assert.deepEqual(
       topOrigins(origins).map((row) => row.originState),

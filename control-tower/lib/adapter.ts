@@ -102,7 +102,7 @@ export async function getNetwork(query: URLSearchParams): Promise<AdapterResult<
   return read(`/v1/operator/network?${query.toString()}`, adapterNetworkResponse, "The carrier network is unavailable right now. Retry shortly.");
 }
 
-// query carries the demand page's filters as the adapter reads them (equipment, origin, page).
+// query carries the demand page's filters as the adapter reads them (q, next, equipment, origin, sort, dir, page, pageSize).
 export async function getDemand(query: URLSearchParams): Promise<AdapterResult<TowerDemand>> {
   return read(`/v1/operator/demand?${query.toString()}`, adapterDemandResponse, "The demand data is unavailable right now. Retry shortly.");
 }

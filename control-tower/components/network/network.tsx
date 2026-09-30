@@ -1,6 +1,6 @@
 "use client";
 
-import { ConfigProvider, Pagination, Select, Table, Tooltip, type TableColumnsType, type TableProps } from "antd";
+import { ConfigProvider, Pagination, Table, Tooltip, type TableColumnsType, type TableProps } from "antd";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useMemo, useState } from "react";
@@ -26,7 +26,7 @@ import { Tile } from "@/components/dashboard/kpi-tiles";
 import { equipmentOptions, HeaderSelect, SearchInput, stateOptions } from "@/components/inbox/filter-bar";
 import { StatusIcons, statusStyle, type NetworkStatus } from "@/components/network/network-chips";
 import { StateMap } from "@/components/state-map";
-import { networkViews, pageSizes, type NetworkCarrier, type TowerCall, type TowerCarrierCalls, type TowerNetwork } from "@/lib/contracts";
+import { networkSorts, networkViews, pageSizes, type NetworkCarrier, type TowerCall, type TowerCarrierCalls, type TowerNetwork } from "@/lib/contracts";
 import { carrierName, equipmentLabel, formatDateTime, formatTimeAgo } from "@/lib/format";
 import {
   callOutcome,
@@ -37,8 +37,8 @@ import {
   networkPaging,
   networkQuery,
   shortReason,
+  networkFilterKeys,
   sortChange,
-  topOpenLanes,
   type CallOutcome,
   type NetworkSort,
 } from "@/lib/network";
@@ -56,37 +56,19 @@ const shownCalls = 8;
 const plural = (n: number, one: string) => `${n} ${n === 1 ? one : `${one}s`}`;
 
 // Every filter "Clear filters" resets; any change to them goes back to page 1.
-const filterKeys = ["view", "q", "equipment", "origin"] as const;
+const filterKeys = ["view", ...networkFilterKeys] as const;
 
-const statuses = Object.keys(statusStyle) as NetworkStatus[];
+const statusOptions = (Object.keys(statusStyle) as NetworkStatus[]).map((status) => ({ value: status, label: statusStyle[status].label }));
 
-// The status filter: the inbox's header select, with each status's icon in the menu and as the prefix.
-function StatusSelect({ value, onChange }: { value: NetworkStatus | ""; onChange: (value: string) => void }) {
-  const Icon = value ? statusStyle[value].icon : LuListFilter;
+// A status menu row carries the status's icon in its tone.
+function statusOption(option: { value: string; label: string }) {
+  const style = statusStyle[option.value as NetworkStatus];
+  const Icon = style.icon;
   return (
-    <Select<NetworkStatus>
-      size="small"
-      aria-label="Status"
-      title="Status"
-      placeholder="All statuses"
-      value={value === "" ? undefined : value}
-      onChange={(next?: NetworkStatus) => onChange(next ?? "")}
-      options={statuses.map((status) => ({ value: status, label: statusStyle[status].label }))}
-      optionRender={(option) => {
-        const style = statusStyle[option.value as NetworkStatus];
-        const OptionIcon = style.icon;
-        return (
-          <span className="flex items-center gap-2">
-            <OptionIcon size={14} className={style.iconTone} aria-hidden />
-            {style.label}
-          </span>
-        );
-      }}
-      allowClear
-      popupMatchSelectWidth={false}
-      prefix={<Icon size={14} className={value ? statusStyle[value].iconTone : "text-accent"} aria-hidden />}
-      style={{ flex: "1 1 0", minWidth: 0 }}
-    />
+    <span className="flex items-center gap-2">
+      <Icon size={14} className={style.iconTone} aria-hidden />
+      {style.label}
+    </span>
   );
 }
 
@@ -165,8 +147,6 @@ const iconButton =
 
 type AntdOrder = "ascend" | "descend";
 
-// The columns the adapter sorts by, keyed as the table names them.
-const sortKeys: Partial<Record<string, NetworkSort>> = { mc: "mc", carrier: "carrier", lastCall: "lastCall", calls: "calls", bookings: "bookings" };
 // Text sorts A to Z first, numbers and dates most first. Neither direction clears the sort, so a
 // header click always shows a sorted list.
 const textDirections: AntdOrder[] = ["ascend", "descend", "ascend"];
@@ -186,7 +166,8 @@ function SidePanel({
   onPick: (origin: string, equipment: string | null) => void;
 }) {
   const origins = useMemo(() => (data?.openOrigins ?? []).map((row) => ({ state: row.originState, count: row.carriers })), [data?.openOrigins]);
-  const lanes = topOpenLanes(data?.openLanes ?? []);
+  // The adapter lists open lanes most carriers first.
+  const lanes = (data?.openLanes ?? []).slice(0, 5);
   const maxCarriers = lanes[0]?.carriers ?? 1;
   const growth = view === "growth";
   // A second click on the picked state lets it go.
@@ -277,7 +258,8 @@ export function Network() {
 
   const onTable: TableProps<NetworkCarrier>["onChange"] = (_pagination, _filters, sorter) => {
     const picked = Array.isArray(sorter) ? sorter[0] : sorter;
-    const next = picked?.order ? sortKeys[String(picked.columnKey)] : undefined;
+    // The table's column keys are the adapter's sort names.
+    const next = picked?.order ? networkSorts.find((s) => s === picked.columnKey) : undefined;
     updateSearch(next ? sortChange(next, picked?.order === "ascend" ? "asc" : "desc") : sortChange(defaultSort, "desc"));
   };
   const onPage = (nextPage: number, nextSize: number) =>
@@ -388,7 +370,7 @@ export function Network() {
       loading ? (
         "Loading carriers..."
       ) : (
-        "The carrier network is unavailable. It retries every few seconds."
+        `The carrier network is unavailable. It retries every ${networkPollMs / 1000} seconds.`
       )
     ) : filtered ? (
       <>
@@ -423,7 +405,7 @@ export function Network() {
               icon={statusStyle.at_risk.icon}
               iconTone={statusStyle.at_risk.iconTone}
               value={data ? String(data.counts.atRisk) : "-"}
-              hint="Booked before, now quiet"
+              hint="Booked before, now quiet or calling less"
             />
             <Tile
               label="Lane open"
@@ -446,7 +428,16 @@ export function Network() {
             <ConfigProvider componentSize="small">
               <div className="flex items-center gap-1.5 border-b border-line px-4 py-3">
                 <SearchInput q={q} onSearch={onSearch} placeholder="MC, DOT or name" label="Search carriers" className="min-w-0 flex-[2]" />
-                <StatusSelect value={status} onChange={(v) => onFilter("view", v)} />
+                <HeaderSelect
+                  label="Status"
+                  placeholder="All statuses"
+                  icon={status ? statusStyle[status].icon : LuListFilter}
+                  tone={status ? statusStyle[status].iconTone : "text-accent"}
+                  value={status}
+                  onChange={(v) => onFilter("view", v)}
+                  options={statusOptions}
+                  optionRender={statusOption}
+                />
                 <HeaderSelect label="Equipment" icon={LuContainer} tone="text-accent" value={equipment} onChange={(v) => onFilter("equipment", v)} options={equipmentOptions} />
                 <HeaderSelect label="From" icon={LuRoute} tone="text-ok" value={origin} onChange={(v) => onFilter("origin", v)} options={stateOptions} />
               </div>

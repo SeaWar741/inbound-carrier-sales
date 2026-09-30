@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { IconType } from "react-icons";
 import { Select } from "antd";
 import { LuArrowRight, LuArrowUpDown, LuChevronDown, LuContainer, LuFlag, LuRoute, LuSearch } from "react-icons/lu";
@@ -177,8 +177,10 @@ export function FilterSelect({
   );
 }
 
+type HeaderOption = { value: string; label: string };
+
 // An antd select in the list header: a colored leading icon, search by label, and a clear button.
-// An empty value shows the placeholder.
+// An empty value shows the placeholder. `optionRender` draws a menu row, for options with an icon.
 export function HeaderSelect({
   label,
   placeholder = label,
@@ -188,6 +190,7 @@ export function HeaderSelect({
   value,
   onChange,
   options,
+  optionRender,
 }: {
   label: string;
   placeholder?: string;
@@ -197,7 +200,8 @@ export function HeaderSelect({
   tone: string;
   value: string;
   onChange: (value: string) => void;
-  options: { value: string; label: string }[];
+  options: HeaderOption[];
+  optionRender?: (option: HeaderOption) => ReactNode;
 }) {
   return (
     <Select
@@ -208,6 +212,7 @@ export function HeaderSelect({
       value={value === "" ? undefined : value}
       onChange={(next?: string) => onChange(next ?? "")}
       options={options}
+      optionRender={optionRender && ((option) => optionRender(option.data as HeaderOption))}
       showSearch={{ optionFilterProp: "label" }}
       allowClear
       popupMatchSelectWidth={false}

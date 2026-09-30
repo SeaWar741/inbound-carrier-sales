@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { NetworkCarrier } from "./contracts.ts";
-import { callOutcome, callsWindow, inboxHref, networkPaging, networkQuery, shortReason, sortChange, topOpenLanes } from "./network.ts";
+import { callOutcome, callsWindow, inboxHref, networkPaging, networkQuery, shortReason, sortChange } from "./network.ts";
 
 const now = Date.parse("2026-09-30T17:00:00Z");
 const daysAgo = (days: number) => new Date(now - days * 86_400_000).toISOString();
@@ -153,23 +153,6 @@ describe("sortChange", () => {
     assert.deepEqual(sortChange("lastCall", "desc"), { sort: null, dir: null, page: null });
     assert.deepEqual(sortChange("calls", "asc"), { sort: "calls", dir: "asc", page: null });
     assert.deepEqual(sortChange("mc", "desc"), { sort: "mc", dir: null, page: null });
-  });
-});
-
-describe("topOpenLanes", () => {
-  it("keeps the five lanes with the most carriers, most first", () => {
-    const lanes = [
-      { originState: "TX", equipment: "REEFER", carriers: 2 },
-      { originState: "CA", equipment: "REEFER", carriers: 5 },
-      { originState: "GA", equipment: "DRY_VAN", carriers: 1 },
-      { originState: "AZ", equipment: "FLATBED", carriers: 2 },
-      { originState: "IL", equipment: "DRY_VAN", carriers: 3 },
-      { originState: "OH", equipment: "DRY_VAN", carriers: 4 },
-    ];
-    assert.deepEqual(
-      topOpenLanes(lanes).map((lane) => lane.originState),
-      ["CA", "OH", "IL", "AZ", "TX"],
-    );
   });
 });
 
