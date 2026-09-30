@@ -110,7 +110,18 @@ export type InboxWindow = { since: string; from: string; to: string };
 
 // The date window as an antd range picker. A preset (or a range equal to one) keeps the rolling
 // `since` window, so it follows the clock; any other range is sent as whole desk days.
-export function DateRange({ dateWindow: current, today, onWindow }: { dateWindow: InboxWindow; today: string; onWindow: (next: InboxWindow) => void }) {
+// `inline` drops the label for a filter row, where the picker sits beside the other controls.
+export function DateRange({
+  dateWindow: current,
+  today,
+  onWindow,
+  inline = false,
+}: {
+  dateWindow: InboxWindow;
+  today: string;
+  onWindow: (next: InboxWindow) => void;
+  inline?: boolean;
+}) {
   const end = dayjs(today);
   const presetRange = (days: number): [Dayjs, Dayjs] => [end.subtract(days, "day"), end];
   const preset = current.from && current.to ? null : (sincePresets.find((p) => p.since === current.since) ?? sincePresets[1]!);
@@ -127,10 +138,12 @@ export function DateRange({ dateWindow: current, today, onWindow }: { dateWindow
 
   return (
     <div>
-      <div className="mb-2 flex items-baseline justify-between gap-2 px-1 text-[11px] font-semibold tracking-wide text-fg-faint uppercase">
-        <span>Date range</span>
-        <span className="truncate font-medium tracking-normal normal-case">{preset ? preset.label : "Custom"}</span>
-      </div>
+      {!inline && (
+        <div className="mb-2 flex items-baseline justify-between gap-2 px-1 text-[11px] font-semibold tracking-wide text-fg-faint uppercase">
+          <span>Date range</span>
+          <span className="truncate font-medium tracking-normal normal-case">{preset ? preset.label : "Custom"}</span>
+        </div>
+      )}
       <DatePicker.RangePicker
         aria-label="Date range"
         value={value}

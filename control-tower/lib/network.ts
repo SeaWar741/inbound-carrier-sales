@@ -1,5 +1,5 @@
-import type { CarrierRelationship, NetworkCarrier } from "./contracts";
-import { deskDayKey, equipmentLabel } from "./format.ts";
+import type { CarrierRelationship, DemandLane, NetworkCarrier, TowerCall } from "./contracts";
+import { deskDayKey, equipmentLabel, formatUsd } from "./format.ts";
 
 // Mirrors the adapter's segmentRecentDays, only to word the span the at-risk sentence compares.
 export const recentDays = 14;
@@ -145,4 +145,92 @@ export function inboxHref(carrier: Pick<NetworkCarrier, "key" | "mcNumber" | "do
     params.set("to", deskDayKey(now));
   }
   return `/inbox?${params.toString()}`;
+}
+
+// The carrier page's one decision: what to do with this carrier and the sentence that says why.
+// The first rule that holds wins, in the order a call is most worth making.
+export type CarrierDecision = { kind: NetworkReason["kind"]; title: string; sentence: string };
+
+export function carrierDecision(carrier: NetworkCarrier, now: number): CarrierDecision {
+  const { facts } = carrier;
+  if (carrier.relationship === "at_risk") {
+    if (facts.callsRecent > 0) return { kind: "at_risk", title: "Call back", sentence: "Calling less than usual" };
+    const after = facts.lifetimeBookings > 0 ? ` after ${plural(facts.lifetimeBookings, "booking")}` : "";
+    return { kind: "at_risk", title: "Call back", sentence: `No call in ${daysSinceLastCall(carrier, now)} d${after}` };
+  }
+  if (carrier.growth) {
+    const lane = carrier.lanes.find((l) => l.open);
+    const where = lane?.originState ? [lane.originState, lane.equipment && equipmentLabel(lane.equipment)].filter(Boolean).join(" ") : "A lane it runs";
+    return { kind: "growth", title: "Offer the open lane", sentence: `${where} is open on the board now` };
+  }
+  if (carrier.relationship === "new") return { kind: "new", title: "Get to know them", sentence: `${plural(facts.lifetimeCalls, "call")} so far` };
+  if (carrier.top) return { kind: "top", title: "Keep them close", sentence: "Books most of its offers" };
+  return { kind: "active", title: "Nothing to act on", sentence: nothingToFlag };
+}
+
+// The demand page of one lane: origin, destination and equipment joined with "|", an empty part
+// for "Any", encoded as one path segment (/demand/TX%7CGA%7CREEFER).
+export function demandHref(lane: Pick<DemandLane, "originState" | "destinationState" | "equipment">): string {
+  return `/demand/${encodeURIComponent([lane.originState, lane.destinationState ?? "", lane.equipment ?? ""].join("|"))}`;
+}
+
+// One row of the carrier page's lanes: how often it ran the lane in the window, whether the board
+// has it open, and the asks on it that found no load or no deal.
+export type CarrierLane = {
+  key: string;
+  originState: string | null;
+  destinationState: string | null;
+  equipment: string | null;
+  // Null when the lane is only in the carrier's demand, not among its observed lanes.
+  calls: number | null;
+  open: boolean;
+  unmet: number;
+};
+
+// The observed lanes in the network's order, each with its unmet asks, then the lanes it only asked
+// for without getting a load, most unmet first. The two sources name "Any" the same way (null).
+export function carrierLanes(observed: NetworkCarrier["lanes"], demand: Pick<DemandLane, "originState" | "destinationState" | "equipment" | "noMatch" | "offeredNoBooking">[]): CarrierLane[] {
+  const keyOf = (lane: { originState: string | null; destinationState: string | null; equipment: string | null }) =>
+    [lane.originState ?? "", lane.destinationState ?? "", lane.equipment ?? ""].join("|");
+  const unmetByKey = new Map(demand.map((lane) => [keyOf(lane), lane.noMatch + lane.offeredNoBooking]));
+  const rows: CarrierLane[] = observed.map((lane) => ({
+    key: keyOf(lane),
+    originState: lane.originState,
+    destinationState: lane.destinationState,
+    equipment: lane.equipment,
+    calls: lane.count,
+    open: lane.open,
+    unmet: unmetByKey.get(keyOf(lane)) ?? 0,
+  }));
+  const seen = new Set(rows.map((row) => row.key));
+  const askedOnly = demand
+    .filter((lane) => !seen.has(keyOf(lane)) && lane.noMatch + lane.offeredNoBooking > 0)
+    .map((lane) => ({
+      key: keyOf(lane),
+      originState: lane.originState,
+      destinationState: lane.destinationState,
+      equipment: lane.equipment,
+      calls: null,
+      open: false,
+      unmet: lane.noMatch + lane.offeredNoBooking,
+    }))
+    .sort((a, b) => b.unmet - a.unmet);
+  return [...rows, ...askedOnly];
+}
+
+export type CallOutcome = { kind: "live" | "booked" | "holding" | "lost" | "no_offer"; text: string };
+
+// How one of the carrier's calls ended, for its timeline: the hold decides when there is one, then
+// whether any load was offered.
+export function callOutcome(call: Pick<TowerCall, "live" | "hold" | "offers">): CallOutcome {
+  if (call.live) return { kind: "live", text: "On the call now" };
+  const hold = call.hold;
+  if (hold) {
+    if (hold.status === "booked" || hold.status === "booked_unconfirmed") return { kind: "booked", text: `Booked at ${formatUsd(hold.agreedRate)}` };
+    if (hold.status === "released") return { kind: "lost", text: "Hold released" };
+    return { kind: "holding", text: `Holding at ${formatUsd(hold.agreedRate)}` };
+  }
+  const last = call.offers.at(-1);
+  if (last) return { kind: "lost", text: `No deal, last ask ${formatUsd(last.carrierAsk)}` };
+  return { kind: "no_offer", text: "No load offered" };
 }

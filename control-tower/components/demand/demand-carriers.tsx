@@ -2,50 +2,40 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { LuChevronRight, LuLoaderCircle, LuTriangleAlert, LuUserRound, LuUsers } from "react-icons/lu";
-import { Section } from "@/components/section";
+import { LuChevronRight, LuLoaderCircle, LuTriangleAlert } from "react-icons/lu";
 import type { DemandCarrier, DemandLane, TowerDemandCarriers } from "@/lib/contracts";
 import { carrierName } from "@/lib/format";
-import { asksLabel, carrierSearchHref, demandCarriersQuery } from "@/lib/demand";
+import { asksLabel, carrierHref, demandCarriersQuery } from "@/lib/demand";
 import { fetchTower } from "@/lib/use-poll";
 
 type Loaded = { rows: DemandCarrier[]; total: number; page: number };
 
-// One carrier; the whole row opens it on the Carriers page, searched by MC or name.
+// One carrier; the whole row opens the carrier's own page.
 function CarrierRow({ carrier }: { carrier: DemandCarrier }) {
-  const href = carrierSearchHref(carrier);
-  const body = (
-    <>
-      <LuUserRound size={14} className="shrink-0 text-fg-faint" aria-hidden />
-      <span className="min-w-0 truncate font-medium text-fg">{carrierName({ ...carrier, dotNumber: null })}</span>
-      {carrier.carrierName && carrier.mcNumber && <span className="shrink-0 font-mono text-xs text-fg-muted">MC {carrier.mcNumber}</span>}
-      <span className="tabular ml-auto shrink-0 text-fg-muted">{asksLabel(carrier.asks)}</span>
-      {href && <LuChevronRight size={14} className="shrink-0 text-fg-faint" aria-hidden />}
-    </>
-  );
-  const row = "flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-sm";
   return (
     <li>
-      {href ? (
-        <Link href={href} className={`${row} outline-none hover:bg-panel-raised focus-visible:ring-2 focus-visible:ring-accent/40`}>
-          {body}
-        </Link>
-      ) : (
-        <div className={row}>{body}</div>
-      )}
+      <Link
+        href={carrierHref(carrier.key)}
+        className="flex h-11 min-w-0 items-center gap-3 px-4 text-sm outline-none transition-colors hover:bg-panel-raised focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:ring-inset"
+      >
+        <span className="min-w-0 truncate font-medium text-fg">{carrierName({ ...carrier, dotNumber: null })}</span>
+        {carrier.carrierName && carrier.mcNumber && <span className="shrink-0 font-mono text-xs text-fg-muted">MC {carrier.mcNumber}</span>}
+        <span className="tabular ml-auto shrink-0 text-xs text-fg-muted">{asksLabel(carrier.asks)}</span>
+        <LuChevronRight size={14} className="shrink-0 text-fg-faint" aria-hidden />
+      </Link>
     </li>
   );
 }
 
-// The carriers behind the selected lane, most asks first as the adapter sends them. Read once per
-// lane (the panel is keyed by it); "Load more" appends the next page.
+// The carriers behind one lane, most asks first as the adapter sends them. Read once per lane;
+// "Load more" appends the next page.
 export function DemandCarriers({ lane }: { lane: Pick<DemandLane, "originState" | "destinationState" | "equipment"> }) {
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [page, setPage] = useState(1);
   const [attempt, setAttempt] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const loading = error === null && (loaded === null || loaded.page < page);
-  // The rows poll, so the lane is a new object each time; the query string is what decides a read.
+  // The lane is a new object on every poll of the page; the query string is what decides a read.
   const query = demandCarriersQuery(lane, page);
 
   useEffect(() => {
@@ -70,9 +60,15 @@ export function DemandCarriers({ lane }: { lane: Pick<DemandLane, "originState" 
 
   const rows = loaded?.rows ?? [];
   return (
-    <Section icon={LuUsers} title="Who asked" aside={loaded && <span className="tabular text-xs text-fg-faint">{loaded.total}</span>}>
+    <section aria-labelledby="who-asked" className="overflow-hidden rounded-lg border border-line bg-panel">
+      <div className="flex items-center justify-between border-b border-line px-4 py-3">
+        <h2 id="who-asked" className="text-xs font-medium tracking-wide text-fg-muted uppercase">
+          Who asked
+        </h2>
+        {loaded && <span className="tabular text-xs text-fg-faint">{loaded.total}</span>}
+      </div>
       {error && (
-        <p role="status" className="mb-2 flex items-center gap-1 text-xs text-risk">
+        <p role="status" className="flex items-center gap-1 px-4 py-3 text-xs text-risk">
           <LuTriangleAlert size={12} className="shrink-0" aria-hidden />
           {error}
           <button
@@ -88,35 +84,37 @@ export function DemandCarriers({ lane }: { lane: Pick<DemandLane, "originState" 
         </p>
       )}
       {loaded === null && !error && (
-        <p role="status" className="flex items-center gap-2 text-xs text-fg-faint">
+        <p role="status" className="flex items-center gap-2 px-4 py-3 text-xs text-fg-faint">
           <LuLoaderCircle size={14} className="animate-spin" aria-hidden />
           Loading carriers...
         </p>
       )}
-      {loaded !== null && rows.length === 0 && <p className="text-sm text-fg-muted">No carriers recorded on this lane</p>}
+      {loaded !== null && rows.length === 0 && <p className="px-4 py-3 text-sm text-fg-muted">No carriers recorded on this lane</p>}
       {rows.length > 0 && (
-        <ul aria-label="Carriers who asked" className="-mx-2">
+        <ul aria-label="Carriers who asked" className="divide-y divide-line">
           {rows.map((carrier) => (
             <CarrierRow key={carrier.key} carrier={carrier} />
           ))}
         </ul>
       )}
       {loaded !== null && loaded.total > rows.length && (
-        <button
-          type="button"
-          disabled={loading}
-          onClick={() => {
-            // After a failed page the next page is the same one, so the attempt forces the read.
-            setError(null);
-            setPage(loaded.page + 1);
-            setAttempt((n) => n + 1);
-          }}
-          className="mt-2 inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md border border-line bg-panel px-3 text-xs font-medium text-fg shadow-xs hover:bg-panel-raised disabled:cursor-default disabled:opacity-60"
-        >
-          {loading && <LuLoaderCircle size={12} className="animate-spin" aria-hidden />}
-          Load more ({rows.length} of {loaded.total})
-        </button>
+        <div className="flex justify-center border-t border-line px-4 py-3">
+          <button
+            type="button"
+            disabled={loading}
+            onClick={() => {
+              // After a failed page the next page is the same one, so the attempt forces the read.
+              setError(null);
+              setPage(loaded.page + 1);
+              setAttempt((n) => n + 1);
+            }}
+            className="inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md border border-line bg-panel px-3 text-xs font-medium text-fg hover:bg-panel-raised disabled:cursor-default disabled:opacity-60"
+          >
+            {loading && <LuLoaderCircle size={12} className="animate-spin" aria-hidden />}
+            Load more ({rows.length} of {loaded.total})
+          </button>
+        </div>
       )}
-    </Section>
+    </section>
   );
 }

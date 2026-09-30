@@ -1,7 +1,20 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { NetworkCarrier } from "./contracts.ts";
-import { callsTrend, fromInboxWindow, inboxHref, networkReasons, shortReason, toInboxWindow, windowPhrase, type NetworkWindow } from "./network.ts";
+import {
+  callOutcome,
+  callsTrend,
+  carrierDecision,
+  carrierLanes,
+  demandHref,
+  fromInboxWindow,
+  inboxHref,
+  networkReasons,
+  shortReason,
+  toInboxWindow,
+  windowPhrase,
+  type NetworkWindow,
+} from "./network.ts";
 
 const now = Date.parse("2026-09-30T17:00:00Z");
 const daysAgo = (days: number) => new Date(now - days * 86_400_000).toISOString();
@@ -224,5 +237,90 @@ describe("inboxHref", () => {
       inboxHref(carrier({ facts: { lastCallAt: "2026-08-15T15:00:00Z" } }), now),
       "/inbox?carrier=mc%3A123456&q=123456&from=2026-08-15&to=2026-09-30",
     );
+  });
+});
+
+describe("carrierDecision", () => {
+  const decision = (c: NetworkCarrier) => {
+    const { title, sentence } = carrierDecision(c, now);
+    return `${title}: ${sentence}`;
+  };
+
+  it("asks to call back a silent at-risk carrier, with its past bookings when it had any", () => {
+    assert.equal(decision(carrier({ relationship: "at_risk", facts: { lastCallAt: daysAgo(37.2), callsRecent: 0, lifetimeBookings: 2 } })), "Call back: No call in 37 d after 2 bookings");
+    assert.equal(decision(carrier({ relationship: "at_risk", facts: { lastCallAt: daysAgo(20), callsRecent: 0, lifetimeBookings: 1 } })), "Call back: No call in 20 d after 1 booking");
+    assert.equal(decision(carrier({ relationship: "at_risk", facts: { lastCallAt: daysAgo(20), callsRecent: 0, lifetimeBookings: 0 } })), "Call back: No call in 20 d");
+  });
+
+  it("asks to call back an at-risk carrier calling less, before any tag", () => {
+    const fading = carrier({ relationship: "at_risk", growth: true, top: true, facts: { callsRecent: 1, callsPrior: 6 } });
+    assert.deepEqual(carrierDecision(fading, now), { kind: "at_risk", title: "Call back", sentence: "Calling less than usual" });
+  });
+
+  it("offers the open lane to a growth carrier, even a new one", () => {
+    const lanes = [{ originState: "PA", destinationState: "PA", equipment: "REEFER", count: 7, open: true }];
+    assert.equal(decision(carrier({ relationship: "new", growth: true, lanes })), "Offer the open lane: PA Reefer is open on the board now");
+    assert.equal(
+      decision(carrier({ growth: true, lanes: [{ originState: "GA", destinationState: null, equipment: null, count: 1, open: true }] })),
+      "Offer the open lane: GA is open on the board now",
+    );
+    assert.equal(decision(carrier({ growth: true })), "Offer the open lane: A lane it runs is open on the board now");
+  });
+
+  it("words new, top and plain active carriers", () => {
+    assert.equal(decision(carrier({ relationship: "new", top: true, facts: { lifetimeCalls: 2 } })), "Get to know them: 2 calls so far");
+    assert.equal(decision(carrier({ top: true })), "Keep them close: Books most of its offers");
+    assert.deepEqual(carrierDecision(carrier(), now), { kind: "active", title: "Nothing to act on", sentence: "Active, nothing to flag" });
+  });
+});
+
+describe("demandHref", () => {
+  it("joins the lane with | and leaves Any empty, as one encoded segment", () => {
+    assert.equal(demandHref({ originState: "TX", destinationState: "GA", equipment: "REEFER" }), "/demand/TX%7CGA%7CREEFER");
+    assert.equal(demandHref({ originState: "CO", destinationState: null, equipment: "FLATBED" }), "/demand/CO%7C%7CFLATBED");
+    assert.equal(demandHref({ originState: "CO", destinationState: null, equipment: null }), "/demand/CO%7C%7C");
+  });
+});
+
+describe("carrierLanes", () => {
+  const ask = (originState: string, destinationState: string | null, equipment: string | null, noMatch: number, offeredNoBooking: number) => ({
+    originState,
+    destinationState,
+    equipment,
+    noMatch,
+    offeredNoBooking,
+  });
+
+  it("keeps the observed lanes first with their unmet asks, then the asked-only lanes by unmet asks", () => {
+    const observed = [
+      { originState: "PA", destinationState: "PA", equipment: "REEFER", count: 7, open: true },
+      { originState: "GA", destinationState: null, equipment: null, count: 1, open: false },
+    ];
+    const demand = [ask("TX", "GA", "REEFER", 1, 1), ask("PA", "PA", "REEFER", 0, 3), ask("CO", null, "FLATBED", 3, 0), ask("IL", "IN", "DRY_VAN", 0, 0)];
+    assert.deepEqual(
+      carrierLanes(observed, demand).map((lane) => [lane.key, lane.calls, lane.open, lane.unmet]),
+      [
+        ["PA|PA|REEFER", 7, true, 3],
+        ["GA||", 1, false, 0],
+        ["CO||FLATBED", null, false, 3],
+        ["TX|GA|REEFER", null, false, 2],
+      ],
+    );
+  });
+});
+
+describe("callOutcome", () => {
+  const hold = (status: "held" | "confirming" | "booked" | "booked_unconfirmed" | "released") =>
+    ({ holdId: "h1", loadId: "DMH290", status, agreedRate: 1850, postedRate: null, maxBuy: null, bookingRef: null, lane: null, trip: null, createdAt: daysAgo(1) });
+  const offer = { loadId: "DMH290", round: 2, carrierAsk: 2100, decision: "counter" as const, rateToSay: 1900, postedRate: null, maxBuy: null, lane: null, createdAt: daysAgo(1) };
+
+  it("reads a live call first, then the hold, then the offers", () => {
+    assert.equal(callOutcome({ live: true, hold: hold("booked"), offers: [] }).text, "On the call now");
+    assert.deepEqual(callOutcome({ live: false, hold: hold("booked"), offers: [] }), { kind: "booked", text: "Booked at $1,850" });
+    assert.equal(callOutcome({ live: false, hold: hold("booked_unconfirmed"), offers: [] }).kind, "booked");
+    assert.deepEqual(callOutcome({ live: false, hold: hold("confirming"), offers: [] }), { kind: "holding", text: "Holding at $1,850" });
+    assert.deepEqual(callOutcome({ live: false, hold: hold("released"), offers: [offer] }), { kind: "lost", text: "Hold released" });
+    assert.deepEqual(callOutcome({ live: false, hold: null, offers: [offer] }), { kind: "lost", text: "No deal, last ask $2,100" });
+    assert.deepEqual(callOutcome({ live: false, hold: null, offers: [] }), { kind: "no_offer", text: "No load offered" });
   });
 });

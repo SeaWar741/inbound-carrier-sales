@@ -3,15 +3,19 @@ import { describe, it } from "node:test";
 import type { DemandLane } from "./contracts.ts";
 import {
   asksLabel,
-  carrierSearchHref,
+  carrierHref,
   demandCarriersQuery,
   demandKey,
+  demandLaneHref,
+  demandNextStep,
   demandSignal,
   demandTotalsLabels,
   demandTrend,
   demandUnmet,
   laneLabel,
+  laneTitle,
   parseDemandKey,
+  parseDemandLaneParam,
   unmetBarPercent,
 } from "./demand.ts";
 
@@ -131,11 +135,52 @@ describe("demandCarriersQuery", () => {
   });
 });
 
-describe("carrierSearchHref", () => {
-  it("searches the Carriers page by MC, else by name", () => {
-    assert.equal(carrierSearchHref({ mcNumber: "123456", carrierName: "Acme Freight" }), "/carriers?q=123456");
-    assert.equal(carrierSearchHref({ mcNumber: null, carrierName: "Acme Freight" }), "/carriers?q=Acme+Freight");
-    assert.equal(carrierSearchHref({ mcNumber: null, carrierName: null }), null);
+describe("carrierHref", () => {
+  it("opens the carrier's page by its key", () => {
+    assert.equal(carrierHref("mc:9000002"), "/carriers/mc%3A9000002");
+  });
+});
+
+describe("demandLaneHref and parseDemandLaneParam", () => {
+  it("round-trips a lane through its page path, Any parts included", () => {
+    for (const row of [lane(), lane({ destinationState: null }), lane({ equipment: null }), lane({ destinationState: null, equipment: null })]) {
+      const segment = demandLaneHref(row).slice("/demand/".length);
+      assert.deepEqual(parseDemandLaneParam(segment), { originState: row.originState, destinationState: row.destinationState, equipment: row.equipment });
+    }
+    assert.equal(demandLaneHref(lane({ destinationState: null, equipment: "FLATBED" })), "/demand/TX%7C%7CFLATBED");
+  });
+
+  it("reads a segment that arrives already decoded", () => {
+    assert.deepEqual(parseDemandLaneParam("CO||FLATBED"), { originState: "CO", destinationState: null, equipment: "FLATBED" });
+  });
+
+  it("refuses a segment that is not a lane", () => {
+    for (const segment of ["TX", "%E0%A4%A", "tx%7CGA%7C", "TX%7CGA"]) assert.equal(parseDemandLaneParam(segment), null, segment);
+  });
+});
+
+describe("laneTitle", () => {
+  it("names the lane and its equipment, Any when the carriers did not say", () => {
+    assert.equal(laneTitle(lane({ equipment: "REEFER" })), "TX → GA · Reefer");
+    assert.equal(laneTitle(lane({ destinationState: null, equipment: null })), "TX → Any · Any equipment");
+  });
+});
+
+describe("demandNextStep", () => {
+  it("asks for a load when only searches went unmet", () => {
+    assert.deepEqual(demandNextStep({ noMatch: 9, offeredNoBooking: 0 }), { kind: "source", title: "Source a load", body: "The board had nothing for these carriers." });
+  });
+
+  it("asks for the rate when only offers went unbooked", () => {
+    assert.deepEqual(demandNextStep({ noMatch: 0, offeredNoBooking: 7 }), { kind: "rate", title: "Check the rate", body: "Loads were offered and none booked." });
+  });
+
+  it("asks for both when both went unmet", () => {
+    assert.equal(demandNextStep({ noMatch: 2, offeredNoBooking: 1 })?.kind, "both");
+  });
+
+  it("has nothing to ask when nothing went unmet", () => {
+    assert.equal(demandNextStep({ noMatch: 0, offeredNoBooking: 0 }), null);
   });
 });
 

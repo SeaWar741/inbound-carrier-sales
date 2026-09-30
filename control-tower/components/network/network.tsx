@@ -1,55 +1,32 @@
 "use client";
 
+import { ConfigProvider } from "antd";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useMemo } from "react";
-import { LuContainer, LuMousePointerClick, LuRoute } from "react-icons/lu";
+import { LuContainer, LuRoute, LuTriangleAlert } from "react-icons/lu";
+import { DateRange } from "@/components/inbox/inbox-rail";
 import { equipmentOptions, HeaderSelect, SearchInput, stateOptions } from "@/components/inbox/filter-bar";
-import { NetworkDetail } from "@/components/network/network-detail";
 import { NetworkList } from "@/components/network/network-list";
-import { NetworkRail, viewLabel } from "@/components/network/network-rail";
+import { viewLabel, ViewSelect } from "@/components/network/view-select";
+import { useLoadMore } from "@/components/paged-list";
 import { networkViews, type NetworkView, type TowerNetwork } from "@/lib/contracts";
 import { deskDayKey } from "@/lib/format";
 import { fromInboxWindow, toInboxWindow, type NetworkWindow } from "@/lib/network";
 import { useNow } from "@/lib/use-now";
 import { updateSearch, usePagedList } from "@/lib/use-paged-list";
-import { usePoll } from "@/lib/use-poll";
 
 // The network changes with calls, not by the second, and each read also checks the TMS board.
 const networkPollMs = 30_000;
 
-// Everything else the adapter query reads from the URL; the view is resolved first, and carrier only
-// drives the panel.
-const listKeys = ["since", "from", "to", "equipment", "origin", "q"] as const;
-// What "Clear filters" resets; the view stays.
+// Everything else the adapter query reads from the URL; the view is resolved first. "Clear filters"
+// resets the same keys and keeps the view.
 const filterKeys = ["since", "from", "to", "equipment", "origin", "q"] as const;
 // The adapter's `since` values; the URL omits its default (30d).
 const sinceValues = ["today", "7d", "30d"];
 const isoDay = /^\d{4}-\d{2}-\d{2}$/;
 
-// The selected carrier when the loaded pages do not hold it (a shared link to a carrier past page one,
-// or one a filter hides): its row fetched by key, like the inbox detail fetches its carrier.
-function CarrierByKey({ carrierKey, listQuery, now, dateWindow }: { carrierKey: string; listQuery: string; now: number; dateWindow: NetworkWindow }) {
-  // Only the window carries over; the view (All when left out) and the filters would hide it again.
-  const list = new URLSearchParams(listQuery);
-  const params = new URLSearchParams({ key: carrierKey });
-  for (const key of ["since", "from", "to"]) {
-    const value = list.get(key);
-    if (value) params.set(key, value);
-  }
-  const { data, loading } = usePoll<TowerNetwork>(`/api/network?${params.toString()}`, networkPollMs, "carrier network");
-  const carrier = data?.rows[0];
-  if (carrier) return <NetworkDetail carrier={carrier} now={now} dateWindow={dateWindow} />;
-  return (
-    <div className="grid h-full place-items-center border-l border-line bg-panel">
-      <p className="px-8 text-center text-fg-muted">
-        {loading ? "Loading carrier..." : data ? "No calls from this carrier in this window" : "The carrier network is unavailable"}
-      </p>
-    </div>
-  );
-}
-
-// Who the desk's carriers are: the whole network sorted into new, at risk, top and growth, with the
-// reason for each. Like the inbox, the whole state lives in the URL.
+// Who the desk's carriers are, sorted into at risk, growth, top and new, one line each with the
+// reason; a row opens the carrier's page. Like the inbox, the whole state lives in the URL.
 export function Network() {
   const searchParams = useSearchParams();
   const now = useNow();
@@ -68,7 +45,7 @@ export function Network() {
 
   const listQuery = useMemo(() => {
     const query = new URLSearchParams({ view });
-    for (const key of listKeys) {
+    for (const key of filterKeys) {
       const value = searchParams.get(key);
       // A hand-edited window the page would not show must not make the adapter refuse the query.
       if (key === "since" && !sinceValues.includes(value ?? "")) continue;
@@ -85,81 +62,76 @@ export function Network() {
     networkPollMs,
     "carrier network",
   );
+  // The page scrolls as a whole, so the page is the scroller the next page loads against.
+  const { scroller, sentinel } = useLoadMore(hasMore, data?.rows.length ?? 0, onLoadMore);
 
   const equipment = searchParams.get("equipment") ?? "";
   const origin = searchParams.get("origin") ?? "";
   const dateWindow: NetworkWindow = range ? { since: "", from, to } : { since, from: "", to: "" };
   const filtered = since !== "" || range || equipment !== "" || origin !== "" || q !== "";
 
-  const rows = data?.rows ?? [];
-  const selectedKey = searchParams.get("carrier");
-  // The panel is never empty: with nothing picked it shows the first row, without writing it to the URL.
-  const selected = rows.find((row) => row.key === selectedKey) ?? (selectedKey === null ? (rows[0] ?? null) : null);
-  // A selection the loaded rows do not hold is fetched on its own once the list has answered.
-  const missingKey = selected === null && selectedKey !== null && data !== null ? selectedKey : null;
-
-  // A new view is a new list, so the old pick goes with it.
-  const onView = useCallback((next: NetworkView) => updateSearch({ view: next, carrier: null }), []);
+  const onView = useCallback((next: NetworkView) => updateSearch({ view: next }), []);
   const onSearch = useCallback((next: string) => updateSearch({ q: next }), []);
-  const onSelect = useCallback((key: string) => updateSearch({ carrier: key }), []);
   const onClearFilters = useCallback(() => updateSearch(Object.fromEntries(filterKeys.map((key) => [key, null]))), []);
   // The inbox picker reads the window its own way; the URL keeps the page's.
   const onWindow = useCallback((next: NetworkWindow) => updateSearch(fromInboxWindow(next)), []);
 
-  const header = (
-    <div className="flex min-w-0 items-center gap-1.5">
-      <SearchInput q={q} onSearch={onSearch} placeholder="MC, DOT or name" label="Search carriers" className="min-w-0 flex-[2]" />
-      <HeaderSelect label="From" icon={LuRoute} tone="text-ok" value={origin} onChange={(v) => updateSearch({ origin: v })} options={stateOptions} />
-      <HeaderSelect
-        label="Equipment"
-        grow={1.2}
-        icon={LuContainer}
-        tone="text-accent"
-        value={equipment}
-        onChange={(v) => updateSearch({ equipment: v })}
-        options={equipmentOptions}
-      />
-    </div>
-  );
-
   return (
-    <div className="flex h-full min-h-0 overflow-hidden">
-      <div className="h-full min-h-0 w-56 shrink-0">
-        <NetworkRail data={data} view={view} dateWindow={toInboxWindow(dateWindow)} today={deskDayKey(now)} onView={onView} onWindow={onWindow} />
-      </div>
+    <div ref={scroller} className="h-full overflow-y-auto">
+      <div className="mx-auto max-w-7xl px-8 py-8">
+        <h1 className="text-2xl font-semibold tracking-tight text-fg">Carriers</h1>
+        <p className="mt-1 text-sm text-fg-muted">Who to call back and why</p>
 
-      <div className="h-full min-h-0 min-w-0 flex-1">
-        <NetworkList
-          data={data}
-          loading={loading}
-          error={error}
-          now={now}
-          title={viewLabel(view)}
-          header={header}
-          filtered={filtered}
-          selectedKey={selected?.key ?? null}
-          loadingMore={loadingMore}
-          hasMore={hasMore}
-          onLoadMore={onLoadMore}
-          onSelect={onSelect}
-          onClearFilters={onClearFilters}
-        />
-      </div>
-
-      <div className="h-full min-h-0 w-[400px] shrink-0">
-        {selected ? (
-          <NetworkDetail carrier={selected} now={now} dateWindow={dateWindow} />
-        ) : missingKey ? (
-          <CarrierByKey key={missingKey} carrierKey={missingKey} listQuery={listQuery} now={now} dateWindow={dateWindow} />
-        ) : (
-          <div className="grid h-full place-items-center border-l border-line bg-panel">
-            <div className="text-center text-fg-muted">
-              <LuMousePointerClick size={48} className="mx-auto mb-3 opacity-50" aria-hidden />
-              <p>{data === null ? "Loading carriers..." : "No carrier to show"}</p>
-              <p className="mt-1 text-xs text-fg-faint">Pick a view or clear the filters</p>
+        <div className="mt-6 overflow-hidden rounded-lg border border-line bg-panel">
+          {/* The theme's small controls are the search box's height, so the row lines up. */}
+          <ConfigProvider componentSize="small">
+            <div className="flex items-center gap-2 border-b border-line px-4 py-3">
+              <ViewSelect data={data} view={view} onView={onView} />
+              <div className="w-60 shrink-0">
+                <DateRange inline dateWindow={toInboxWindow(dateWindow)} today={deskDayKey(now)} onWindow={onWindow} />
+              </div>
+              <div className="flex w-32 shrink-0">
+                <HeaderSelect label="From" icon={LuRoute} tone="text-ok" value={origin} onChange={(v) => updateSearch({ origin: v })} options={stateOptions} />
+              </div>
+              <div className="flex w-40 shrink-0">
+                <HeaderSelect
+                  label="Equipment"
+                  icon={LuContainer}
+                  tone="text-accent"
+                  value={equipment}
+                  onChange={(v) => updateSearch({ equipment: v })}
+                  options={equipmentOptions}
+                />
+              </div>
+              <SearchInput q={q} onSearch={onSearch} placeholder="MC, DOT or name" label="Search carriers" className="ml-auto w-64" />
             </div>
-          </div>
-        )}
+          </ConfigProvider>
+
+          {data && !data.boardAvailable && (
+            <p role="status" className="flex items-center gap-1.5 border-b border-line px-4 py-2 text-xs text-warn">
+              <LuTriangleAlert size={12} className="shrink-0" aria-hidden />
+              The TMS board is unavailable, so no carrier is marked Growth
+            </p>
+          )}
+          {error && data && (
+            <p role="status" className="flex items-center gap-1.5 border-b border-line px-4 py-2 text-xs text-risk">
+              <LuTriangleAlert size={12} className="shrink-0" aria-hidden />
+              <span className="truncate">{error}</span>
+            </p>
+          )}
+
+          <NetworkList
+            data={data}
+            loading={loading}
+            now={now}
+            viewName={viewLabel(view)}
+            filtered={filtered}
+            loadingMore={loadingMore}
+            hasMore={hasMore}
+            sentinel={sentinel}
+            onClearFilters={onClearFilters}
+          />
+        </div>
       </div>
     </div>
   );
