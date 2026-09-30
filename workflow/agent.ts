@@ -31,10 +31,10 @@ type ToolSpec = {
 const tools: ToolSpec[] = [
   {
     name: "verify_carrier",
-    exposedFields: ["status", "message", "eligible", "carrierName"],
+    exposedFields: ["status", "message", "eligible", "carrierName", "maskedContact"],
     description: "Verify the caller's carrier with FMCSA. Pass the MC number, or the DOT number if they have no MC number; never both.",
     path: "/v1/carriers/verify",
-    waitMessage: "Give me one second while I pull up your authority.",
+    waitMessage: "Let me pull up your authority real quick.",
     parameters: [
       { name: "mc_number", description: "The carrier's MC number, digits only", required: false },
       { name: "dot_number", description: "The carrier's USDOT number, digits only, only if they have no MC number", required: false },
@@ -46,7 +46,7 @@ const tools: ToolSpec[] = [
     exposedFields: ["status", "message", "maskedDestination"],
     description: "Send a six-digit identity code to the carrier's contact on file.",
     path: "/v1/otp/send",
-    waitMessage: "Sending that code now.",
+    waitMessage: "Okay, shooting that code over now.",
     parameters: [{ name: "channel", description: "Where to send the code: email or sms", required: true }],
     body: { channel: "channel" },
   },
@@ -55,22 +55,22 @@ const tools: ToolSpec[] = [
     exposedFields: ["status", "message", "verified", "attemptsLeft"],
     description: "Check the six-digit code the caller read back.",
     path: "/v1/otp/check",
-    waitMessage: "Let me check that.",
+    waitMessage: "Checking that code.",
     parameters: [{ name: "code", description: "The six digits the caller read, digits only", required: true }],
     body: { code: "code" },
   },
   {
     name: "search_loads",
     exposedFields: ["status", "message", "loads"],
-    description: "Search open loads for the caller's lane and equipment. Only works after check_otp verified the caller.",
+    description: "Search open loads for the caller's lane and equipment. Only works after check_otp verified the caller. Each load carries feasibility: solo, team (the window needs a team driver), impossible (too tight to run legally) or null.",
     path: "/v1/loads/search",
-    waitMessage: "Let me see what I've got on that lane.",
+    waitMessage: "Alright, let me see what I've got on that lane.",
     parameters: [
       { name: "origin_city", description: "Origin city, e.g. Chicago", required: false },
       { name: "origin_state", description: "Origin state as a two-letter code, e.g. IL", required: true },
       { name: "destination_city", description: "Destination city, if the caller has one", required: false },
       { name: "destination_state", description: "Destination state as a two-letter code, if the caller has one", required: false },
-      { name: "equipment_type", description: "One of: dry van, reefer, flatbed, step deck, power only", required: true },
+      { name: "equipment_type", description: "One of: dry van, reefer, flatbed, step deck, power only. Use any when the caller runs anything or has no preference", required: false },
       { name: "pickup_date", description: "Pickup date as YYYY-MM-DD, if the caller has one", required: false },
     ],
     body: {
@@ -87,7 +87,7 @@ const tools: ToolSpec[] = [
     exposedFields: ["status", "message", "decision", "rateToSay", "round", "isFinalRound"],
     description: "Evaluate a rate the carrier proposed for a load. Call it for every number the carrier says.",
     path: "/v1/offers/evaluate",
-    waitMessage: "Let me see what I can do.",
+    waitMessage: "Okay, let me see.",
     parameters: [
       { name: "load_id", description: "The load number, e.g. LD00881", required: true },
       { name: "carrier_ask", description: "The carrier's rate in whole US dollars, digits only", required: true },
@@ -95,11 +95,21 @@ const tools: ToolSpec[] = [
     body: { loadId: "load_id", carrierAsk: "carrier_ask" },
   },
   {
+    name: "get_trip_estimate",
+    exposedFields: ["status", "message", "carrierNetUsd", "feasibility", "netPerHour"],
+    description:
+      "Estimate what the carrier keeps on a load after diesel and tolls, at the rate on the table, and whether the window needs a team. Call it when the carrier asks what they'd clear, what fuel or tolls run, or pushes on the rate.",
+    path: "/v1/trips/estimate",
+    waitMessage: "Let me run the numbers on that lane.",
+    parameters: [{ name: "load_id", description: "The load number, e.g. LD00881", required: true }],
+    body: { loadId: "load_id" },
+  },
+  {
     name: "create_hold",
     exposedFields: ["status", "message", "holdStatus"],
     description: "Put the agreed load on hold for a senior rep to confirm. Call it right after evaluate_offer accepts.",
     path: "/v1/holds",
-    waitMessage: "Locking that in for you.",
+    waitMessage: "Perfect, locking that in for you.",
     parameters: [
       { name: "load_id", description: "The load number", required: true },
       { name: "agreed_rate", description: "The rate evaluate_offer accepted, in whole US dollars", required: true },
@@ -111,7 +121,7 @@ const tools: ToolSpec[] = [
     exposedFields: ["status", "message"],
     description: "Hand the call to a senior rep. Call it when the carrier asks for a human or a senior rep.",
     path: "/v1/calls/request-human",
-    waitMessage: "One moment.",
+    waitMessage: "Sure, getting a rep for you.",
     parameters: [{ name: "reason", description: "Why the carrier wants a human, in a few words, if they said", required: false }],
     body: { reason: "reason" },
   },
@@ -162,7 +172,7 @@ export function buildAgent(options: AgentOptions): {
     agent: {
       name: text("Pablo"),
       languages: [{ type: "static", static: { id: "en", name: "English" } }],
-      voices: [{ type: "static", static: { id: "2j33fces4qv5", name: "Pablo HR" } }],
+      voices: [{ type: "static", static: { id: "tz9x2rl3l6da", name: "Christopher HR" } }],
     },
   });
   prompt.setPrompt({
