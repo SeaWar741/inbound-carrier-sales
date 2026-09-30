@@ -247,7 +247,7 @@ export function Transcript({
           className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full bg-accent px-3 py-1 text-xs font-medium text-white shadow-lg outline-none focus-visible:ring-2 focus-visible:ring-fg"
         >
           <LuArrowDown size={12} aria-hidden />
-          Jump to live
+          {stream.status === "ended" ? "Jump to end" : "Jump to live"}
         </button>
       )}
     </div>

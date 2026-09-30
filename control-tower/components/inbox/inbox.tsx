@@ -84,7 +84,7 @@ export function Inbox() {
           now={now}
           tab={tab}
           page={page}
-          filters={<FilterBar filters={filters} onChange={onFilter} onClear={onClearFilters} />}
+          filters={<FilterBar filters={filters} onChange={onFilter} />}
           filtered={filtered}
           selectedKey={selectedKey}
           onTab={onTab}

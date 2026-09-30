@@ -19,13 +19,17 @@ function currentOffer(call: TowerCall): WallOffer | null {
   return call.offers.at(-1) ?? null;
 }
 
+// One view of the load on the table at a time: "pricing" is the meter, receipt and negotiation, led
+// by the hold while it waits on the desk; "load" is the map, the lane and the hold details.
 export function LoadPanel({
   selectedCall,
   history,
+  view,
 }: {
   selectedCall: TowerCall | null;
   // The carrier's calls, newest first, for the negotiation path and outcome of the load.
   history: TowerCall[];
+  view: "pricing" | "load";
 }) {
   const offer = selectedCall ? currentOffer(selectedCall) : null;
   const hold = selectedCall?.hold ?? null;
@@ -60,11 +64,37 @@ export function LoadPanel({
   const path = useMemo(() => (loadId ? negotiationPath(history, loadId) : []), [history, loadId]);
   const agreedRate = hold && hold.status !== "released" && hold.loadId === offer?.loadId ? hold.agreedRate : null;
 
-  return (
-    <div className="flex flex-col">
-      <h2 className="border-b border-line px-3 py-2 text-xs font-medium uppercase tracking-wide text-fg-faint">Load</h2>
+  if (selectedCall === null) {
+    return <EmptyState className="py-10" icon={<LuMousePointerClick size={20} />} title="Select a call to see its load" hint="Map, pricing and hold follow the selection" />;
+  }
+  const noOffer = <EmptyState className="py-10" icon={<LuTruck size={20} />} title="No load on the table yet" hint="The lane and pricing appear with the first offer" />;
+  const holdCard = hold && <HoldCard key={hold.holdId} call={selectedCall} hold={hold} />;
 
-      <div className="border-b border-line">
+  if (view === "pricing") {
+    // The confirm and release buttons are the desk's main action, so an open hold comes first.
+    const holdOpen = hold !== null && (hold.status === "held" || hold.status === "confirming");
+    return (
+      <div className="flex flex-col divide-y divide-line">
+        {holdOpen && holdCard}
+        {offer === null ? (
+          noOffer
+        ) : (
+          <MarginMeter
+            key={offer.loadId}
+            offer={offer}
+            authorizedUsd={authorizedUsd}
+            agreedRate={agreedRate}
+            path={path}
+            outcome={loadOutcome(history, offer.loadId)}
+          />
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col divide-y divide-line">
+      <div>
         <div className="aspect-[16/10] px-2 pt-2">
           <LaneMap loads={mapLoads} selectedId={loadId} />
         </div>
@@ -85,25 +115,7 @@ export function LoadPanel({
           </div>
         )}
       </div>
-
-      {selectedCall === null ? (
-        <EmptyState className="py-10" icon={<LuMousePointerClick size={20} />} title="Select a call to see its load" hint="Map, pricing and hold follow the selection" />
-      ) : offer === null ? (
-        <EmptyState className="py-10" icon={<LuTruck size={20} />} title="No load on the table yet" hint="The lane and pricing appear with the first offer" />
-      ) : (
-        <div className="border-b border-line">
-          <MarginMeter
-            key={offer.loadId}
-            offer={offer}
-            authorizedUsd={authorizedUsd}
-            agreedRate={agreedRate}
-            path={path}
-            outcome={loadOutcome(history, offer.loadId)}
-          />
-        </div>
-      )}
-
-      {selectedCall && hold && <HoldCard key={hold.holdId} call={selectedCall} hold={hold} />}
+      {holdCard || (offer === null && noOffer)}
     </div>
   );
 }

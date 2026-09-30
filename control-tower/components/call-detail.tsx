@@ -2,7 +2,6 @@
 
 import { LuMessageSquareText, LuPhone } from "react-icons/lu";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityChips } from "@/components/activity-chips";
 import { InterventionBar, type SentIntervention } from "@/components/intervention-bar";
 import { PulseDot } from "@/components/pulse-dot";
 import { StageRail } from "@/components/stage-rail";
@@ -144,9 +143,9 @@ export function CallDetail({
         </span>
       </header>
 
-      <div className="flex flex-col gap-3 border-b border-line px-3 py-3">
+      {/* The step progress only; the transcript marks each tool call where it happened. */}
+      <div className="border-b border-line px-3 py-3">
         <StageRail call={call} />
-        <ActivityChips events={call.events} />
       </div>
 
       <div className="min-h-0 flex-1">

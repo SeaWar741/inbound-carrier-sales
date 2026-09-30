@@ -1,19 +1,11 @@
 "use client";
 
 import { useMemo, useRef, useState, useSyncExternalStore } from "react";
-import {
-  LuArrowRight,
-  LuBuilding2,
-  LuChevronDown,
-  LuChevronRight,
-  LuMessageSquareText,
-  LuPhone,
-  LuTriangleAlert,
-  LuTruck,
-} from "react-icons/lu";
+import { LuArrowRight, LuChevronDown, LuChevronRight, LuMessageSquareText, LuPhone, LuTriangleAlert, LuTruck } from "react-icons/lu";
 import { CallDetail } from "@/components/call-detail";
 import { equipmentLabel } from "@/components/hold-card";
 import { SkeletonRows } from "@/components/inbox/carrier-list";
+import { TabStrip } from "@/components/inbox/filter-bar";
 import { Badge, CarrierStagePill } from "@/components/inbox/stage-pill";
 import { LoadPanel } from "@/components/load-panel";
 import { PulseDot } from "@/components/pulse-dot";
@@ -66,33 +58,21 @@ function Fact({ label, children }: { label: string; children: React.ReactNode })
   );
 }
 
-// The cortex CRM card: an icon square and title over a two-column grid of facts. Every count reads
-// the calls on file, so the card never mixes them with the list's `since` window.
-function FactsCard({ carrier, calls }: { carrier: TowerCarrier | null; calls: TowerCall[] }) {
+// The Carrier tab: what the header does not already say, and the pricing record with this carrier.
+// Every aggregate reads the calls on file, so it never mixes them with the list's `since` window.
+function CarrierFacts({ carrier, calls }: { carrier: TowerCarrier | null; calls: TowerCall[] }) {
   const hold = openHold(calls);
   const pricing = useMemo(() => carrierPricing(calls), [calls]);
   const orDash = (value: number | null, format: (v: number) => string) => (value === null ? "-" : format(value));
   return (
-    <div className="overflow-hidden rounded-lg border border-line bg-panel shadow-sm">
-      <div className="flex items-center gap-2 border-b border-line p-3">
-        <div className="grid size-8 shrink-0 place-items-center rounded-lg bg-accent-soft text-accent">
-          <LuBuilding2 size={16} aria-hidden />
-        </div>
-        <div className="min-w-0 flex-1 text-sm font-semibold text-fg">Carrier record</div>
-      </div>
+    <div className="flex flex-col divide-y divide-line">
       <div className="grid grid-cols-2 gap-3 p-3 text-xs">
-        <Fact label="Calls">{calls.length}</Fact>
-        <Fact label="Loads offered">{pricing.loadsOffered}</Fact>
         <Fact label="Next pickup">{carrier?.nextTrip?.pickupAt ? formatDateTime(carrier.nextTrip.pickupAt) : "-"}</Fact>
-        <Fact label="ETA">{carrier?.nextTrip?.etaAt ? formatDateTime(carrier.nextTrip.etaAt) : "-"}</Fact>
-        <div className="col-span-2 min-w-0">
-          <div className="text-fg-muted">Open hold</div>
-          <div className="tabular truncate font-semibold text-fg">
-            {hold ? `${hold.loadId} at ${formatUsd(hold.agreedRate)}${hold.status === "confirming" ? ", confirming" : ""}` : "None"}
-          </div>
-        </div>
+        <Fact label="Open hold">
+          {hold ? `${hold.loadId} at ${formatUsd(hold.agreedRate)}${hold.status === "confirming" ? ", confirming" : ""}` : "None"}
+        </Fact>
       </div>
-      <div className="border-t border-line p-3">
+      <div className="p-3">
         <h3 className="mb-2 text-[11px] font-medium tracking-wide text-fg-faint uppercase">Pricing with this carrier</h3>
         <div className="grid grid-cols-2 gap-3 text-xs">
           <Fact label="Booked">
@@ -103,18 +83,27 @@ function FactsCard({ carrier, calls }: { carrier: TowerCarrier | null; calls: To
           <Fact label="Avg margin kept">{orDash(pricing.avgMarginKept, formatUsd)}</Fact>
           <Fact label="Avg round at agreement">{orDash(pricing.avgRoundsToAgree, (v) => `R${v.toFixed(1)}`)}</Fact>
         </div>
-        <p className="mt-2 text-[11px] text-fg-faint">Across the {calls.length} calls on file.</p>
+        <p className="mt-2 text-[11px] text-fg-faint">Across the {plural(calls.length, "call")} on file.</p>
       </div>
     </div>
   );
 }
 
+type AsideTab = "pricing" | "load" | "carrier";
+const asideTabs: { value: AsideTab; label: string }[] = [
+  { value: "pricing", label: "Pricing" },
+  { value: "load", label: "Load" },
+  { value: "carrier", label: "Carrier" },
+];
+
+// One thing at a time: pricing (with the hold's actions) by default, the load, or the carrier record.
 function Aside({ carrier, calls, selected }: { carrier: TowerCarrier | null; calls: TowerCall[]; selected: TowerCall | null }) {
+  const [tab, setTab] = useState<AsideTab>("pricing");
   return (
-    <div className="space-y-3 p-3 pb-6">
-      <FactsCard carrier={carrier} calls={calls} />
-      <div className="overflow-hidden rounded-lg border border-line bg-panel shadow-sm">
-        <LoadPanel selectedCall={selected} history={calls} />
+    <div className="flex h-full min-h-0 flex-col">
+      <TabStrip label="Carrier and load" tabs={asideTabs} active={tab} onTab={setTab} />
+      <div className="min-h-0 flex-1 overflow-y-auto pb-6">
+        {tab === "carrier" ? <CarrierFacts carrier={carrier} calls={calls} /> : <LoadPanel selectedCall={selected} history={calls} view={tab} />}
       </div>
     </div>
   );
@@ -204,13 +193,25 @@ function LoadCardView({
   const lane = card.loadId ? laneOf(card) : null;
   const outcome = card.loadId ? loadOutcome(calls, card.loadId) : null;
   const label = outcome ? outcomeLabel(outcome).text : null;
-  const meta = [card.rounds > 0 && plural(card.rounds, "round"), plural(card.calls.length, "call"), formatDeskWhen(card.lastAt, today)]
+  const meta = [
+    lane && equipmentLabel(lane.equipment),
+    lane && `${lane.miles.toLocaleString("en-US")} mi`,
+    formatDeskWhen(card.lastAt, today),
+  ]
     .filter(Boolean)
     .join(" · ");
+  const liveMark = live && (
+    <span className="flex shrink-0 items-center gap-1 font-medium text-accent">
+      <LuPhone size={11} aria-hidden />
+      Live
+    </span>
+  );
+  // A load card lists its calls only when there is more than one to choose between.
+  const showCalls = open && (card.loadId === null || card.calls.length > 1);
 
   return (
     <li
-      className={`overflow-hidden rounded-lg border transition-colors ${
+      className={`overflow-hidden rounded-[var(--radius-panel)] border transition-colors ${
         open || takenOver ? "border-accent bg-accent-soft/60" : card.loadId ? "border-line bg-panel hover:bg-panel-raised" : "border-line bg-bg hover:bg-panel-raised"
       }`}
     >
@@ -218,52 +219,43 @@ function LoadCardView({
         ref={cardRef}
         type="button"
         onClick={() => onSelect(latest.callId)}
-        aria-expanded={open}
-        className="block w-full cursor-pointer p-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:ring-inset"
+        aria-expanded={showCalls}
+        className="block w-full cursor-pointer px-3 py-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:ring-inset"
       >
         {card.loadId ? (
           <>
             <div className="flex items-center justify-between gap-2">
-              <span className="tabular text-[11px] text-fg-faint">{card.loadId}</span>
+              <span className="tabular truncate text-xs font-medium text-fg">{card.loadId}</span>
               {outcome && label && <Badge tone={outcomeTone[outcome.kind]}>{label}</Badge>}
             </div>
-            <div className="mt-1.5 text-sm font-medium text-fg">
+            <div className="mt-0.5 truncate text-sm text-fg" title={lane ? `${lane.origin.city}, ${lane.origin.state} to ${lane.destination.city}, ${lane.destination.state}` : undefined}>
               {lane ? (
                 <>
                   {lane.origin.city}, {lane.origin.state}
-                  <LuArrowRight size={13} className="mx-1 inline align-[-2px] text-fg-faint" aria-label="to" />
+                  <LuArrowRight size={12} className="mx-1 inline align-[-2px] text-fg-faint" aria-label="to" />
                   {lane.destination.city}, {lane.destination.state}
                 </>
               ) : (
                 "Lane not recorded"
               )}
             </div>
-            {lane && (
-              <div className="mt-0.5 text-xs text-fg-muted">
-                {equipmentLabel(lane.equipment)} · {lane.miles.toLocaleString("en-US")} mi
-              </div>
-            )}
+            <div className="mt-0.5 flex items-center gap-2 text-[11px] text-fg-muted">
+              <span className="tabular min-w-0 flex-1 truncate">{meta}</span>
+              {liveMark}
+            </div>
           </>
         ) : (
           <>
             <div className="flex items-center gap-1.5 text-sm text-fg-muted">
               {open ? <LuChevronDown size={14} aria-hidden /> : <LuChevronRight size={14} aria-hidden />}
-              {plural(card.calls.length, "call")} without a load
+              <span className="min-w-0 flex-1 truncate">{plural(card.calls.length, "call")} without a load</span>
+              {liveMark && <span className="text-xs">{liveMark}</span>}
             </div>
-            <div className="mt-0.5 text-xs text-fg-faint">Verification only, no load offered</div>
+            <div className="mt-0.5 truncate text-[11px] text-fg-faint">Verification only, no load offered</div>
           </>
         )}
-        <div className="mt-2 flex items-center gap-2 text-xs text-fg-faint">
-          <span className="min-w-0 flex-1 truncate">{meta}</span>
-          {live && (
-            <span className="flex shrink-0 items-center gap-1 font-medium text-accent">
-              <LuPhone size={11} aria-hidden />
-              Live
-            </span>
-          )}
-        </div>
       </button>
-      {open && (
+      {showCalls && (
         <ol aria-label={card.loadId ? `Calls on ${card.loadId}` : "Calls without a load"} className="space-y-0.5 border-t border-line/70 p-1.5">
           {card.calls.map((call) => (
             <CallRow
@@ -312,7 +304,7 @@ function Timeline({
   }
 
   return (
-    <ol aria-label="Loads" onKeyDown={onKeyDown} className="space-y-2 p-3">
+    <ol aria-label="Loads" onKeyDown={onKeyDown} className="space-y-1.5 p-2">
       {cards.map((card) => (
         <LoadCardView
           key={cardKey(card)}
@@ -376,14 +368,13 @@ export function CarrierDetail({
     <div className="flex h-full min-h-0 min-w-0 flex-1 overflow-hidden">
       <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-panel">
         <div className="shrink-0 border-b border-line px-4 py-3">
-          <div className="mb-2 flex items-center justify-between gap-2">
-            <div className="min-w-0 flex-1">
-              <h2 className="truncate font-semibold text-fg">{name}</h2>
-              {numbers && <p className="tabular truncate text-sm text-fg-muted">{numbers}</p>}
-            </div>
+          <div className="mb-2 flex min-w-0 items-center gap-2">
+            <h2 className="min-w-0 truncate font-semibold text-fg">{name}</h2>
+            {numbers && <span className="tabular min-w-0 shrink-[3] truncate text-sm text-fg-muted">{numbers}</span>}
+            <span className="min-w-0 flex-1" />
             {carrier && <CarrierStagePill stage={carrier.carrierStage} size="md" />}
           </div>
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <div className="flex min-w-0 items-center gap-2 overflow-hidden">
             {carrier?.needsHuman && <Badge tone="bg-risk-soft text-risk">Needs human</Badge>}
             {latest?.live && (
               <Badge tone="bg-accent-soft text-accent">
@@ -432,7 +423,7 @@ export function CarrierDetail({
               {callPane}
             </section>
             {!wide && (
-              <section aria-label="Carrier and load" className="min-h-0 overflow-y-auto border-t border-line bg-bg">
+              <section aria-label="Carrier and load" className="min-h-0 overflow-hidden border-t border-line bg-panel">
                 <Aside carrier={carrier} calls={calls} selected={selected} />
               </section>
             )}
@@ -441,7 +432,7 @@ export function CarrierDetail({
       </div>
 
       {wide && (
-        <aside aria-label="Carrier and load" className="h-full min-h-0 w-[300px] shrink-0 overflow-y-auto border-l border-line bg-bg">
+        <aside aria-label="Carrier and load" className="h-full min-h-0 w-[300px] shrink-0 overflow-hidden border-l border-line bg-panel">
           <Aside carrier={carrier} calls={calls} selected={selected} />
         </aside>
       )}

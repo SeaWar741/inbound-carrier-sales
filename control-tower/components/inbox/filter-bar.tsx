@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { IconType } from "react-icons";
-import { LuArrowDownUp, LuArrowRight, LuCalendarDays, LuChevronDown, LuCircleDot, LuRoute, LuSearch, LuTruck, LuX } from "react-icons/lu";
+import { LuArrowDownUp, LuArrowRight, LuChevronDown, LuListFilter, LuSearch, LuX } from "react-icons/lu";
 import { equipmentLabel } from "@/components/hold-card";
 import { carrierStages, inboxSorts } from "@/lib/contracts";
 import { carrierStageLabels } from "@/lib/format";
@@ -94,12 +94,13 @@ export type Tab<T extends string> = {
   label: React.ReactNode;
   // Names a tab whose label is only an icon.
   ariaLabel?: string;
-  count: number | null;
+  // Null shows "-" while loading; a tab without a count leaves the pill out.
+  count?: number | null;
   // Keeps a red pill while its count is not zero.
   urgent?: boolean;
 };
 
-// The cortex tab strip: an underlined tab with a count pill.
+// The cortex tab strip: an underlined tab with an optional count pill.
 export function TabStrip<T extends string>({
   label,
   tabs,
@@ -129,9 +130,11 @@ export function TabStrip<T extends string>({
             }`}
           >
             {tab.label}
-            <span className={`tabular min-w-4 rounded-full px-1 py-0.5 text-center text-[10px] leading-none font-semibold ${pill}`}>
-              {tab.count ?? "-"}
-            </span>
+            {tab.count !== undefined && (
+              <span className={`tabular min-w-4 rounded-full px-1 py-0.5 text-center text-[10px] leading-none font-semibold ${pill}`}>
+                {tab.count ?? "-"}
+              </span>
+            )}
           </button>
         );
       })}
@@ -176,93 +179,164 @@ export function FilterSelect({
   );
 }
 
-// Origin and destination states as one chip: "TX -> Any".
-function LaneSelect({
-  origin,
-  destination,
+const panelSelect =
+  "h-8 w-full min-w-0 cursor-pointer appearance-none rounded-md border border-line bg-panel pr-7 pl-2.5 text-sm text-fg outline-none transition-colors hover:bg-panel-raised focus-visible:border-accent focus-visible:ring-[3px] focus-visible:ring-accent/30";
+
+// A labelled full-width native select for the filters panel.
+function PanelSelect({
+  label,
+  value,
   onChange,
+  options,
 }: {
-  origin: string;
-  destination: string;
-  onChange: (key: "origin" | "destination", value: string) => void;
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: { value: string; label: string }[];
 }) {
-  const set = origin !== "" || destination !== "";
-  const select = (key: "origin" | "destination", value: string, label: string) => (
-    <select
-      aria-label={label}
-      value={value}
-      onChange={(event) => onChange(key, event.target.value)}
-      className="field-sizing-content h-full cursor-pointer appearance-none bg-transparent px-0.5 outline-none focus-visible:underline"
-    >
-      <option value="">Any</option>
-      {states.map((state) => (
-        <option key={state} value={state}>
-          {state}
-        </option>
-      ))}
-    </select>
-  );
   return (
-    <span
-      className={`inline-flex h-7 shrink-0 items-center gap-0.5 rounded-lg border bg-panel pr-1.5 pl-2 text-xs font-medium transition-colors focus-within:ring-2 focus-within:ring-accent/40 hover:bg-panel-raised ${
-        set ? "border-accent/40 text-accent" : "border-line text-fg"
-      }`}
-    >
-      <LuRoute size={13} className={`mr-0.5 ${set ? "text-accent" : "text-fg-faint"}`} aria-hidden />
-      {select("origin", origin, "Origin state")}
-      <LuArrowRight size={12} className="text-fg-faint" aria-hidden />
-      {select("destination", destination, "Destination state")}
+    <label className="relative flex min-w-0 flex-1 items-center">
+      <span className="sr-only">{label}</span>
+      <select value={value} onChange={(event) => onChange(event.target.value)} className={panelSelect}>
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+      <LuChevronDown size={14} className="pointer-events-none absolute right-2 text-fg-faint" aria-hidden />
+    </label>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-xs font-medium text-fg-muted">{label}</span>
+      <div className="flex items-center gap-1.5">{children}</div>
+    </div>
+  );
+}
+
+// An active filter after the Filters button; the x drops just that filter.
+function FilterPill({ label, onRemove, children }: { label: string; onRemove: () => void; children: React.ReactNode }) {
+  return (
+    <span className="inline-flex h-6 min-w-0 shrink items-center gap-0.5 rounded-full bg-accent-soft pr-0.5 pl-2 text-[11px] font-medium text-accent">
+      <span className="inline-flex min-w-0 items-center gap-0.5 truncate">{children}</span>
+      <button
+        type="button"
+        onClick={onRemove}
+        aria-label={`Remove ${label} filter`}
+        title={`Remove ${label} filter`}
+        className="inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-full outline-none transition-colors hover:bg-accent/15 focus-visible:ring-2 focus-visible:ring-accent/40"
+      >
+        <LuX size={11} aria-hidden />
+      </button>
     </span>
   );
 }
 
-// Filter chips and the search box of the carrier list header. Every change goes to the URL.
+const stageOptions = [{ value: "", label: "Any stage" }, ...carrierStages.map((s) => ({ value: s, label: carrierStageLabels[s] }))];
+const equipmentOptions = [{ value: "", label: "Any equipment" }, ...equipmentCodes.map((c) => ({ value: c, label: equipmentLabel(c) }))];
+const stateOptions = (any: string) => [{ value: "", label: any }, ...states.map((state) => ({ value: state, label: state }))];
+const sinceLabel = (since: string) => sinceOptions.find((option) => option.value === since)?.label ?? since;
+
+// The search box over one row: a Filters button with its panel, the active filters as pills, and
+// the sort. Every change goes to the URL.
 export function FilterBar({
   filters,
   onChange,
-  onClear,
 }: {
   filters: InboxFilters;
   onChange: (key: keyof InboxFilters, value: string) => void;
-  onClear: () => void;
 }) {
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
   const onSearch = useCallback((q: string) => onChange("q", q), [onChange]);
-  const narrowed = [filters.stage, filters.equipment, filters.origin, filters.destination, filters.since, filters.q].some((v) => v !== "");
+
+  const lane = filters.origin !== "" || filters.destination !== "";
+  const active = [filters.stage !== "", filters.equipment !== "", lane, filters.since !== ""].filter(Boolean).length;
+  const clearLane = () => {
+    if (filters.origin) onChange("origin", "");
+    if (filters.destination) onChange("destination", "");
+  };
+  // Clears what the panel sets; the search box keeps its text.
+  const clearPanel = () => {
+    if (filters.stage) onChange("stage", "");
+    if (filters.equipment) onChange("equipment", "");
+    clearLane();
+    if (filters.since) onChange("since", "");
+  };
+
+  // A click outside the bar or Esc closes the panel; Esc hands focus back to the button.
+  useEffect(() => {
+    if (!open) return;
+    const onPointer = (event: PointerEvent) => {
+      if (!root.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setOpen(false);
+      trigger.current?.focus();
+    };
+    document.addEventListener("pointerdown", onPointer);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onPointer);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
 
   return (
     <>
       <SearchInput q={filters.q} onSearch={onSearch} placeholder="Search MC, DOT, carrier, load..." label="Search carriers" className="mb-2" />
 
-      {/* Starts at the left and wraps to a second row when the chips outgrow the pane; never scrolls or clips a label. */}
-      <div className="flex flex-wrap items-center gap-1.5">
-        <FilterSelect
-          label="Stage"
-          icon={LuCircleDot}
-          value={filters.stage}
-          onChange={(v) => onChange("stage", v)}
-          options={[{ value: "", label: "Stage" }, ...carrierStages.map((s) => ({ value: s, label: carrierStageLabels[s] }))]}
-        />
-        <FilterSelect
-          label="Equipment"
-          icon={LuTruck}
-          value={filters.equipment}
-          onChange={(v) => onChange("equipment", v)}
-          options={[{ value: "", label: "Equipment" }, ...equipmentCodes.map((c) => ({ value: c, label: equipmentLabel(c) }))]}
-        />
-        <LaneSelect origin={filters.origin} destination={filters.destination} onChange={onChange} />
-        <FilterSelect label="Since" icon={LuCalendarDays} value={filters.since} onChange={(v) => onChange("since", v)} options={sinceOptions} />
-        {narrowed && (
-          <button
-            type="button"
-            onClick={onClear}
-            aria-label="Clear filters"
-            title="Clear filters"
-            className="inline-flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-lg text-fg-muted transition-colors hover:bg-panel-raised hover:text-risk"
-          >
-            <LuX size={14} aria-hidden />
-          </button>
-        )}
-        <span className="ml-auto shrink-0">
+      {/* One row at any pane width: the pills shrink and truncate instead of wrapping. */}
+      <div ref={root} className="relative flex min-w-0 items-center gap-1.5">
+        <button
+          ref={trigger}
+          type="button"
+          onClick={() => setOpen((value) => !value)}
+          aria-expanded={open}
+          aria-controls="inbox-filters"
+          className={`inline-flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border bg-panel px-2 text-xs font-medium outline-none transition-colors hover:bg-panel-raised focus-visible:ring-2 focus-visible:ring-accent/40 ${
+            active > 0 ? "border-accent/40 text-accent" : "border-line text-fg"
+          }`}
+        >
+          <LuListFilter size={13} className={active > 0 ? "text-accent" : "text-fg-faint"} aria-hidden />
+          Filters
+          {active > 0 && (
+            <span className="tabular min-w-4 rounded-full bg-accent px-1 py-0.5 text-center text-[10px] leading-none font-semibold text-white">{active}</span>
+          )}
+        </button>
+
+        <div className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
+          {filters.stage && (
+            <FilterPill label="stage" onRemove={() => onChange("stage", "")}>
+              {carrierStageLabels[filters.stage as keyof typeof carrierStageLabels] ?? filters.stage}
+            </FilterPill>
+          )}
+          {filters.equipment && (
+            <FilterPill label="equipment" onRemove={() => onChange("equipment", "")}>
+              {equipmentLabel(filters.equipment)}
+            </FilterPill>
+          )}
+          {lane && (
+            <FilterPill label="lane" onRemove={clearLane}>
+              {filters.origin || "Any"}
+              <LuArrowRight size={10} className="shrink-0" aria-label="to" />
+              {filters.destination || "Any"}
+            </FilterPill>
+          )}
+          {filters.since && (
+            <FilterPill label="date" onRemove={() => onChange("since", "")}>
+              {sinceLabel(filters.since)}
+            </FilterPill>
+          )}
+        </div>
+
+        <span className="shrink-0">
           <FilterSelect
             label="Sort"
             icon={LuArrowDownUp}
@@ -271,6 +345,52 @@ export function FilterBar({
             options={inboxSorts.map((s) => ({ value: s === "priority" ? "" : s, label: sortLabels[s] }))}
           />
         </span>
+
+        {open && (
+          <div
+            id="inbox-filters"
+            role="dialog"
+            aria-label="Filters"
+            className="absolute top-full left-0 z-20 mt-1.5 flex w-72 flex-col gap-3 rounded-[var(--radius-panel)] border border-line bg-panel p-3 shadow-lg"
+          >
+            <Field label="Stage">
+              <PanelSelect label="Stage" value={filters.stage} onChange={(v) => onChange("stage", v)} options={stageOptions} />
+            </Field>
+            <Field label="Equipment">
+              <PanelSelect label="Equipment" value={filters.equipment} onChange={(v) => onChange("equipment", v)} options={equipmentOptions} />
+            </Field>
+            <Field label="Lane">
+              <PanelSelect label="Origin state" value={filters.origin} onChange={(v) => onChange("origin", v)} options={stateOptions("Any")} />
+              <LuArrowRight size={14} className="shrink-0 text-fg-faint" aria-hidden />
+              <PanelSelect
+                label="Destination state"
+                value={filters.destination}
+                onChange={(v) => onChange("destination", v)}
+                options={stateOptions("Any")}
+              />
+            </Field>
+            <Field label="Date">
+              <PanelSelect label="Since" value={filters.since} onChange={(v) => onChange("since", v)} options={sinceOptions} />
+            </Field>
+            <div className="flex items-center justify-between border-t border-line pt-3">
+              <button
+                type="button"
+                onClick={clearPanel}
+                disabled={active === 0}
+                className="cursor-pointer rounded-md px-1 text-xs font-medium text-fg-muted outline-none transition-colors hover:text-fg focus-visible:ring-2 focus-visible:ring-accent/40 disabled:pointer-events-none disabled:opacity-50"
+              >
+                Clear
+              </button>
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                className="inline-flex h-7 cursor-pointer items-center rounded-md border border-line bg-panel px-3 text-xs font-medium text-fg shadow-xs outline-none transition-colors hover:bg-panel-raised focus-visible:ring-2 focus-visible:ring-accent/40"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </>
   );

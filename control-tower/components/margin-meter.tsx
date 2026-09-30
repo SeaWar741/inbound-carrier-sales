@@ -264,8 +264,6 @@ export function MarginMeter({
       </dl>
 
       {path.length > 0 && <NegotiationPath path={path} postedRate={postedRate} maxBuy={maxBuy} outcome={outcome} />}
-
-      <p className="text-[11px] text-fg-faint">Trip costs (fuel, tolls) arrive with Trip Intelligence.</p>
     </div>
   );
 }
