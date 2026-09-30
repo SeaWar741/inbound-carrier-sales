@@ -117,6 +117,7 @@ function holdNotice(hold: HoldRow, row: NoticeRow): CarrierMessage {
 // Never awaited: the outcome lands in call_events for the tower instead of slowing the answer.
 function noticeCarrier(deps: NoticeDeps, hold: HoldRow, log: Log): void {
   void (async () => {
+    // Every summary names the load: the tower's hold card finds its notice by that load id.
     let status = "failed";
     let summary = `Hold notice for ${hold.loadId} failed`;
     try {
