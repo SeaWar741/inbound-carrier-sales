@@ -18,6 +18,7 @@ import { confirmHoldRoutes, holdRoutes, releaseHoldRoutes } from "./routes/holds
 import { loadRoutes } from "./routes/loads.ts";
 import { offerRoutes } from "./routes/offers.ts";
 import { operatorInboxRoutes } from "./routes/operator-inbox.ts";
+import { operatorNetworkRoutes } from "./routes/operator-network.ts";
 import { operatorWallRoutes } from "./routes/operator.ts";
 import { otpRoutes } from "./routes/otp.ts";
 import { tripRoutes } from "./routes/trips.ts";
@@ -86,7 +87,7 @@ if (import.meta.main) {
       holdRoutes({ tms, twin, trips, delivery }),
       handoffRoutes({ twin }),
     ],
-    operatorRoutes: [confirmHoldRoutes({ tms, twin, delivery }), releaseHoldRoutes({ twin, delivery }), operatorWallRoutes({ twin, tmsHealth }), operatorInboxRoutes({ twin })],
+    operatorRoutes: [confirmHoldRoutes({ tms, twin, delivery }), releaseHoldRoutes({ twin, delivery }), operatorWallRoutes({ twin, tmsHealth }), operatorInboxRoutes({ twin }), operatorNetworkRoutes({ twin, tms })],
   }, { twin });
   if (!config.EIA_API_KEY || !config.ORS_API_KEY) app.log.warn("trip estimates disabled: EIA_API_KEY/ORS_API_KEY not set");
   await app.listen({ host: "0.0.0.0", port: config.PORT });

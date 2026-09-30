@@ -116,6 +116,52 @@ Known limits:
 - The dashboard and map ETA still use the 50 mph estimate. The inbox load panel and carrier header show the legal ETA once the load has a hold with an estimate.
 - A booking the TMS did not confirm (`booked_unconfirmed`) sends no notice to the carrier. A rep checks the TMS and calls the carrier.
 
+## Carriers and demand
+
+Two operator pages built from what the inbound calls already record: **Carriers** (who to call back and why) and **Demand** (lanes carriers ask for that the board did not cover). The adapter routes are `GET /v1/operator/network`, `GET /v1/operator/demand` and `GET /v1/operator/demand/carriers`, in `src/routes/operator-network.ts`. Each is one Twin query. Every search that reaches the board is stored in `load_searches`.
+
+### Carriers
+
+The page reads a fixed window: the last 30 days. There is no date range to pick. Each carrier gets one relationship status, first match wins:
+- **New**: fewer than `segmentNewMaxCalls` (3) calls ever. There is no pattern to judge yet.
+- **At risk**: at least one booking ever, and either no call in `segmentRecentDays` (14) days, or fewer than half as many calls in the last 14 days as in the 14 before. An at-risk carrier stays listed even when its last call is older than 30 days, because going quiet is what puts it there.
+- **Active**: everyone else.
+
+Two tags sit on top of the status, independent of it and of each other:
+- **Top**: at least `segmentTopMinBookings` (2) bookings in the 30 days, and at least `segmentTopMinRate` (0.5) bookings per call that reached an offer. Calls that failed verification or found no load do not count against a carrier.
+- **Lane open**: a lane the carrier searched or negotiated has an open load on the board now. The match is strict: the exact origin state, destination state and equipment, or origin state and equipment alone when the carrier booked that exact lane 2 or more times. A search's Any destination or equipment matches only that part. Under an equipment or origin filter, only an open lane that matches the filter counts, so the tag, the Lane open number and a click on the side panel agree.
+
+A carrier can be At risk, Top and Lane open at once, so the statuses overlap. They are decided once, in SQL, and the tower only words the reason on the row. The key numbers and status counts follow the filters but never the chosen status. Each row opens the carrier's calls in place, and a link opens it in the Inbox; there is no separate profile page.
+
+A booking is a hold in `booked` or `booked_unconfirmed`, the same as the inbox and the dashboard. A carrier's lanes count calls, not rows: a call that searched a lane and negotiated a load on it ran it once.
+
+### Demand
+
+Only uncovered demand shows: a search that found a load is covered and counts nowhere. Rows are lane (origin state to destination state, or Any) x equipment (or Any), over the last 4 desk weeks in `America/Chicago`. Per row:
+- **No match**: searches from `load_searches` that found nothing, grouped by the lane the carrier asked for.
+- **Offered, no booking**: a load negotiated on a call that ended with no live hold on it, grouped by the offered load's lane. Twin records no explicit carrier rejection (`offers.decision` is our verdict, and calls carry no outcome), so the page never says "rejected".
+- **Unmet** = no match + offered, no booking. Rows sort by unmet by default.
+- **Carriers**: distinct carriers with an unmet ask on the row. Opening the row lists who asked, a page at a time.
+- **Last → this wk**: unmet in the desk week before against this one.
+- **Next step**: find a load when the board had nothing, check the rate when offers did not book. It opens the Dashboard filtered to the row's origin state and equipment.
+
+There is no booked column. A search has no id that follows it to an offer and a hold, so a booking cannot be tied to the search that led to it. A search that found nothing only because the TMS failed to return load details is not recorded, so an outage never reads as demand.
+
+### Prior art
+
+- [Highway Lane Intelligence](https://highway.com/lane-intelligence) shows why a carrier is recommended, with a count and a window. We take that: every reason names its numbers and its window.
+- [DAT LaneMakers](https://secure.businesswire.com/news/home/20250505910165/en/DAT-introduces-LaneMakers-for-DAT-iQ-Benchmark-to-help-shippers-find-capacity-for-underserved-lanes) starts from the underserved lane and lists the carriers active on it. We take the lane-first view: a demand row opens to who asked.
+- [Parade](https://help.parade.ai/en/articles/2673088-interpreting-carrier-profile) ranks carriers with a score. We discard scores and show raw counts, so a rep can check them.
+- RFM segmentation ([Count](https://count.co/metric/rfm-segmentation), [Umbrex](https://umbrex.com/resources/frameworks/marketing-frameworks/rfm-segmentation-recency-frequency-monetary/)) is the baseline behind New, At risk and Top: recency, frequency and bookings. The baseline to beat is a list sorted by bookings.
+- We found no public product with an "asked but not covered" view, so the Demand page is our own.
+
+### Known limits
+
+- Only inbound calls count. Outbound touchpoints are not recorded, so At risk means no recent inbound call.
+- The board is read with one LOAD_QUERY per equipment type, capped at `openLanesPerEquipment` (50) loads each and cached `openLanesCacheMs` (10 minutes) in memory. LOAD_QUERY has no status filter, so a type that fills the cap may hide open lanes, and the adapter logs it. When the TMS cannot be read, no lane shows as open and the page says so.
+- Lanes are matched at the state level, not the city.
+- Zip-only searches have no origin state and do not appear on the Demand page.
+
 ## Deploy
 
 `render.yaml` is a Render Blueprint (Docker, free plan). Secrets are entered in the Render dashboard.

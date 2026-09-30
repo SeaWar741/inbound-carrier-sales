@@ -33,6 +33,9 @@ const authorized = new Map<string, number>();
 type OfferRow = { callId: string; loadId: string; round: number; carrierAsk: number; decision: string; rateToSay: number | null };
 let offers: (OfferRow & { postedRate?: number; maxBuy?: number; lane?: string[] })[] = [];
 const sqlLog: string[] = [];
+// Recorded searches, as their INSERT text; a flag makes the insert fail.
+const searchInserts: string[] = [];
+let failSearchInsert = false;
 
 const twinFetch = vi.fn<typeof fetch>(async (_input, init) => {
   const body: unknown = JSON.parse(typeof init?.body === "string" ? init.body : "{}");
@@ -59,6 +62,11 @@ const twinFetch = vi.fn<typeof fetch>(async (_input, init) => {
       return jsonResponse({ message: 'duplicate key value violates unique constraint "offers_call_id_load_id_round_key"' }, 400);
     }
     offers.push(row);
+    return jsonResponse({ command: "INSERT", rowCount: 1, rows: [], truncated: false });
+  }
+  if (text.startsWith("INSERT INTO load_searches")) {
+    if (failSearchInsert) return jsonResponse({ message: 'relation "load_searches" does not exist' }, 400);
+    searchInserts.push(text);
     return jsonResponse({ command: "INSERT", rowCount: 1, rows: [], truncated: false });
   }
   const callState = /FROM offers o WHERE o\.call_id = c\.call_id AND o\.load_id = E'([^']*)'[\s\S]*WHERE c\.call_id = E'([^']*)'/.exec(text);
@@ -126,6 +134,8 @@ beforeEach(() => {
   authorized.clear();
   offers = [];
   sqlLog.length = 0;
+  searchInserts.length = 0;
+  failSearchInsert = false;
   twinFetch.mockClear();
 });
 
@@ -375,6 +385,23 @@ describe("POST /v1/loads/search", () => {
     expect(res.json().loads.map((l: { loadId: string }) => l.loadId)).toEqual(["LD2"]);
   });
 
+  it("records no search when nothing was pitched and some details could not be read", async () => {
+    const tms = {
+      queryLoads: vi.fn(async () => [summary("LD1", "OPEN"), summary("LD2", "OPEN")]),
+      getLoad: vi.fn(async (loadId: string) => {
+        if (loadId === "LD1") throw new TmsUnavailableError("LOAD_GET", 3, false, "timeout");
+        return detail(loadId, "OPEN");
+      }),
+    };
+    // The one load that was read cannot be delivered on time, so nothing is pitched.
+    const target = serverWith(tms, { estimate: async () => ({ feasibility: "impossible" }) as TripSnapshot });
+    const res = await search({ callId: "call-ok", originState: "GA" }, target);
+    await target.close();
+    expect(res.json()).toMatchObject({ status: "no_loads" });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(searchInserts).toEqual([]);
+  });
+
   it("answers tms_unavailable when no load detail could be read", async () => {
     const tms = {
       queryLoads: vi.fn(async () => [summary("LD1", "OPEN"), summary("LD2", "OPEN")]),
@@ -409,6 +436,51 @@ describe("POST /v1/loads/search", () => {
       expect(res.statusCode).toBe(200);
       expect(res.json()).toMatchObject({ status: "invalid_request", loads: [] });
     }
+  });
+
+  it("records a search that reached the board with its pitched and dropped counts", async () => {
+    const tms = {
+      queryLoads: vi.fn(async () => ["LD1", "LD2"].map((id) => summary(id, "OPEN"))),
+      getLoad: vi.fn(async (loadId: string) => detail(loadId, "OPEN")),
+    };
+    // Estimates start in candidate order: the first load is impossible, the second deliverable.
+    let started = 0;
+    const estimate = vi.fn<TripEstimates["estimate"]>(async () => ({ feasibility: started++ === 0 ? "impossible" : "solo" }) as TripSnapshot);
+    const target = serverWith(tms, { estimate });
+    const res = await search({ callId: "call-ok", originState: "TX", destinationState: "GA", equipmentType: "REEFER" }, target);
+    await target.close();
+    expect(res.json()).toMatchObject({ status: "ok" });
+    await vi.waitFor(() => expect(searchInserts).toHaveLength(1));
+    expect(searchInserts[0]).toMatch(
+      /VALUES \(E'call-ok', NULL, E'TX', NULL, NULL, E'GA', NULL, E'REEFER', NULL, 1, 1\)$/,
+    );
+  });
+
+  it("records a search with no match as zero results and any equipment as NULL", async () => {
+    const tms = { queryLoads: vi.fn(async () => []), getLoad: vi.fn() };
+    const target = serverWith(tms);
+    const res = await search({ callId: "call-ok", originState: "TX", equipmentType: "any" }, target);
+    await target.close();
+    expect(res.json()).toMatchObject({ status: "no_loads" });
+    await vi.waitFor(() => expect(searchInserts).toHaveLength(1));
+    expect(searchInserts[0]).toMatch(/VALUES \(E'call-ok', NULL, E'TX', NULL, NULL, NULL, NULL, NULL, NULL, 0, 0\)$/);
+  });
+
+  it("records nothing when the board or the call lookup is unavailable, or the call is not verified", async () => {
+    await withFake(["empty-close"], (target) => search({ callId: "call-ok", originState: "GA", equipmentType: "DRY_VAN" }, target));
+    await search({ callId: "call-unverified", originState: "GA" });
+    // Give a stray fire-and-forget insert the time it would need to land.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(searchInserts).toEqual([]);
+  });
+
+  it("still answers the carrier when the search cannot be recorded", async () => {
+    failSearchInsert = true;
+    const tms = { queryLoads: vi.fn(async () => []), getLoad: vi.fn() };
+    const target = serverWith(tms);
+    const res = await search({ callId: "call-ok", originState: "TX" }, target);
+    await target.close();
+    expect(res.json()).toMatchObject({ status: "no_loads" });
   });
 
   it("stays behind the agent key", async () => {

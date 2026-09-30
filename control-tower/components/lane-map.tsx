@@ -41,7 +41,7 @@ export type LaneMapLoad = {
 };
 
 // MapLibre cannot parse oklch, so these are the sRGB equivalents of the globals.css tokens.
-const colors = {
+export const colors = {
   panel: "#ffffff", // --panel
   panelRaised: "#f4f5f6", // --panel-raised
   fgMuted: "#6a6f78", // --fg-muted
@@ -50,10 +50,10 @@ const colors = {
   ok: "#199a4d", // --ok
 };
 
-const styleUrl = "https://tiles.openfreemap.org/styles/positron";
+export const styleUrl = "https://tiles.openfreemap.org/styles/positron";
 
 // Used when the tile style cannot load, so the lanes still draw on a plain ground.
-const fallbackStyle: StyleSpecification = {
+export const fallbackStyle: StyleSpecification = {
   version: 8,
   sources: {},
   layers: [{ id: "background", type: "background", paint: { "background-color": colors.panelRaised } }],
@@ -77,12 +77,12 @@ const hiddenBaseLayers = [
   "railway_dashline",
 ];
 
-const contiguousUs: LngLatBoundsLike = [
+export const contiguousUs: LngLatBoundsLike = [
   [-125, 24],
   [-66.5, 49.5],
 ];
 // Loose enough that a short container can still show the whole country.
-const maxBounds: LngLatBoundsLike = [
+export const maxBounds: LngLatBoundsLike = [
   [-140, 15],
   [-50, 58],
 ];
@@ -250,7 +250,7 @@ function addLayers(map: MapLibreMap) {
 
 // Quiets the positron basemap so the lanes carry the color: drop the noise, soften labels, and
 // bring state lines in at country scale as faint dashes.
-function quietBasemap(map: MapLibreMap) {
+export function quietBasemap(map: MapLibreMap) {
   for (const id of hiddenBaseLayers) if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", "none");
   for (const id of ["label_city", "label_city_capital", "label_town", "label_state"]) {
     if (!map.getLayer(id)) continue;

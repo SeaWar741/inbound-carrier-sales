@@ -109,6 +109,23 @@ export const carrierStageLabels: Record<CarrierStage, string> = {
   lost: "Lost",
 };
 
+const equipmentLabels: Record<string, string> = {
+  DRY_VAN: "Dry van",
+  REEFER: "Reefer",
+  FLATBED: "Flatbed",
+  STEP_DECK: "Step deck",
+  POWER_ONLY: "Power only",
+};
+
+// "1 call", "2 calls"; `many` for the irregular ones ("searches").
+export function plural(n: number, one: string, many = `${one}s`): string {
+  return `${n} ${n === 1 ? one : many}`;
+}
+
+export function equipmentLabel(code: string): string {
+  return equipmentLabels[code] ?? code;
+}
+
 // How a carrier is named in the inbox: its FMCSA name when stored, else its numbers.
 export function carrierName(carrier: { carrierName: string | null; mcNumber: string | null; dotNumber: string | null }): string {
   if (carrier.carrierName) return carrier.carrierName;

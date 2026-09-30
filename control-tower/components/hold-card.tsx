@@ -13,18 +13,6 @@ type HoldStatus = Hold["status"];
 // The second press must land within this window, so a stray click never books a load.
 const armWindowMs = 4_000;
 
-const equipmentLabels: Record<string, string> = {
-  DRY_VAN: "Dry van",
-  REEFER: "Reefer",
-  FLATBED: "Flatbed",
-  STEP_DECK: "Step deck",
-  POWER_ONLY: "Power only",
-};
-
-export function equipmentLabel(code: string): string {
-  return equipmentLabels[code] ?? code;
-}
-
 // The TMS gives YYYYMMDDHHMMSS with no timezone, so it is shown as written.
 const pickupFormat = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", month: "short", day: "numeric" });
 export function formatPickup(wire: string): string {
