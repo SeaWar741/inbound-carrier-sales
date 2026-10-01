@@ -133,6 +133,13 @@ const twin = {
     statements.push(statement.text);
     if (failTwin) throw new TwinError("connection reset");
     const text = statement.text;
+    if (text.includes("FROM call_transcripts")) {
+      if (!text.includes("E'demo-1'")) return [];
+      return [
+        { seq: "1", role: "agent", text: "Thanks for calling, this is Pablo.", at: "2026-09-30T15:00:00.000Z" },
+        { seq: "2", role: "tool", text: "verify_carrier", at: "2026-09-30T15:00:09.000Z" },
+      ].map((r) => rowSchema.parse(r));
+    }
     if (text.endsWith("FROM staged p")) return text.includes("'unknown'") ? [] : [rowSchema.parse(carriersRow.rows[0])];
     if (text.startsWith("WITH scoped")) return [rowSchema.parse(carriersRow)];
     if (text.includes("FROM calls t WHERE COALESCE('mc:' || t.mc_number")) {
@@ -429,5 +436,38 @@ describe("GET /v1/operator/carriers/:key/calls", () => {
     } finally {
       failTwin = false;
     }
+  });
+});
+
+describe("GET /v1/operator/calls/:callId/transcript", () => {
+  const getTranscript = (callId: string) =>
+    app.inject({ method: "GET", url: `/v1/operator/calls/${callId}/transcript`, headers: { "x-api-key": testConfig.OPERATOR_API_KEY } });
+
+  it("returns the stored conversation in order", async () => {
+    statements.length = 0;
+    const res = await getTranscript("demo-1");
+    expect(res.json()).toEqual({
+      status: "ok",
+      entries: [
+        { seq: 1, role: "agent", text: "Thanks for calling, this is Pablo.", at: "2026-09-30T15:00:00.000Z" },
+        { seq: 2, role: "tool", text: "verify_carrier", at: "2026-09-30T15:00:09.000Z" },
+      ],
+    });
+    expect(statements[0]).toContain("ORDER BY seq");
+  });
+
+  it("answers an empty list for a call with no stored conversation", async () => {
+    expect((await getTranscript("run-1")).json()).toEqual({ status: "ok", entries: [] });
+  });
+
+  it("answers 503 when Twin fails and stays behind the operator key", async () => {
+    failTwin = true;
+    try {
+      expect((await getTranscript("demo-1")).statusCode).toBe(503);
+    } finally {
+      failTwin = false;
+    }
+    const res = await app.inject({ method: "GET", url: "/v1/operator/calls/demo-1/transcript", headers: { "x-api-key": testConfig.AGENT_API_KEY } });
+    expect(res.statusCode).toBe(401);
   });
 });

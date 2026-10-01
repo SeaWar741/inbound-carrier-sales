@@ -1,21 +1,31 @@
-// Fills Twin with fake carriers, calls, offers and holds so the dashboard and the inbox have
-// something to show. Every row is marked (call ids `demo-`, load ids `DM`) and the seed runs its
-// own teardown first, so a rerun never duplicates. The capacity trucks are fitted to real OPEN loads read
-// from the TMS (read only), so they need TMS_HOST/TMS_PORT/TMS_TOKEN; without them only the trucks are skipped.
-// DEMO_NOTICE_EMAIL, when set, is where those trucks' load notices go; unset, they show no contact.
-// Usage: npm run seed:demo            (teardown, then seed)
+// Fills Twin with the demo dataset (scripts/demo-dataset.ts): about two months of carrier calls with their
+// offers, holds, searches, trucks on file, rep interventions and the conversation itself. Every row hangs
+// off a `demo-` call id and the seed runs its own teardown first, so a rerun never duplicates.
+// Grounded in real sources, all read only: lanes, freight and rates from the TMS board, a share of the
+// carriers from FMCSA with their real verdict, and trip costs from the same estimator create_hold uses.
+// Hold notices from the tower go to DEMO_NOTICE_EMAIL; unset, demo calls carry no contact, so a real
+// carrier is never emailed.
+// Usage: npm run seed:demo               (teardown, then seed)
 //        npm run seed:demo -- --teardown
+//        npm run seed:demo -- --dry-run   (read the sources and generate, print a sample, write nothing)
 import { z } from "zod";
-import { operatorTimeZone } from "../src/constants.ts";
+import { tmsWallClockToDate as tmsDate } from "../src/domain/trip.ts";
+import { verifyCarrier } from "../src/domain/verification.ts";
+import { FmcsaClient, type FmcsaCarrier } from "../src/infra/fmcsa-client.ts";
+import type { LoadDetail } from "../src/infra/tms/codec.ts";
 import { TmsClient } from "../src/infra/tms/tms-client.ts";
-import { TripEstimator } from "../src/infra/trip-estimator.ts";
+import { TripEstimator, zip3Centroids } from "../src/infra/trip-estimator.ts";
 import { TwinClient, sql, type SqlStatement } from "../src/infra/twin-client.ts";
-import { deskToday, fitsTruck } from "../src/routes/capacity.ts";
 import { openBoard } from "../src/routes/operator-network.ts";
+import { buildDataset, type DemoCarrier, type Equipment, type LaneTemplate, type LiveLoad, type Place, type Row } from "./demo-dataset.ts";
 
 const env = z
   .object({
     HAPPYROBOT_API_KEY: z.string().min(1),
+    TMS_HOST: z.string().min(1),
+    TMS_PORT: z.coerce.number().int().positive(),
+    TMS_TOKEN: z.string().min(1),
+    FMCSA_API_KEY: z.string().min(1),
     // Without either key every demo hold is stored without a trip, like create_hold does.
     EIA_API_KEY: z.string().min(1).optional(),
     ORS_API_KEY: z.string().min(1).optional(),
@@ -25,319 +35,241 @@ const env = z
 const twin = new TwinClient({ apiKey: env.HAPPYROBOT_API_KEY });
 const run = (statement: SqlStatement) => twin.query(statement, z.unknown());
 
+const demoTables = ["call_transcripts", "interventions", "call_events", "offers", "holds", "load_searches", "truck_capacity", "calls"];
+// Always filtered on the demo mark: never an unfiltered delete.
 async function teardown() {
-  // Always filtered on the demo marks: never an unfiltered delete.
-  for (const table of ["interventions", "call_events", "offers", "load_searches", "calls"]) {
-    await run({ text: `DELETE FROM ${table} WHERE call_id LIKE 'demo-%'` });
-  }
-  await run({ text: "DELETE FROM holds WHERE call_id LIKE 'demo-%'" });
-  await run({ text: "DELETE FROM truck_capacity WHERE call_id LIKE 'demo-%'" });
+  for (const table of demoTables) await run({ text: `DELETE FROM ${table} WHERE call_id LIKE 'demo-%'` });
 }
-
-await teardown();
 if (process.argv.includes("--teardown")) {
+  await teardown();
   console.log("demo rows removed");
   process.exit(0);
 }
-type Lane = [string, string, string, string, string, string, number, string];
-const lanes: Lane[] = [
-  ["Chicago", "IL", "60601", "Dallas", "TX", "75201", 925, "DRY_VAN"],
-  ["Atlanta", "GA", "30303", "Nashville", "TN", "37203", 250, "REEFER"],
-  ["Los Angeles", "CA", "90012", "Phoenix", "AZ", "85004", 370, "DRY_VAN"],
-  ["Denver", "CO", "80202", "Kansas City", "MO", "64105", 605, "FLATBED"],
-  ["Houston", "TX", "77002", "Memphis", "TN", "38103", 565, "REEFER"],
-  ["Columbus", "OH", "43215", "Charlotte", "NC", "28202", 425, "DRY_VAN"],
-  ["Seattle", "WA", "98104", "Salt Lake City", "UT", "84101", 840, "FLATBED"],
-  ["Indianapolis", "IN", "46204", "Minneapolis", "MN", "55401", 590, "DRY_VAN"],
-  ["Philadelphia", "PA", "19103", "Pittsburgh", "PA", "15222", 305, "REEFER"],
-  ["Miami", "FL", "33101", "Atlanta", "GA", "30303", 660, "REEFER"],
-  ["Portland", "OR", "97204", "Los Angeles", "CA", "90012", 965, "DRY_VAN"],
-  ["Dallas", "TX", "75201", "Denver", "CO", "80202", 790, "FLATBED"],
-];
 
-// The TMS writes pickup times as a YYYYMMDDHHMMSS wall clock in the desk's zone.
-const wallClock = (date: Date) =>
-  new Intl.DateTimeFormat("sv-SE", { timeZone: operatorTimeZone, dateStyle: "short", timeStyle: "medium" })
-    .format(date)
-    .replaceAll(/\D/g, "");
-const roundTo25 = (value: number) => Math.round(value / 25) * 25;
-const ago = (hours: number) => `now() - ${hours} * interval '1 hour'`;
-// The fake loads carry no delivery appointment, so each gets a day per started 500 miles after
-// pickup: a window one driver makes on every demo lane, as most real loads are.
-const deliveryAfter = (pickup: Date, miles: number) => new Date(pickup.getTime() + Math.ceil(miles / 500) * 24 * 3_600_000);
+// --- the board: lanes, freight and rates ----------------------------------------------------------
 
-// The estimator create_hold uses, so demo holds show the same trip a real hold would. A lane seen
-// before reuses its route; with ORS over quota the fallback speed applies and tolls are left out.
-const trips = TripEstimator.fromConfig(env);
-const tripLog = { warn: (details: object, message: string) => console.warn(message, details) };
+const tms = new TmsClient({ host: env.TMS_HOST, port: env.TMS_PORT, token: env.TMS_TOKEN });
+const board = (await openBoard(tms, console)).filter((load) => !["HI", "AK"].includes(load.origState) && !["HI", "AK"].includes(load.destState));
+const details: LoadDetail[] = [];
+for (const load of board) {
+  // One read at a time keeps the seed far under the TMS limit of 4 per second.
+  details.push(await tms.getLoad(load.loadId));
+}
+console.log(`board: ${details.length} open loads read`);
 
-const calls: string[] = [];
-const offers: string[] = [];
-const holds: string[] = [];
-const events: string[] = [];
-const searches: string[] = [];
-let booked = 0;
+const places = new Map<string, Place>();
+for (const d of details) {
+  places.set(`${d.origCity}|${d.origState}`, { city: d.origCity, state: d.origState, zip: d.origZip });
+  places.set(`${d.destCity}|${d.destState}`, { city: d.destCity, state: d.destState, zip: d.destZip });
+}
+const placeList = [...places.values()].filter((p) => zip3Centroids.has(p.zip.slice(0, 3)));
 
-// A search that reached the board, as load_searches stores it: NULL destination or equipment asked for any.
-const search = (callId: string, hoursAgo: number, lane: (string | null)[], results: number) => {
-  const [oCity, oState, oZip, dCity, dState, dZip, equipment] = lane;
-  searches.push(
-    sql`(${callId}, ${oCity ?? null}, ${oState ?? null}, ${oZip ?? null}, ${dCity ?? null}, ${dState ?? null}, ${dZip ?? null}, ${equipment ?? null}, ${results}, `.text +
-      ago(hoursAgo - 0.04) +
-      ")",
-  );
+// Road miles from the zip3 centroids: great circle times the usual 1.2 road factor.
+function roadMiles(a: Place, b: Place): number {
+  const [lng1, lat1] = zip3Centroids.get(a.zip.slice(0, 3))!;
+  const [lng2, lat2] = zip3Centroids.get(b.zip.slice(0, 3))!;
+  const rad = Math.PI / 180;
+  const h = Math.sin(((lat2 - lat1) * rad) / 2) ** 2 + Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin(((lng2 - lng1) * rad) / 2) ** 2;
+  return Math.round(2 * 3958.8 * Math.asin(Math.sqrt(h)) * 1.2);
+}
+
+const equipmentMix: [Equipment, number][] = [["DRY_VAN", 40], ["REEFER", 25], ["FLATBED", 18], ["STEP_DECK", 7], ["POWER_ONLY", 10]];
+let seed = 20261001;
+const random = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+const pick = <T>(list: readonly T[]) => list[Math.floor(random() * list.length)]!;
+const weighted = <T>(entries: readonly [T, number][]) => {
+  let roll = random() * entries.reduce((s, [, w]) => s + w, 0);
+  for (const [v, w] of entries) if ((roll -= w) < 0) return v;
+  return entries[0]![0];
 };
 
-for (let i = 1; i <= 24; i++) {
-  const nn = String(i).padStart(2, "0");
-  const mc = String(9000000 + i);
-  const name = `Demo Freight ${nn}`;
-  const callCount = 1 + (i % 3);
-  // 3 carriers wait on a rep, 15 booked a load, 6 walked away.
-  const outcome = i % 8 === 0 ? "held" : i % 8 <= 5 ? "booked" : "lost";
-  // Of the 15 booked loads, 3 picked up long ago (arrived), 8 in the last 15 h (mostly in transit), 4 ahead.
-  const k = outcome === "booked" ? booked++ : -1;
-  const pickupOffset = k < 0 ? 24 + i : k < 3 ? -30 - k * 5 : k < 11 ? -1 - (k - 3) * 2 : 6 + (k - 11) * 10;
-  const latestAgo = outcome === "booked" && pickupOffset < 0 ? 6 - pickupOffset : 1 + ((i * 7) % 30);
+// The board's $/mile and max-buy share per equipment, so invented loads price like real ones.
+const pricing = new Map<Equipment, { perMile: number[]; maxRatio: number[] }>();
+for (const d of details) {
+  const entry = pricing.get(d.equipmentType as Equipment) ?? { perMile: [], maxRatio: [] };
+  entry.perMile.push(d.rate / d.miles);
+  entry.maxRatio.push(d.maxBuy / d.rate);
+  pricing.set(d.equipmentType as Equipment, entry);
+}
+const freight = details.map((d) => ({ commodity: d.commodity, weight: d.weight, pieces: d.pieces, notes: d.notes, equipment: d.equipmentType }));
 
-  for (let j = 0; j < callCount; j++) {
-    const latest = j === callCount - 1;
-    const callId = `demo-${nn}-${j}`;
-    const hoursAgo = latestAgo + (callCount - 1 - j) * 20;
-    const [oCity, oState, oZip, dCity, dState, dZip, miles, equipment] = lanes[(i + j) % lanes.length]!;
-    const loadId = `DM${nn}${j}`;
-    const posted = roundTo25(miles * 2.4);
-    const maxBuy = roundTo25(posted * 1.1);
-    const pickupDate = new Date(Date.now() + (latest ? pickupOffset : 48) * 3_600_000);
-    const pickupAt = wallClock(pickupDate);
-    const rounds = 1 + ((i + j) % 3);
-    const result = latest && outcome !== "lost" ? outcome : "lost";
-
-    calls.push(
-      sql`(${callId}, ${String(8000000 + i)}, ${mc}, TRUE, TRUE, ${name}, `.text + ago(hoursAgo) + ")",
-    );
-    search(callId, hoursAgo, [oCity, oState, oZip, dCity, dState, dZip, equipment], 1);
-    events.push(
-      sql`(${callId}, 'verify_carrier', ${`Verified MC ${mc}, ${name}`}, 'ok', `.text + ago(hoursAgo) + ")",
-      sql`(${callId}, 'search_loads', ${`Found ${loadId} ${oCity}, ${oState} to ${dCity}, ${dState}`}, 'ok', `.text +
-        ago(hoursAgo - 0.05) +
-        ")",
-    );
-
-    let ask = roundTo25(posted * 1.25);
-    for (let round = 1; round <= rounds; round++) {
-      const last = round === rounds;
-      const decision = last ? (result === "lost" ? "reject" : "accept") : "counter";
-      const rateToSay = decision === "accept" ? ask : roundTo25(posted + (maxBuy - posted) * (round / 3));
-      // We only counter or reject an ask above what we offer, so the decayed ask never lands below it.
-      const carrierAsk = decision === "accept" ? ask : Math.max(ask, rateToSay + 25);
-      const at = hoursAgo - 0.05 - round * 0.03;
-      offers.push(
-        sql`(${callId}, ${loadId}, ${round}, ${carrierAsk}, ${decision}, ${rateToSay}, ${posted}, ${maxBuy},
-          ${oCity}, ${oState}, ${oZip}, ${dCity}, ${dState}, ${dZip}, ${equipment}, ${miles}, ${pickupAt}, `.text +
-          ago(at) +
-          ")",
-      );
-      events.push(
-        sql`(${callId}, 'evaluate_offer', ${`${decision === "accept" ? "Accept" : decision === "reject" ? "Reject" : "Counter"} round ${round}: carrier asks $${carrierAsk.toLocaleString("en-US")}`}, 'ok', `.text +
-          ago(at) +
-          ")",
-      );
-      ask = Math.max(roundTo25(ask * 0.95), posted);
-    }
-
-    if (result !== "lost") {
-      const agreed = roundTo25(Math.min(ask, maxBuy));
-      const status = result === "held" ? "held" : "booked";
-      // Same inputs estimateLoadTrip builds from a TMS load: its lane, miles and window at the agreed rate.
-      const estimate = await trips.estimate(
-        {
-          origin: { zip: oZip, state: oState },
-          destination: { zip: dZip, state: dState },
-          miles,
-          pickupAt: pickupDate,
-          deliveryAt: deliveryAfter(pickupDate, miles),
-          rate: agreed,
-        },
-        tripLog,
-      );
-      const trip = estimate ? JSON.stringify(estimate) : null;
-      holds.push(
-        sql`(${callId}, ${loadId}, ${mc}, ${agreed}, ${status}, ${status === "booked" ? `DMB-${nn}` : null}, ${posted}, ${maxBuy}, ${trip}::jsonb, `.text +
-          `${ago(hoursAgo - 0.2)}, ${ago(hoursAgo - 0.2)})`,
-      );
-      events.push(
-        sql`(${callId}, 'create_hold', ${`${status === "booked" ? "Booked" : "Holding"} load ${loadId} at $${agreed.toLocaleString("en-US")}`}, 'ok', `.text +
-          ago(hoursAgo - 0.2) +
-          ")",
-      );
-    }
-  }
+function laneBetween(origin: Place, destination: Place, equipment: Equipment): LaneTemplate | null {
+  const miles = roadMiles(origin, destination);
+  if (miles < 150 || miles > 2600) return null;
+  const prices = pricing.get(equipment) ?? pricing.get("DRY_VAN")!;
+  // Short hauls pay more per mile, as on the board.
+  const perMile = pick(prices.perMile) * (miles < 400 ? 1.25 : miles > 1500 ? 0.92 : 1);
+  const cargo = pick(freight.filter((f) => f.equipment === equipment).length > 0 ? freight.filter((f) => f.equipment === equipment) : freight);
+  return { origin, destination, miles, equipment, ratePerMile: perMile, maxBuyRatio: pick(prices.maxRatio), commodity: cargo.commodity, weight: cargo.weight, pieces: cargo.pieces, notes: cargo.notes };
 }
 
-// History for the carrier network, on carriers that exist only in past weeks so every view has rows:
-// days ago per call and whether it booked. Each call searched, got one offer on its lane and either
-// booked it or walked away. The Top carriers run lane 1 (Atlanta REEFER) and book it more than twice,
-// so they read as Growth only while the TMS board has an open GA REEFER load; the seed does not post one.
-type History = { lane: number; calls: [daysAgo: number, booked: boolean][] };
-const history: History[] = [
-  // At risk: booked 3 to 7 weeks ago, silent in the last 14 days.
-  ...[0, 1, 2, 3].map((n) => ({ lane: 4 + n, calls: [[22 + n * 5, true], [26 + n * 5, false], [30 + n * 5, true], [34 + n * 5, false]] as History["calls"] })),
-  // At risk: calls down, 1 in the last 14 days against 6 in the 14 days before.
-  ...[0, 1].map((n) => ({ lane: 8 + n, calls: [[3, false], [15, true], [17, false], [19, false], [21, false], [24, false], [27 - n, false]] as History["calls"] })),
-  // Top: 3 of 4 negotiated calls booked in the last 30 days.
-  ...[0, 1, 2].map((n) => ({ lane: 1, calls: [[2 + n, true], [6 + n, true], [10 + n, false], [20 + n, true]] as History["calls"] })),
-];
-history.forEach(({ lane, calls: past }, h) => {
-  const nn = String(25 + h);
-  const mc = String(9000000 + 25 + h);
-  const name = `Demo Freight ${nn}`;
-  const [oCity, oState, oZip, dCity, dState, dZip, miles, equipment] = lanes[lane]!;
-  const posted = roundTo25(miles * 2.4);
-  const maxBuy = roundTo25(posted * 1.1);
-  past.forEach(([daysAgo, didBook], j) => {
-    const callId = `demo-h${nn}-${j}`;
-    const loadId = `DMH${nn}${j}`;
-    const hoursAgo = daysAgo * 24;
-    const pickupAt = wallClock(new Date(Date.now() - (hoursAgo - 48) * 3_600_000));
-    calls.push(sql`(${callId}, ${String(8000000 + 25 + h)}, ${mc}, TRUE, TRUE, ${name}, `.text + ago(hoursAgo) + ")");
-    search(callId, hoursAgo, [oCity, oState, oZip, dCity, dState, dZip, equipment], 1);
-    // A lost call is a carrier holding out above our ceiling after we offered max buy.
-    const carrierAsk = didBook ? posted : Math.max(roundTo25(maxBuy * 1.1), maxBuy + 25);
-    offers.push(
-      sql`(${callId}, ${loadId}, 1, ${carrierAsk}, ${didBook ? "accept" : "reject"}, ${didBook ? posted : maxBuy}, ${posted}, ${maxBuy},
-        ${oCity}, ${oState}, ${oZip}, ${dCity}, ${dState}, ${dZip}, ${equipment}, ${miles}, ${pickupAt}, `.text +
-        ago(hoursAgo - 0.1) +
-        ")",
-    );
-    if (didBook) {
-      holds.push(
-        sql`(${callId}, ${loadId}, ${mc}, ${posted}, 'booked', ${`DMB-H${nn}${j}`}, ${posted}, ${maxBuy}, NULL::jsonb, `.text +
-          `${ago(hoursAgo - 0.2)}, ${ago(hoursAgo - 0.2)})`,
-      );
-    }
-  });
-});
+const lanes: LaneTemplate[] = details.map((d) => ({
+  origin: { city: d.origCity, state: d.origState, zip: d.origZip },
+  destination: { city: d.destCity, state: d.destState, zip: d.destZip },
+  miles: d.miles,
+  equipment: d.equipmentType as Equipment,
+  ratePerMile: d.rate / d.miles,
+  maxBuyRatio: d.maxBuy / d.rate,
+  commodity: d.commodity,
+  weight: d.weight,
+  pieces: d.pieces,
+  notes: d.notes,
+}));
+while (lanes.length < 160) {
+  const lane = laneBetween(pick(placeList), pick(placeList), weighted(equipmentMix));
+  if (lane) lanes.push(lane);
+}
 
-// Unmet demand for the radar: extra calls from existing carriers whose searches found nothing.
-// REEFER Houston to Atlanta by 4 carriers, FLATBED out of Denver to anywhere by 2, spread over two weeks.
-const houstonAtlantaReefer = ["Houston", "TX", "77002", "Atlanta", "GA", "30303", "REEFER"];
-const denverFlatbedAnywhere = ["Denver", "CO", "80202", null, null, null, "FLATBED"];
-const unmet: [carrier: number, daysAgo: number, lane: (string | null)[]][] = [
-  [2, 1, houstonAtlantaReefer],
-  [2, 4, houstonAtlantaReefer],
-  [2, 9, houstonAtlantaReefer],
-  [5, 2, houstonAtlantaReefer],
-  [5, 10, houstonAtlantaReefer],
-  [11, 3, houstonAtlantaReefer],
-  [14, 11, houstonAtlantaReefer],
-  [11, 6, houstonAtlantaReefer],
-  [14, 5, houstonAtlantaReefer],
-  [17, 1, denverFlatbedAnywhere],
-  [17, 8, denverFlatbedAnywhere],
-  [20, 5, denverFlatbedAnywhere],
-];
-unmet.forEach(([i, daysAgo, lane], k) => {
-  const nn = String(i).padStart(2, "0");
-  const callId = `demo-s${nn}-${k}`;
-  calls.push(sql`(${callId}, ${String(8000000 + i)}, ${String(9000000 + i)}, TRUE, TRUE, ${`Demo Freight ${nn}`}, `.text + ago(daysAgo * 24) + ")");
-  search(callId, daysAgo * 24, lane, 0);
-});
+// Lanes carriers ask for that the board has nothing for, by origin state and equipment, for the demand radar.
+const covered = new Set(details.map((d) => `${d.origState}|${d.equipmentType}`));
+const unmetLanes = lanes.filter((l) => !covered.has(`${l.origin.state}|${l.equipment}`)).slice(0, 6);
 
-await run({
-  text: `INSERT INTO calls (call_id, dot_number, mc_number, eligible, verified, carrier_name, created_at) VALUES ${calls.join(", ")}`,
-});
-await run({
-  text: `INSERT INTO offers (call_id, load_id, round, carrier_ask, decision, rate_to_say, posted_rate, max_buy,
-    origin_city, origin_state, origin_zip, destination_city, destination_state, destination_zip, equipment, miles, pickup_at, created_at)
-    VALUES ${offers.join(", ")}`,
-});
-await run({
-  text: `INSERT INTO holds (call_id, load_id, mc_number, agreed_rate, status, booking_ref, posted_rate, max_buy, trip, created_at, updated_at)
-    VALUES ${holds.join(", ")}`,
-});
-await run({
-  text: `INSERT INTO load_searches (call_id, origin_city, origin_state, origin_zip, destination_city, destination_state, destination_zip, equipment, results, created_at)
-    VALUES ${searches.join(", ")}`,
-});
-await run({ text: `INSERT INTO call_events (call_id, tool, summary, status, created_at) VALUES ${events.join(", ")}` });
-// Capacity: 3 trucks that fit a real OPEN load on the board and 1 in a state with none, read the way
-// openLanes reads the board. fitsTruck picks them, so the capacity page lists the same loads.
-const tmsEnv = z
-  .object({ TMS_HOST: z.string().min(1), TMS_PORT: z.coerce.number().int().positive(), TMS_TOKEN: z.string().min(1) })
-  .safeParse(process.env);
-const capacity: string[] = [];
-if (!tmsEnv.success) {
-  console.warn("TMS_HOST/TMS_PORT/TMS_TOKEN missing: capacity trucks skipped");
-} else {
-  const tms = new TmsClient({ host: tmsEnv.data.TMS_HOST, port: tmsEnv.data.TMS_PORT, token: tmsEnv.data.TMS_TOKEN });
-  const board = await openBoard(tms, console);
-  const today = deskToday(new Date());
-  const isoDay = (wire: string) => `${wire.slice(0, 4)}-${wire.slice(4, 6)}-${wire.slice(6, 8)}`;
-  const open = board.filter((load) => isoDay(load.pickupDateTime) >= today);
-  // The page hides a load with a live hold, so a truck fitted only to one would show nothing.
-  const held =
-    open.length === 0
-      ? new Set<string>()
-      : new Set(
-          (
-            await twin.query(
-              sql`SELECT load_id FROM holds WHERE load_id IN (${open.map((load) => load.loadId)}) AND status <> 'released'`,
-              z.object({ load_id: z.string() }),
-            )
-          ).map((row) => row.load_id),
-        );
+const today = new Date();
+// A load another call holds cannot take a demo hold too (one active hold per load).
+const held = new Set(
+  (
+    await twin.query(
+      sql`SELECT load_id FROM holds WHERE load_id IN (${details.map((d) => d.loadId)}) AND status <> 'released'`,
+      z.object({ load_id: z.string() }),
+    )
+  ).map((row) => row.load_id),
+);
+const liveLoads: LiveLoad[] = details
+  .filter((d) => !held.has(d.loadId) && tmsDate(d.pickupDateTime) > new Date(today.getTime() + 6 * 3_600_000))
+  .slice(0, 8)
+  .map((d) => ({
+    ...lanes.find((l) => l.origin.zip === d.origZip && l.destination.zip === d.destZip && l.miles === d.miles)!,
+    loadId: d.loadId,
+    rate: d.rate,
+    maxBuy: d.maxBuy,
+    pickupAt: tmsDate(d.pickupDateTime).toISOString(),
+    deliveryAt: tmsDate(d.deliveryDateTime).toISOString(),
+  }));
 
-  type Truck = { city: string; state: string; equipment: string | null; freeDate: string; preferred: string | null };
-  const trucks: Truck[] = [];
-  for (const load of open.filter((candidate) => !held.has(candidate.loadId))) {
-    if (trucks.length === 3) break;
-    // One truck per origin state, so each row of the page shows a different board.
-    if (trucks.some((truck) => truck.state === load.origState)) continue;
-    const pickupDay = isoDay(load.pickupDateTime);
-    const truck = { city: load.origCity, state: load.origState, equipment: load.equipmentType, freeDate: pickupDay, preferred: trucks.length === 0 ? load.destState : null };
-    if (fitsTruck(truck, load)) trucks.push(truck);
-  }
-  if (trucks.length < 3) console.warn(`only ${trucks.length} capacity truck(s) fit an open load on the board`);
-  // A truck no load on the board fits, any equipment, so the page also shows the empty case.
-  const quietStates: [city: string, state: string][] = [
-    ["Burlington", "VT"],
-    ["Bangor", "ME"],
-    ["Cheyenne", "WY"],
-    ["Fargo", "ND"],
-    ["Sioux Falls", "SD"],
-    ["Billings", "MT"],
-  ];
-  const quiet = quietStates.find(([, state]) => !board.some((load) => fitsTruck({ state, equipment: null, freeDate: today }, load)));
-  if (quiet) trucks.push({ city: quiet[0], state: quiet[1], equipment: null, freeDate: today, preferred: null });
 
-  const noticeEmail = env.DEMO_NOTICE_EMAIL ?? null;
-  const capacityCalls: string[] = [];
-  trucks.forEach((truck, n) => {
-    const i = n + 1;
-    const nn = String(i).padStart(2, "0");
-    const callId = `demo-c${nn}`;
-    const mc = String(9000000 + i);
-    const hoursAgo = 2 + n * 3;
-    capacityCalls.push(
-      sql`(${callId}, ${String(8000000 + i)}, ${mc}, TRUE, TRUE, ${`Demo Freight ${nn}`}, 'email', ${noticeEmail}, `.text + ago(hoursAgo) + ")",
-    );
-    capacity.push(
-      sql`(${callId}, ${mc}, ${truck.city}, ${truck.state}, ${truck.equipment}, ${truck.freeDate}::date, ${truck.preferred}, `.text +
-        ago(hoursAgo - 0.1) +
-        ")",
-    );
-  });
-  if (capacity.length > 0) {
-    await run({
-      text: `INSERT INTO calls (call_id, dot_number, mc_number, eligible, verified, carrier_name, otp_channel, otp_destination, created_at)
-        VALUES ${capacityCalls.join(", ")}`,
-    });
-    await run({
-      text: `INSERT INTO truck_capacity (call_id, mc_number, city, state, equipment, free_date, preferred_destination_state, created_at)
-        VALUES ${capacity.join(", ")}`,
+// --- carriers: some real ones from FMCSA, the rest invented -------------------------------------
+
+const fmcsa = new FmcsaClient({ webKey: env.FMCSA_API_KEY });
+const nameSearch = z.object({ content: z.array(z.object({ carrier: z.object({ dotNumber: z.number(), phyState: z.string().nullish(), totalPowerUnits: z.number().nullish() }) })).nullish() });
+const realCarriers: DemoCarrier[] = [];
+const contacts = ["Mike", "Carlos", "Dave", "Jessica", "Raj", "Andre", "Luis", "Brian", "Maria", "Sergei", "Kevin", "Tasha", "Omar", "Jake", "Priya", "Tony", "Darnell", "Gabe", "Nikolai", "Rosa", "Steve", "Ahmed", "Lena", "Marcus"];
+const cadences: [DemoCarrier["cadence"], number][] = [["top", 8], ["regular", 30], ["occasional", 40], ["lapsed", 10], ["new", 12]];
+const homeFor = (state: string | null | undefined) => placeList.find((p) => p.state === state) ?? pick(placeList);
+
+for (const keyword of ["express", "transport", "trucking", "freight", "logistics", "carriers", "hauling", "transportation", "lines", "brothers"]) {
+  if (realCarriers.length >= 26) break;
+  const response = await fetch(`https://mobile.fmcsa.dot.gov/qc/services/carriers/name/${keyword}?webKey=${env.FMCSA_API_KEY}&size=40`);
+  const found = nameSearch.parse(await response.json()).content ?? [];
+  const candidates = found.map((f) => f.carrier).filter((c) => (c.totalPowerUnits ?? 0) >= 2 && (c.totalPowerUnits ?? 0) <= 80);
+  for (const candidate of candidates.slice(0, 15)) {
+    if (realCarriers.length >= 26) break;
+    const dot = String(candidate.dotNumber);
+    const carrier: FmcsaCarrier | null = await fmcsa.carrierByDot(dot);
+    if (!carrier) continue;
+    const [authorities, outOfService] = await Promise.all([fmcsa.authorities(dot), fmcsa.outOfServiceOrders(dot)]);
+    const mc = authorities.find((a) => a.prefix === "MC" && a.docketNumber != null)?.docketNumber;
+    if (mc == null) continue;
+    const verdict = verifyCarrier({ match: "one", carrier, authorities, outOfService, contact: null, now: today });
+    // Keep a few the desk would turn away, most of them eligible.
+    if (verdict.status !== "ok" && realCarriers.filter((c) => c.status !== "ok").length >= 5) continue;
+    realCarriers.push({
+      mc: String(mc),
+      dot,
+      name: carrier.legalName ?? carrier.dbaName ?? `DOT ${dot}`,
+      real: true,
+      status: verdict.status,
+      equipment: weighted(equipmentMix),
+      home: homeFor(candidate.phyState),
+      contact: pick(contacts),
+      cadence: weighted(cadences),
     });
   }
 }
+console.log(`fmcsa: ${realCarriers.length} real carriers, ${realCarriers.filter((c) => c.status !== "ok").length} not cleared`);
 
-console.log(`seeded ${calls.length} calls, ${offers.length} offers, ${holds.length} holds, ${searches.length} searches, ${events.length} events, ${capacity.length} capacity trucks`);
+const firstWords = ["Ridgeline", "Blue Ox", "Prairie Wind", "Iron Horse", "Lone Star", "Cascade", "Great Lakes", "Sunbelt", "Keystone", "Red River", "Summit", "Patriot", "Silver Creek", "Gulf Coast", "Heartland", "Copperline", "Northbound", "Liberty", "Eagle Ridge", "Pine Valley", "Big Sky", "Bayou", "Granite", "Trinity", "Apex", "Frontier", "Coastal", "Twin Peaks", "Rio Grande", "Badger State", "Hoosier", "Buckeye", "Magnolia", "Palmetto", "Ozark", "Sierra", "Timberline", "Desert Sun", "Blackwater", "Crossroads", "Harbor", "Longhorn", "Mesa", "Cumberland", "Tidewater", "Brazos", "Wolf Creek", "High Plains"];
+const suffixes = ["Transport LLC", "Trucking Inc", "Logistics LLC", "Freight Lines Inc", "Carriers LLC", "Express Inc", "Hauling LLC", "Transportation Co"];
+const invented: DemoCarrier[] = [];
+const usedNames = new Set<string>();
+while (invented.length < 96) {
+  const name = `${pick(firstWords)} ${pick(suffixes)}`;
+  if (usedNames.has(name)) continue;
+  usedNames.add(name);
+  invented.push({
+    // Above every MC and DOT issued so far, so no invented carrier shares a real one's number.
+    mc: String(2_100_000 + Math.floor(random() * 800_000)),
+    dot: String(5_100_000 + Math.floor(random() * 800_000)),
+    name,
+    real: false,
+    status: random() < 0.03 ? "needs_review" : "ok",
+    equipment: weighted(equipmentMix),
+    home: pick(placeList),
+    contact: pick(contacts),
+    cadence: weighted(cadences),
+  });
+}
+
+// --- generate and write -------------------------------------------------------------------------
+
+const trips = TripEstimator.fromConfig(env);
+const tripLog = { warn: (_details: object, message: string) => console.warn(message) };
+// ORS free directions allow 40 a minute: one estimate at a time, a new lane 1.6 s after the last; the estimator caches each lane.
+let tripQueue = Promise.resolve<unknown>(undefined);
+const throttledEstimate = (trip: Parameters<typeof trips.estimate>[0]) => {
+  const next = tripQueue.then(async () => {
+    const started = Date.now();
+    const snapshot = await trips.estimate(trip, tripLog);
+    // A cached lane answers in a few milliseconds and needs no gap.
+    const took = Date.now() - started;
+    if (took > 150) await new Promise((resolve) => setTimeout(resolve, Math.max(0, 1_600 - took)));
+    return snapshot;
+  });
+  tripQueue = next;
+  return next;
+};
+const dataset = await buildDataset({
+  now: today,
+  days: 60,
+  seed: 20261001,
+  carriers: [...realCarriers, ...invented],
+  lanes,
+  unmetLanes,
+  liveLoads,
+  estimate: throttledEstimate,
+  noticeEmail: env.DEMO_NOTICE_EMAIL ?? null,
+});
+
+// Batched multi-row inserts; every value goes through the sql tag's escaping.
+async function insert(table: string, rows: Row[], casts: Record<string, string> = {}) {
+  if (rows.length === 0) return;
+  const columns = Object.keys(rows[0]!);
+  for (let i = 0; i < rows.length; i += 400) {
+    const values = rows
+      .slice(i, i + 400)
+      .map((row) => `(${columns.map((c) => sql`${row[c] ?? null}`.text + (casts[c] ?? "")).join(", ")})`)
+      .join(", ");
+    await run({ text: `INSERT INTO ${table} (${columns.join(", ")}) VALUES ${values}` });
+  }
+}
+
+const counts = Object.entries(dataset)
+  .map(([table, rows]) => `${rows.length} ${table}`)
+  .join(", ");
+if (process.argv.includes("--dry-run")) {
+  const sample = dataset.holds.find((h) => dataset.offers.filter((o) => o.call_id === h.call_id).length >= 2)?.call_id;
+  for (const t of dataset.transcripts.filter((t) => t.call_id === sample)) console.log(`${String(t.at).slice(11, 19)} ${String(t.role).padEnd(7)} ${t.text}`);
+  console.log(`dry run, nothing written: ${counts}`);
+  process.exit(0);
+}
+
+await teardown();
+await insert("calls", dataset.calls);
+await insert("offers", dataset.offers);
+await insert("holds", dataset.holds, { trip: "::jsonb" });
+await insert("load_searches", dataset.searches);
+await insert("truck_capacity", dataset.capacity, { free_date: "::date" });
+await insert("interventions", dataset.interventions);
+await insert("call_events", dataset.events);
+await insert("call_transcripts", dataset.transcripts);
+
+console.log(`seeded ${counts}`);

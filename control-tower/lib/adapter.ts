@@ -8,6 +8,7 @@ import {
   adapterDemandResponse,
   adapterLoadsResponse,
   adapterNetworkResponse,
+  adapterTranscriptResponse,
   adapterWallResponse,
   autonomyModes,
   confirmHoldResponse,
@@ -15,6 +16,7 @@ import {
   releaseHoldResponse,
   type AdapterCarrierCallsResponse,
   type AdapterCarriersResponse,
+  type AdapterTranscriptResponse,
   type AutonomyMode,
   type ConfirmHoldResponse,
   type ErrorResponse,
@@ -81,6 +83,10 @@ async function read<T>(path: string, schema: z.ZodType<T>, unavailableMessage: s
   const parsed = schema.safeParse(await json(response));
   if (!parsed.success) return unavailable(unavailableMessage);
   return { ok: true, httpStatus: 200, body: parsed.data };
+}
+
+export async function getTranscript(callId: string): Promise<AdapterResult<AdapterTranscriptResponse>> {
+  return read(`/v1/operator/calls/${encodeURIComponent(callId)}/transcript`, adapterTranscriptResponse, "The transcript is unavailable right now.");
 }
 
 export async function getLoads(): Promise<AdapterResult<TowerLoads>> {

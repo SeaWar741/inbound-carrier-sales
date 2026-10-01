@@ -622,6 +622,13 @@ export const operatorCarriersResponse = z.object({
 export type OperatorCarriersResponse = z.infer<typeof operatorCarriersResponse>;
 
 export const operatorCarrierCallsParams = z.object({ key: z.string().trim().min(1).max(128) });
+
+export const operatorCallTranscriptParams = z.object({ callId: z.string().trim().min(1).max(128) });
+// In call order; an unknown call or one with no stored conversation answers an empty list.
+export const operatorCallTranscriptResponse = z.object({
+  status: z.literal("ok"),
+  entries: z.array(z.object({ seq: z.number().int(), role: z.enum(["agent", "carrier", "tool", "signal"]), text: z.string(), at: z.string() })),
+});
 // The carrier summary reads the same window and live calls as the list, so it matches the carrier's row.
 export const operatorCarrierCallsQuery = withDayRange(operatorCarriersFields.pick({ since: true, from: true, to: true, live: true }));
 export type OperatorCarrierCallsQuery = z.output<typeof operatorCarrierCallsQuery>;
