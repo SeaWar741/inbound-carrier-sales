@@ -104,3 +104,6 @@ export const tripVendorTimeoutMs = 4_500;
 
 // Below this, tolls are spoken as "next to nothing" rather than "about $3 in tolls", which reads oddly aloud.
 export const tollsSpokenFloorUsd = 20;
+
+// Capacity capture: a truck fits loads picking up from its free date through this many days after (JC's number).
+export const capacityWindowDays = 2;

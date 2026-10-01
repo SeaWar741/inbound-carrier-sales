@@ -17,6 +17,7 @@ const toolNames: Record<string, string> = {
   "/v1/offers/evaluate": "evaluate_offer",
   "/v1/holds": "create_hold",
   "/v1/trips/estimate": "get_trip_estimate",
+  "/v1/capacity": "save_capacity",
 };
 
 // Only the routes named above are recorded. request_human is absent on purpose: its route

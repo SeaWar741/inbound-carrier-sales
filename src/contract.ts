@@ -255,6 +255,27 @@ export const createHoldResponse = z.object({
 });
 export type CreateHoldResponse = z.infer<typeof createHoldResponse>;
 
+// Flat fields like searchLoadsBody. Consent is a tool string: only an explicit yes counts.
+export const saveCapacityBody = z.object({
+  callId,
+  city: cityInput,
+  state: stateInput,
+  freeDate: z.iso.date(),
+  equipmentType: optionalEquipment,
+  preferredDestinationState: optionalField(stateInput),
+  consent: z.preprocess(
+    (value) => value === true || (typeof value === "string" && /^\s*(yes|true)\s*$/i.test(value)),
+    z.boolean(),
+  ),
+});
+export type SaveCapacityBody = z.output<typeof saveCapacityBody>;
+
+export const saveCapacityResponse = z.object({
+  status: z.enum(["ok", "not_verified", "no_consent", "invalid_request", "service_unavailable"]),
+  message: z.string(),
+});
+export type SaveCapacityResponse = z.infer<typeof saveCapacityResponse>;
+
 export const confirmHoldParams = z.object({ holdId: z.uuid() });
 
 // Other headers pass through untouched; only the key is required.

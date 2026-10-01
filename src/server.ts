@@ -11,6 +11,7 @@ import { TripEstimator } from "./infra/trip-estimator.ts";
 import { TwinClient } from "./infra/twin-client.ts";
 import { requireApiKey } from "./plugins/auth.ts";
 import { recordCallEvents, type CallEventDeps } from "./plugins/call-events.ts";
+import { capacityRoutes } from "./routes/capacity.ts";
 import { carrierRoutes } from "./routes/carriers.ts";
 import { handoffRoutes } from "./routes/handoff.ts";
 import { healthRoutes } from "./routes/health.ts";
@@ -86,6 +87,7 @@ if (import.meta.main) {
       tripRoutes({ tms, twin, trips }),
       holdRoutes({ tms, twin, trips, delivery }),
       handoffRoutes({ twin }),
+      capacityRoutes({ twin }),
     ],
     operatorRoutes: [confirmHoldRoutes({ tms, twin, delivery }), releaseHoldRoutes({ twin, delivery }), operatorWallRoutes({ twin, tmsHealth }), operatorInboxRoutes({ twin }), operatorNetworkRoutes({ twin, tms })],
   }, { twin });

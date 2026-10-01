@@ -90,6 +90,21 @@ export const tableDdl = {
     dropped_impossible int8 NOT NULL DEFAULT 0,
     created_at timestamp NOT NULL DEFAULT now()
   )`,
+  // One truck per call that agreed to be contacted: where and when it frees up (NULL equipment means any).
+  // notified_* is set once a matching load is sent, so a carrier is never told twice.
+  truck_capacity: `CREATE TABLE IF NOT EXISTS truck_capacity (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    call_id text NOT NULL UNIQUE,
+    mc_number text NOT NULL,
+    city text NOT NULL,
+    state text NOT NULL,
+    equipment text,
+    free_date date NOT NULL,
+    preferred_destination_state text,
+    notified_load_id text,
+    notified_at timestamp,
+    created_at timestamp NOT NULL DEFAULT now()
+  )`,
 } as const;
 
 // Changes to tables that already exist; each statement is idempotent and runs on every bootstrap.
@@ -157,3 +172,33 @@ export const holdRowSchema = z
     updatedAt: r.updated_at,
   }));
 export type HoldRow = z.output<typeof holdRowSchema>;
+
+export const truckCapacityRowSchema = z
+  .object({
+    id: z.string(),
+    call_id: z.string(),
+    mc_number: z.string(),
+    city: z.string(),
+    state: z.string(),
+    equipment: z.string().nullable(),
+    // Read as the calendar day YYYY-MM-DD, never as a Date, so no time zone can shift it.
+    free_date: z.string().transform((value) => value.slice(0, 10)),
+    preferred_destination_state: z.string().nullable(),
+    notified_load_id: z.string().nullable(),
+    notified_at: timestamp.nullable(),
+    created_at: timestamp,
+  })
+  .transform((r) => ({
+    id: r.id,
+    callId: r.call_id,
+    mcNumber: r.mc_number,
+    city: r.city,
+    state: r.state,
+    equipment: r.equipment,
+    freeDate: r.free_date,
+    preferredDestinationState: r.preferred_destination_state,
+    notifiedLoadId: r.notified_load_id,
+    notifiedAt: r.notified_at,
+    createdAt: r.created_at,
+  }));
+export type TruckCapacityRow = z.output<typeof truckCapacityRowSchema>;
