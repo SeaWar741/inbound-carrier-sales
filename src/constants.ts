@@ -107,6 +107,8 @@ export const tollsSpokenFloorUsd = 20;
 
 // Capacity capture: a truck fits loads picking up from its free date through this many days after (JC's number).
 export const capacityWindowDays = 2;
+// A notice older than this is not brought up when the carrier calls back (JC's number).
+export const noticeCallbackDays = 3;
 // The capacity page lists the newest active trucks only. The board read is shared by all of them, so this
 // bounds the panel and the holds lookup, not the TMS calls.
 export const capacityTrucksShown = 20;

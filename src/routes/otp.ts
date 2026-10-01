@@ -1,21 +1,25 @@
-import type { FastifyPluginAsync } from "fastify";
+import type { FastifyBaseLogger, FastifyPluginAsync } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import type { Config } from "../config.ts";
-import { otpMaxSendsPerDotPerHour, otpTtlSeconds } from "../constants.ts";
+import { noticeCallbackDays, otpMaxSendsPerDotPerHour, otpTtlSeconds } from "../constants.ts";
 import { checkOtpBody, checkOtpResponse, sendOtpBody, sendOtpResponse, type CheckOtpResponse, type SendOtpResponse } from "../contract.ts";
 import { checkCode, generateCode, hashCode } from "../domain/otp.ts";
 import { maskEmail, maskPhone } from "../domain/verification.ts";
 import type { CensusClient } from "../infra/census-client.ts";
 import type { OtpChannel, OtpDeliveryClient } from "../infra/otp-delivery-client.ts";
+import { TmsBusinessError } from "../infra/tms/errors.ts";
+import type { TmsClient } from "../infra/tms/tms-client.ts";
 import { sql, type TwinClient } from "../infra/twin-client.ts";
 import { invalidRequestHandler } from "../plugins/invalid-request.ts";
+import { loadsHeldByOtherCalls } from "./loads.ts";
 
 export type OtpRouteDeps = {
   config: Pick<Config, "OTP_DELIVERY_MODE" | "OTP_DEMO_EMAIL" | "OTP_DEMO_PHONE" | "OTP_HASH_SECRET" | "OTP_FIXED_CODE">;
   census: Pick<CensusClient, "contactByDot">;
   delivery: Pick<OtpDeliveryClient, "send" | "supports">;
   twin: Pick<TwinClient, "query">;
+  tms: Pick<TmsClient, "getLoad">;
 };
 
 const messages = {
@@ -46,6 +50,7 @@ const notVerified = (status: Exclude<CheckOtpResponse["status"], "ok">, message:
   message,
   verified: false,
   attemptsLeft,
+  notifiedLoadIds: [],
 });
 
 const codeMessage = (code: string) => ({
@@ -73,6 +78,37 @@ const challengeRow = z.object({
   otp_attempts: z.coerce.number().int(),
   db_now: z.coerce.date(),
 });
+
+// Loads we notified this carrier about lately that are still OPEN and not held by another call, newest first.
+// Capped at 3 because each is one TMS read on the login path. Any failure only means the agent does not bring
+// them up, so it never blocks verification.
+async function notifiedLoadIds(deps: OtpRouteDeps, callId: string, mcNumber: string | null, log: FastifyBaseLogger): Promise<string[]> {
+  if (mcNumber === null) return [];
+  try {
+    const rows = await deps.twin.query(
+      sql`SELECT notified_load_id FROM truck_capacity
+          WHERE mc_number = ${mcNumber} AND notified_load_id IS NOT NULL
+            AND notified_at::timestamptz > now() - ${noticeCallbackDays} * interval '1 day'
+          ORDER BY notified_at DESC LIMIT 3`,
+      z.object({ notified_load_id: z.string() }),
+    );
+    const ids = [...new Set(rows.map((row) => row.notified_load_id))];
+    const loads = await Promise.all(
+      ids.map((id) =>
+        deps.tms.getLoad(id).catch((error: unknown) => {
+          if (error instanceof TmsBusinessError) return undefined;
+          throw error;
+        }),
+      ),
+    );
+    const open = ids.filter((_, i) => loads[i]?.status === "OPEN");
+    const held = await loadsHeldByOtherCalls(deps.twin, callId, open);
+    return open.filter((id) => !held.has(id));
+  } catch (error) {
+    log.warn({ err: error }, "notified loads unavailable");
+    return [];
+  }
+}
 
 export function otpRoutes(deps: OtpRouteDeps): FastifyPluginAsync {
   async function destinationFor(channel: OtpChannel, dotNumber: string): Promise<string | undefined> {
@@ -174,13 +210,19 @@ export function otpRoutes(deps: OtpRouteDeps): FastifyPluginAsync {
         }
 
         // Only the challenge just compared is spent; one replaced or cleared meanwhile verifies nothing.
-        const spent = await deps.twin.query(
+        const [spent] = await deps.twin.query(
           sql`UPDATE calls SET verified = TRUE, otp_hash = NULL
-              WHERE call_id = ${callId} AND otp_hash = ${submittedHash} RETURNING call_id`,
-          z.unknown(),
+              WHERE call_id = ${callId} AND otp_hash = ${submittedHash} RETURNING mc_number`,
+          z.object({ mc_number: z.string().nullable() }),
         );
-        if (spent.length === 0) return notVerified("no_active_code", messages.noActiveCode);
-        return { status: "ok" as const, message: messages.verified, verified: true, attemptsLeft: null };
+        if (!spent) return notVerified("no_active_code", messages.noActiveCode);
+        return {
+          status: "ok" as const,
+          message: messages.verified,
+          verified: true,
+          attemptsLeft: null,
+          notifiedLoadIds: await notifiedLoadIds(deps, callId, spent.mc_number, request.log),
+        };
       } catch (error) {
         request.log.warn({ err: error }, "otp check unavailable");
         return notVerified("service_unavailable", messages.serviceUnavailable);

@@ -46,7 +46,7 @@ async function isCallVerified(twin: TwinClient, callId: string): Promise<boolean
 }
 
 // One query for the whole list: a load another call is holding is not pitched.
-async function loadsHeldByOtherCalls(twin: TwinClient, callId: string, loadIds: string[]): Promise<Set<string>> {
+export async function loadsHeldByOtherCalls(twin: Pick<TwinClient, "query">, callId: string, loadIds: string[]): Promise<Set<string>> {
   if (loadIds.length === 0) return new Set();
   const rows = await twin.query(
     sql`SELECT load_id FROM holds WHERE load_id IN (${loadIds}) AND status <> 'released' AND call_id <> ${callId}`,

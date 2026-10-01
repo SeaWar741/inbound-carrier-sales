@@ -229,6 +229,8 @@ export const checkOtpResponse = z.object({
   message: z.string(),
   verified: z.boolean(),
   attemptsLeft: z.number().int().nullable(),
+  // Loads we notified this carrier about that are still bookable, newest first; [] on every answer but ok.
+  notifiedLoadIds: z.array(z.string()),
 });
 export type CheckOtpResponse = z.infer<typeof checkOtpResponse>;
 

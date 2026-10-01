@@ -81,7 +81,7 @@ if (import.meta.main) {
   const app = buildServer(config, {
     agentRoutes: [
       carrierRoutes({ config, fmcsa, census, twin }),
-      otpRoutes({ config, census, delivery, twin }),
+      otpRoutes({ config, census, delivery, twin, tms }),
       loadRoutes({ tms, twin, trips }),
       offerRoutes({ tms, twin }),
       tripRoutes({ tms, twin, trips }),
