@@ -106,7 +106,7 @@ export function KpiTiles({ loads, counters }: { loads: TowerLoad[] | null; count
 
   return (
     <section aria-label="Key numbers" aria-live="polite">
-      <dl className="grid grid-cols-[repeat(4,minmax(0,1fr))_minmax(0,1.6fr)] gap-3">
+      <dl className="grid grid-cols-[repeat(5,minmax(0,1fr))_minmax(0,1.6fr)] gap-3">
         <Tile label="Dollars in motion" value={loads === null ? "-" : formatUsd(dollarsInMotion)} hint="Agreed rate of loads in transit" />
         <Tile label="Loads in motion" value={counts === null ? "-" : String(counts.in_transit)} hint={`${counts?.upcoming ?? 0} more picking up soon`} />
         <Tile
@@ -118,6 +118,13 @@ export function KpiTiles({ loads, counters }: { loads: TowerLoad[] | null; count
           label="Win rate today"
           value={winRate}
           hint={counters === null ? "" : `${counters.booked} booked of ${counters.offered} offered · ${counters.calls} calls`}
+        />
+        <Tile
+          label="Trucks captured · 7d"
+          value={counters === null ? "-" : String(counters.capacity.captured)}
+          hint={
+            counters === null ? "" : `${counters.capacity.notified} notified · ${counters.capacity.bookedAfterNotice} booked after notice`
+          }
         />
         <TripSplit counts={counts} />
       </dl>
