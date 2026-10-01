@@ -236,6 +236,16 @@ export function encodeQueryFilters(filters: LoadQueryFilters): Record<string, st
 
 export const loadIdInput = z.string().trim().toUpperCase().regex(/^[A-Z0-9]{1,12}$/);
 
+// A carrier reads a load number as "905", "LD 905" or "L-D-0-0-9-0-5"; board ids are LD plus five digits.
+export const spokenLoadId = z
+  .string()
+  .transform((value) => {
+    const compact = value.replace(/[\s-]/g, "").toUpperCase();
+    const digits = /^(?:LD)?(\d{1,5})$/.exec(compact)?.[1];
+    return digits === undefined ? compact : `LD${digits.padStart(5, "0")}`;
+  })
+  .pipe(loadIdInput);
+
 export const bookingInput = z.object({
   loadId: loadIdInput,
   mcNumber: z.string().trim().regex(/^\d{1,8}$/),

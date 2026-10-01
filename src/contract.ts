@@ -3,7 +3,7 @@ import { maxAuthorizationUsd, otpDigits } from "./constants.ts";
 import { callRisks, callStages } from "./domain/call-stage.ts";
 import { tripStatuses } from "./domain/trip.ts";
 import { feasibilities, type TripSnapshot } from "./domain/trip-estimate.ts";
-import { cityInput, equipmentInput, loadIdInput, stateInput, zipInput } from "./infra/tms/codec.ts";
+import { cityInput, equipmentInput, loadIdInput, spokenLoadId, stateInput, zipInput } from "./infra/tms/codec.ts";
 import { autonomyModes, holdStatuses } from "./infra/twin-schemas.ts";
 
 // Request and response schemas for the agent and operator APIs.
@@ -73,10 +73,13 @@ export const searchLoadsBody = z
     destinationZip: optionalField(zipInput),
     equipmentType: optionalEquipment,
     pickupDate: optionalField(z.iso.date()),
+    // A load the carrier names by number; when present the lane fields are ignored.
+    loadId: optionalField(spokenLoadId),
   })
-  .refine((b) => b.originCity !== undefined || b.originState !== undefined || b.originZip !== undefined, {
-    message: "Provide an origin city, state or zip",
-  })
+  .refine(
+    (b) => b.loadId !== undefined || b.originCity !== undefined || b.originState !== undefined || b.originZip !== undefined,
+    { message: "Provide a load number or an origin city, state or zip" },
+  )
   .transform(({ originCity, originState, originZip, destinationCity, destinationState, destinationZip, ...rest }) => {
     const hasDestination = destinationCity !== undefined || destinationState !== undefined || destinationZip !== undefined;
     return {

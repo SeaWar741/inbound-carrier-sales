@@ -483,6 +483,93 @@ describe("POST /v1/loads/search", () => {
     expect(res.json()).toMatchObject({ status: "no_loads" });
   });
 
+  describe("by load number", () => {
+    const byId = (getLoad: LoadRouteDeps["tms"]["getLoad"], trips: TripEstimates = noTrips) => {
+      const tms = { queryLoads: vi.fn(), getLoad: vi.fn(getLoad) };
+      return { tms, target: serverWith(tms, trips) };
+    };
+
+    it("pitches the named load with feasibility, normalizes the spoken id, and ignores the lane", async () => {
+      const { tms, target } = byId(async (loadId) => detail(loadId, "OPEN"), { estimate: async () => ({ feasibility: "team" }) as TripSnapshot });
+      const res = await search({ callId: "call-ok", loadId: "ld 905", originState: "TX", equipmentType: "REEFER" }, target);
+      await target.close();
+      expect(res.json()).toMatchObject({ status: "ok", message: "I found one open load that fits." });
+      expect(res.json().loads).toHaveLength(1);
+      expect(res.json().loads[0]).toMatchObject({ loadId: "LD00905", feasibility: "team" });
+      expectNoMaxBuy(res.body);
+      expect(tms.getLoad.mock.calls).toEqual([["LD00905"]]);
+      expect(tms.queryLoads).not.toHaveBeenCalled();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(searchInserts).toEqual([]);
+    });
+
+    it("reads the bare digits and the full id the same way", async () => {
+      const { tms, target } = byId(async (loadId) => detail(loadId, "OPEN"));
+      await search({ callId: "call-ok", loadId: "905" }, target);
+      await search({ callId: "call-ok", loadId: "LD00905" }, target);
+      await target.close();
+      expect(tms.getLoad.mock.calls).toEqual([["LD00905"], ["LD00905"]]);
+    });
+
+    it("answers no_loads when the load is gone, not OPEN, or held by another call", async () => {
+      activeHolds.set("LD00003", "call-other");
+      const { target } = byId(async (loadId) => {
+        if (loadId === "LD00001") throw new TmsBusinessError("LOAD_GET", 1, false, "NOT_FOUND", "Load not found");
+        return detail(loadId, loadId === "LD00002" ? "BOOKED" : "OPEN");
+      });
+      for (const loadId of ["LD00001", "LD00002", "LD00003"]) {
+        const res = await search({ callId: "call-ok", loadId }, target);
+        expect(res.json()).toEqual({
+          status: "no_loads",
+          message: `Load ${loadId} isn't available anymore. Where are you empty, and what are you running?`,
+          loads: [],
+        });
+      }
+      await target.close();
+    });
+
+    it("keeps the caller's own hold visible", async () => {
+      activeHolds.set("LD00004", "call-ok");
+      const { target } = byId(async (loadId) => detail(loadId, "OPEN"));
+      const res = await search({ callId: "call-ok", loadId: "LD00004" }, target);
+      await target.close();
+      expect(res.json()).toMatchObject({ status: "ok" });
+    });
+
+    it("answers no_loads when no crew can deliver it on time", async () => {
+      const { target } = byId(async (loadId) => detail(loadId, "OPEN"), { estimate: async () => ({ feasibility: "impossible" }) as TripSnapshot });
+      const res = await search({ callId: "call-ok", loadId: "LD00905" }, target);
+      await target.close();
+      expect(res.json()).toEqual({
+        status: "no_loads",
+        message: "The loads I have on that lane right now have delivery windows too tight to run legally.",
+        loads: [],
+      });
+    });
+
+    it("answers tms_unavailable when the board does not respond", async () => {
+      const { target } = byId(async () => {
+        throw new TmsUnavailableError("LOAD_GET", 3, false, "timeout");
+      });
+      const res = await search({ callId: "call-ok", loadId: "LD00905" }, target);
+      await target.close();
+      expect(res.json()).toMatchObject({ status: "tms_unavailable", loads: [] });
+    });
+
+    it("refuses an unverified call without touching the TMS", async () => {
+      const { tms, target } = byId(async (loadId) => detail(loadId, "OPEN"));
+      const res = await search({ callId: "call-unverified", loadId: "LD00905" }, target);
+      await target.close();
+      expect(res.json()).toMatchObject({ status: "not_verified" });
+      expect(tms.getLoad).not.toHaveBeenCalled();
+    });
+
+    it("answers invalid_request for a load number that cannot be an id", async () => {
+      const res = await search({ callId: "call-ok", loadId: "load nine oh five!" });
+      expect(res.json()).toMatchObject({ status: "invalid_request" });
+    });
+  });
+
   it("stays behind the agent key", async () => {
     const res = await post("/v1/loads/search", { callId: "call-ok", originState: "GA", equipmentType: "DRY_VAN" }, app, config.OPERATOR_API_KEY);
     expect(res.statusCode).toBe(401);
