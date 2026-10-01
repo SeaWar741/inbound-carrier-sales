@@ -26,6 +26,7 @@ const messages = {
   tmsUnavailable: "I can't reach our load board right now. Please give me a moment and try again.",
   serviceUnavailable: "I'm having trouble on my end right now. Please give me a moment and try again.",
   invalid: "I need at least a pickup city, state or zip to search for loads.",
+  loadGone: (loadId: string) => `Load ${loadId} isn't available. Where are you empty?`,
 } as const;
 
 const found = (count: number) => (count === 1 ? "I found one open load that fits." : `I found ${count} open loads that fit.`);
@@ -37,7 +38,14 @@ const noLoads = (status: Exclude<SearchLoadsResponse["status"], "ok">, message: 
 });
 
 // Only OPEN is offered; any other or future status is treated as not bookable.
-const isOpen = (status: string) => status === "OPEN";
+export const isOpen = (status: string) => status === "OPEN";
+
+// A load the board no longer knows is undefined; an outage still throws.
+export const findLoad = (tms: Pick<TmsClient, "getLoad">, loadId: string) =>
+  tms.getLoad(loadId).catch((error: unknown) => {
+    if (error instanceof TmsBusinessError) return undefined;
+    throw error;
+  });
 
 async function isCallVerified(twin: TwinClient, callId: string): Promise<boolean> {
   const rows = await twin.query(sql`SELECT verified FROM calls WHERE call_id = ${callId}`, z.object({ verified: z.boolean() }));
@@ -45,7 +53,7 @@ async function isCallVerified(twin: TwinClient, callId: string): Promise<boolean
 }
 
 // One query for the whole list: a load another call is holding is not pitched.
-async function loadsHeldByOtherCalls(twin: TwinClient, callId: string, loadIds: string[]): Promise<Set<string>> {
+export async function loadsHeldByOtherCalls(twin: Pick<TwinClient, "query">, callId: string, loadIds: string[]): Promise<Set<string>> {
   if (loadIds.length === 0) return new Set();
   const rows = await twin.query(
     sql`SELECT load_id FROM holds WHERE load_id IN (${loadIds}) AND status <> 'released' AND call_id <> ${callId}`,
@@ -105,6 +113,19 @@ function toPitchedLoad(load: LoadDetail, feasibility: Feasibility | null): Pitch
   };
 }
 
+// A load the carrier named, usually one we notified them about: the same checks and shape as a lane search.
+// Not recorded as a search, since a named load says nothing about the lanes the board is missing.
+async function searchByLoadId(deps: LoadRouteDeps, callId: string, loadId: string, log: FastifyBaseLogger): Promise<SearchLoadsResponse> {
+  const load = await findLoad(deps.tms, loadId);
+  if (!load || !isOpen(load.status) || (await loadsHeldByOtherCalls(deps.twin, callId, [loadId])).size > 0) {
+    return noLoads("no_loads", messages.loadGone(loadId));
+  }
+  const estimate = await estimateLoadTrip(deps.trips, load, load.rate, log);
+  const pitched = toPitchedLoad(load, estimate?.feasibility ?? null);
+  if (pitched.feasibility === "impossible") return noLoads("no_loads", messages.windowsTooTight);
+  return { status: "ok", message: found(1), loads: [pitched] };
+}
+
 export function loadRoutes(deps: LoadRouteDeps): FastifyPluginAsync {
   return async (plugin) => {
     const app = plugin.withTypeProvider<ZodTypeProvider>();
@@ -125,6 +146,8 @@ export function loadRoutes(deps: LoadRouteDeps): FastifyPluginAsync {
         }
 
         try {
+          const { loadId } = request.body;
+          if (loadId !== undefined) return await searchByLoadId(deps, request.body.callId, loadId, request.log);
           const summaries = await deps.tms.queryLoads(toFilters(request.body));
           const open = summaries.filter((load) => isOpen(load.status));
           const heldElsewhere = await loadsHeldByOtherCalls(deps.twin, request.body.callId, open.map((load) => load.loadId));

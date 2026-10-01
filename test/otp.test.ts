@@ -4,6 +4,8 @@ import { loadConfig, type Config } from "../src/config.ts";
 import { checkCode, generateCode, hashCode } from "../src/domain/otp.ts";
 import type { SqlStatement } from "../src/infra/twin-client.ts";
 import type { CarrierMessage } from "../src/infra/otp-delivery-client.ts";
+import type { LoadDetail } from "../src/infra/tms/codec.ts";
+import { TmsBusinessError, TmsUnavailableError } from "../src/infra/tms/errors.ts";
 import { otpRoutes, type OtpRouteDeps } from "../src/routes/otp.ts";
 import { buildServer } from "../src/server.ts";
 import { testConfig } from "./test-config.ts";
@@ -51,6 +53,7 @@ type CallState = {
   otpExpiresAt: Date;
   otpAttempts: number;
   verified: boolean;
+  mcNumber: string | null;
 };
 
 // In-memory stand-in for the statements the OTP routes run against Twin.
@@ -58,6 +61,9 @@ function fakeTwin(calls: Map<string, CallState>) {
   const statements: string[] = [];
   // Runs just before the verify UPDATE, to interleave a concurrent change.
   const hooks: { beforeVerify?: () => void } = {};
+  // Notified load ids by MC, newest first, and loads another call holds.
+  const notices = new Map<string, string[]>();
+  const heldElsewhere = new Set<string>();
   const idOf = (text: string) => /call_id = E'([^']+)'/.exec(text)?.[1] ?? "";
   const query = async <T>(statement: SqlStatement, rowSchema: z.ZodType<T>): Promise<T[]> => {
     const text = statement.text;
@@ -87,12 +93,19 @@ function fakeTwin(calls: Map<string, CallState>) {
       if (expected !== undefined && call.otpHash === expected) {
         call.verified = true;
         call.otpHash = null;
-        rows.push({ call_id: idOf(text) });
+        rows.push({ mc_number: call.mcNumber });
       }
+    } else if (text.includes("FROM truck_capacity")) {
+      const mc = /mc_number = E'([^']*)'/.exec(text)?.[1] ?? "";
+      const limit = Number(/LIMIT (\d+)/.exec(text)?.[1]);
+      rows.push(...(notices.get(mc) ?? []).slice(0, limit).map((id) => ({ notified_load_id: id })));
+    } else if (text.includes("FROM holds")) {
+      const ids = [...(/IN \(([^)]*)\)/.exec(text)?.[1] ?? "").matchAll(/E'([^']*)'/g)].map((m) => m[1] ?? "");
+      rows.push(...ids.filter((id) => heldElsewhere.has(id)).map((id) => ({ load_id: id })));
     }
     return rows.map((row) => rowSchema.parse(row));
   };
-  return { twin: { query }, statements, hooks };
+  return { twin: { query }, statements, hooks, notices, heldElsewhere };
 }
 
 const eligibleCall = (): CallState => ({
@@ -103,6 +116,7 @@ const eligibleCall = (): CallState => ({
   otpExpiresAt: new Date(0),
   otpAttempts: 0,
   verified: false,
+  mcNumber: "123456",
 });
 
 describe("OTP_FIXED_CODE config gate", () => {
@@ -122,12 +136,13 @@ describe("OTP_FIXED_CODE config gate", () => {
 
 describe("OTP routes", () => {
   const calls = new Map<string, CallState>();
-  const { twin, statements, hooks } = fakeTwin(calls);
+  const { twin, statements, hooks, notices, heldElsewhere } = fakeTwin(calls);
+  const getLoad = vi.fn<OtpRouteDeps["tms"]["getLoad"]>();
   const send = vi.fn<(channel: "email" | "sms", to: string, message: CarrierMessage) => Promise<string>>();
   const supports = vi.fn<(channel: "email" | "sms") => boolean>();
   const contactByDot = vi.fn<OtpRouteDeps["census"]["contactByDot"]>();
   const routeConfig = { ...testConfig } satisfies Config;
-  const deps: OtpRouteDeps = { config: routeConfig, census: { contactByDot }, delivery: { send, supports }, twin };
+  const deps: OtpRouteDeps = { config: routeConfig, census: { contactByDot }, delivery: { send, supports }, twin, tms: { getLoad } };
   const app = buildServer(testConfig, { agentRoutes: [otpRoutes(deps)], operatorRoutes: [] });
   afterAll(() => app.close());
 
@@ -149,6 +164,9 @@ describe("OTP routes", () => {
     routeConfig.OTP_DELIVERY_MODE = "demo";
     delete routeConfig.OTP_FIXED_CODE;
     delete hooks.beforeVerify;
+    notices.clear();
+    heldElsewhere.clear();
+    getLoad.mockReset().mockImplementation(async (loadId) => ({ loadId, status: "OPEN" }) as LoadDetail);
   });
 
   it("sends to the demo recipient by default and never returns or stores the code", async () => {
@@ -224,6 +242,60 @@ describe("OTP routes", () => {
     expect(calls.get("call-1")?.verified).toBe(true);
     // The code is spent: a replay finds no active challenge.
     expect((await post("/v1/otp/check", { callId: "call-1", code: sentCode() })).json()).toMatchObject({ status: "no_active_code" });
+  });
+
+  const verifiedWith = async (callId = "call-1") => {
+    calls.set(callId, eligibleCall());
+    await post("/v1/otp/send", { callId, channel: "email" });
+    return (await post("/v1/otp/check", { callId, code: sentCode() })).json();
+  };
+
+  it("returns no notified loads when the carrier has none", async () => {
+    expect(await verifiedWith()).toMatchObject({ status: "ok", notifiedLoadIds: [] });
+    expect(getLoad).not.toHaveBeenCalled();
+  });
+
+  it("returns the loads we notified this MC about that are still open and unheld, newest first", async () => {
+    // The newest three notices, deduped, are read once each; the fourth is past the cap.
+    notices.set("123456", ["LD00006", "LD00005", "LD00006", "LD00004"]);
+    heldElsewhere.add("LD00005");
+    expect(await verifiedWith()).toMatchObject({ status: "ok", notifiedLoadIds: ["LD00006"] });
+    expect(getLoad.mock.calls.map(([id]) => id)).toEqual(["LD00006", "LD00005"]);
+    const lookup = statements.find((text) => text.includes("FROM truck_capacity")) ?? "";
+    expect(lookup).toContain("mc_number = E'123456'");
+    expect(lookup).toContain("now() - 3 * interval '1 day'");
+    expect(lookup).toContain("ORDER BY notified_at DESC LIMIT 3");
+  });
+
+  it("drops a notified load the board no longer has open", async () => {
+    notices.set("123456", ["LD00003", "LD00002"]);
+    getLoad.mockImplementation(async (loadId) => {
+      if (loadId === "LD00002") throw new TmsBusinessError("LOAD_GET", 1, false, "NOT_FOUND", "Load not found");
+      return { loadId, status: "BOOKED" } as LoadDetail;
+    });
+    expect(await verifiedWith()).toMatchObject({ status: "ok", notifiedLoadIds: [] });
+  });
+
+  it("still verifies, with no notified loads, when the board is unavailable", async () => {
+    notices.set("123456", ["LD00005"]);
+    getLoad.mockRejectedValue(new TmsUnavailableError("LOAD_GET", 3, false, "timeout"));
+    expect(await verifiedWith()).toMatchObject({ status: "ok", verified: true, notifiedLoadIds: [] });
+  });
+
+  it("skips the lookup for a carrier verified without an MC", async () => {
+    calls.set("call-1", { ...eligibleCall(), mcNumber: null });
+    await post("/v1/otp/send", { callId: "call-1", channel: "email" });
+    expect((await post("/v1/otp/check", { callId: "call-1", code: sentCode() })).json()).toMatchObject({ status: "ok", notifiedLoadIds: [] });
+    expect(statements.some((text) => text.includes("FROM truck_capacity"))).toBe(false);
+  });
+
+  it("returns no notified loads on a wrong code", async () => {
+    notices.set("123456", ["LD00005"]);
+    calls.set("call-1", eligibleCall());
+    await post("/v1/otp/send", { callId: "call-1", channel: "email" });
+    const wrong = sentCode() === "000000" ? "000001" : "000000";
+    expect((await post("/v1/otp/check", { callId: "call-1", code: wrong })).json()).toMatchObject({ status: "wrong_code", notifiedLoadIds: [] });
+    expect(getLoad).not.toHaveBeenCalled();
   });
 
   it("locks after three wrong codes, even if the fourth is right", async () => {

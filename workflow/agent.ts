@@ -52,7 +52,7 @@ const tools: ToolSpec[] = [
   },
   {
     name: "check_otp",
-    exposedFields: ["status", "message", "verified", "attemptsLeft"],
+    exposedFields: ["status", "message", "verified", "attemptsLeft", "notifiedLoadIds"],
     description: "Check the six-digit code the caller read back.",
     path: "/v1/otp/check",
     waitMessage: "Checking that code.",
@@ -62,16 +62,17 @@ const tools: ToolSpec[] = [
   {
     name: "search_loads",
     exposedFields: ["status", "message", "loads"],
-    description: "Search open loads for the caller's lane and equipment. Only works after check_otp verified the caller. Each load carries feasibility: solo, team (the delivery window needs a team driver) or null; loads no crew can deliver on time are never returned.",
+    description: "Search open loads for the caller's lane and equipment, or look up one load by its number. Only works after check_otp verified the caller. Each load carries feasibility: solo, team (the delivery window needs a team driver) or null; loads no crew can deliver on time are never returned.",
     path: "/v1/loads/search",
-    waitMessage: "Alright, let me see what I've got on that lane.",
+    waitMessage: "Alright, let me pull that up.",
     parameters: [
       { name: "origin_city", description: "Origin city, e.g. Chicago", required: false },
-      { name: "origin_state", description: "Origin state as a two-letter code, e.g. IL", required: true },
+      { name: "origin_state", description: "Origin state as a two-letter code, e.g. IL. Required unless load_id is set", required: false },
       { name: "destination_city", description: "Destination city, if the caller has one", required: false },
       { name: "destination_state", description: "Destination state as a two-letter code, if the caller has one", required: false },
       { name: "equipment_type", description: "One of: dry van, reefer, flatbed, step deck, power only. Use any when the caller runs anything or has no preference", required: false },
       { name: "pickup_date", description: "Pickup date as YYYY-MM-DD, if the caller has one", required: false },
+      { name: "load_id", description: "A load number the caller named or one from notifiedLoadIds, e.g. LD00905. When set, leave the lane fields empty", required: false },
     ],
     body: {
       originCity: "origin_city",
@@ -80,6 +81,7 @@ const tools: ToolSpec[] = [
       destinationState: "destination_state",
       equipmentType: "equipment_type",
       pickupDate: "pickup_date",
+      loadId: "load_id",
     },
   },
   {
