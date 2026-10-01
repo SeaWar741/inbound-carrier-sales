@@ -13,9 +13,6 @@ const capacityPollMs = 60_000;
 const freeDay = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", month: "short", day: "numeric" });
 const formatFreeDay = (isoDate: string) => freeDay.format(new Date(`${isoDate}T00:00:00Z`));
 
-// The adapter words pickups in desk time as "Oct 3, 8:00 AM"; the reason line keeps the day.
-const pickupDay = (pickupDateTime: string) => pickupDateTime.split(",")[0] ?? pickupDateTime;
-
 const truckEquipment = (truck: CapacityTruck) => (truck.equipment === null ? "Any equipment" : equipmentLabel(truck.equipment));
 
 const channelIcons = { email: LuMail, sms: LuMessageSquareText } as const;
@@ -50,10 +47,12 @@ function FitBadge({ truck }: { truck: CapacityTruck }) {
   if (truck.notifiedLoadId !== null) {
     const Icon = truck.noticeChannel ? channelIcons[truck.noticeChannel] : LuSend;
     return (
-      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-ok-soft px-2 py-0.5 text-[11px] font-medium text-ok">
+      <span
+        title={truck.notifiedAt ? `Notified at ${formatClock(truck.notifiedAt)}` : undefined}
+        className="inline-flex shrink-0 items-center gap-1 rounded-full bg-ok-soft px-2 py-0.5 text-[11px] font-medium text-ok"
+      >
         <Icon size={11} aria-hidden />
         Notified {truck.notifiedLoadId}
-        {truck.notifiedAt && ` · ${formatClock(truck.notifiedAt)}`}
       </span>
     );
   }
@@ -95,8 +94,7 @@ function FitLoad({
             Preferred lane
           </span>
         )}
-        <span className="tabular ml-auto truncate text-xs text-fg-faint">Pickup {load.pickupDateTime}</span>
-        <span className="tabular shrink-0 text-xs text-fg">{formatUsd(load.loadboardRate)}</span>
+        <span className="tabular ml-auto shrink-0 text-xs text-fg">{formatUsd(load.loadboardRate)}</span>
       </div>
       <div className="flex min-w-0 items-center gap-1 text-sm text-fg">
         <span className="truncate">{load.origin}</span>
@@ -104,8 +102,8 @@ function FitLoad({
         <span className="truncate">{load.destination}</span>
       </div>
       <div className="flex min-w-0 items-center justify-between gap-2">
-        <span className="truncate text-xs text-fg-muted">
-          {equipment} · {truck.state} origin · pickup {pickupDay(load.pickupDateTime)} (free {formatFreeDay(truck.freeDate)})
+        <span className="text-xs text-fg-muted">
+          {equipment} · {truck.state} origin · pickup {load.pickupDateTime} (free {formatFreeDay(truck.freeDate)})
         </span>
         <button
           type="button"
