@@ -9,8 +9,7 @@ import { finalRound } from "../src/domain/negotiation.ts";
 import { TwinClient, sql } from "../src/infra/twin-client.ts";
 
 type Decision = { decision: "accept" | "counter"; rateToSay: number } | { decision: "reject"; rateToSay: null };
-// laneSupply: 0 (few trucks on the lane) to 1 (many trucks chasing the lane's loads).
-type OfferContext = { posted: number; maxBuy: number; ask: number; round: number; lastOffer: number; laneSupply: number };
+type OfferContext = { posted: number; maxBuy: number; ask: number; round: number; lastOffer: number };
 type Policy = (context: OfferContext) => Decision;
 
 const floor25 = (usd: number) => Math.floor(usd / counterRoundingUsd) * counterRoundingUsd;
@@ -32,19 +31,9 @@ function schedulePolicy(steps: readonly number[], midpoint: boolean): Policy {
       counter = Math.max(lastOffer, Math.min(planned, floor25((lastOffer + ask) / 2)));
       if (counter === lastOffer) counter = planned;
     }
-    counter = Math.max(counter, lastOffer);
     if (ask <= counter) return { decision: "accept", rateToSay: ask };
     if (round > finalRound) return { decision: "reject", rateToSay: null };
     return { decision: "counter", rateToSay: counter };
-  };
-}
-
-// Concedes less before the final round on a lane with many trucks; the final step is kept.
-function lanePolicy(steps: readonly number[], midpoint: boolean): Policy {
-  return (context) => {
-    const scale = 1 - 0.5 * context.laneSupply;
-    const scaled = steps.map((step, i) => (i < steps.length - 1 ? step * scale : step));
-    return schedulePolicy(scaled, midpoint)(context);
   };
 }
 
@@ -79,18 +68,14 @@ type Family = (typeof tactics)[number]["family"];
 const reservations = [-0.1, 0.1, 0.3, 0.5, 0.7, 0.9, 1.1];
 const openings = [0.1, 0.3, 0.6];
 const impatience = [0, 0.1, 0.25];
-const laneSupplies = [0, 0.5, 1];
-const laneSensitivities = [0, 0.1, 0.2];
 // The carrier concedes over this many asks and never reaches its reservation within them.
 const carrierDeadline = 4;
 
-type Carrier = { family: Family; beta: number; rho: number; open: number; w: number; s: number; k: number };
+type Carrier = { family: Family; beta: number; rho: number; open: number; w: number };
 const carriers: Carrier[] = tactics.flatMap(({ family, beta }) =>
   reservations.flatMap((rho) =>
     openings.flatMap((open) =>
-      impatience.flatMap((w) =>
-        laneSupplies.flatMap((s) => laneSensitivities.map((k) => ({ family, beta, rho, open, w, s, k }))),
-      ),
+      impatience.map((w) => ({ family, beta, rho, open, w })),
     ),
   ),
 );
@@ -101,8 +86,7 @@ type Outcome = { booked: number; share: number; rounds: number };
 // probability-weighted gap share paid, rounds the expected number of asks evaluated.
 function play(policy: Policy, carrier: Carrier, load: { posted: number; maxBuy: number }): Outcome {
   const gap = load.maxBuy - load.posted;
-  // More trucks on the lane lower what a sensitive carrier will settle for.
-  const reservation = load.posted + (carrier.rho - carrier.k * carrier.s) * gap;
+  const reservation = load.posted + carrier.rho * gap;
   const asks = Array.from({ length: carrierDeadline }, (_, t) =>
     Math.round(reservation + carrier.open * gap * (1 - (t / carrierDeadline) ** (1 / carrier.beta))),
   );
@@ -117,7 +101,7 @@ function play(policy: Policy, carrier: Carrier, load: { posted: number; maxBuy: 
   let round = 0;
   for (const [t, ask] of asks.entries()) {
     round = t + 1;
-    const evaluation = policy({ posted: load.posted, maxBuy: load.maxBuy, ask, round, lastOffer, laneSupply: carrier.s });
+    const evaluation = policy({ posted: load.posted, maxBuy: load.maxBuy, ask, round, lastOffer });
     if (evaluation.decision === "accept") {
       book(survival, ask, round);
       return outcome;
@@ -139,7 +123,7 @@ function play(policy: Policy, carrier: Carrier, load: { posted: number; maxBuy: 
   return outcome;
 }
 
-export type Metrics = { bookingRate: number; gapShare: number; rounds: number };
+type Metrics = { bookingRate: number; gapShare: number; rounds: number };
 type Tally = { n: number; booked: number; share: number; rounds: number };
 
 const emptyTally = (): Tally => ({ n: 0, booked: 0, share: 0, rounds: 0 });
@@ -149,18 +133,16 @@ const metrics = (tally: Tally): Metrics => ({
   rounds: tally.rounds / tally.n,
 });
 
-export const cellKey = (family: Family, w: number) => `${family} w=${w}`;
+const cellKey = (family: Family, w: number) => `${family} w=${w}`;
 export const gateCells = tactics.flatMap(({ family }) => impatience.map((w) => cellKey(family, w)));
 
-export type PolicyResult = {
+type PolicyResult = {
   name: string;
   overall: Metrics;
   // Gate cells: (tactic family, impatience).
   cells: Record<string, Metrics>;
   byFamily: Record<string, Metrics>;
   byImpatience: Record<string, Metrics>;
-  // The same metrics on the carriers of one lane sensitivity only.
-  byK: Record<string, { overall: Metrics; cells: Record<string, Metrics> }>;
   passesGate: boolean;
 };
 
@@ -178,7 +160,7 @@ function evaluate(name: string, policy: Policy): PolicyResult {
     for (const load of loads) {
       const o = play(policy, carrier, load);
       const cell = cellKey(carrier.family, carrier.w);
-      for (const key of ["all", `cell:${cell}`, `family:${carrier.family}`, `w:${carrier.w}`, `k:${carrier.k}`, `k:${carrier.k}:${cell}`]) {
+      for (const key of ["all", `cell:${cell}`, `family:${carrier.family}`, `w:${carrier.w}`]) {
         add(key, o);
       }
     }
@@ -190,12 +172,6 @@ function evaluate(name: string, policy: Policy): PolicyResult {
     cells: Object.fromEntries(gateCells.map((cell) => [cell, get(`cell:${cell}`)])),
     byFamily: Object.fromEntries(tactics.map(({ family }) => [family, get(`family:${family}`)])),
     byImpatience: Object.fromEntries(impatience.map((w) => [String(w), get(`w:${w}`)])),
-    byK: Object.fromEntries(
-      laneSensitivities.map((k) => [
-        String(k),
-        { overall: get(`k:${k}`), cells: Object.fromEntries(gateCells.map((cell) => [cell, get(`k:${k}:${cell}`)])) },
-      ]),
-    ),
     passesGate: false,
   };
 }
@@ -203,10 +179,10 @@ function evaluate(name: string, policy: Policy): PolicyResult {
 const keepsBookings = (cells: Record<string, Metrics>, baseline: Record<string, Metrics>) =>
   gateCells.every((cell) => cells[cell]!.bookingRate >= baseline[cell]!.bookingRate - bookingTolerance);
 
-export type Tournament = { baseline: PolicyResult; results: PolicyResult[]; winner: PolicyResult | undefined };
+type Tournament = { baseline: PolicyResult; results: PolicyResult[]; winner: PolicyResult | undefined };
 
 // Winner: the lowest gap share among candidates that keep the baseline's booking rate in every
-// gate cell. The lane candidate must also keep it on carriers that ignore lane supply (k = 0).
+// gate cell.
 export function runTournament(): Tournament {
   const baseline = evaluate("baseline", baselinePolicy);
   baseline.passesGate = true;
@@ -216,17 +192,8 @@ export function runTournament(): Tournament {
     result.passesGate = keepsBookings(result.cells, baseline.cells);
     return result;
   });
-  const bestSchedule = scheduleResults.filter((r) => r.passesGate).sort(byGapShare)[0];
-  const laneBase = candidates.find((c) => c.name === bestSchedule?.name);
-  const laneResults = laneBase
-    ? [evaluate(`lane(${laneBase.name})`, lanePolicy(laneBase.steps, laneBase.midpoint))].map((result) => {
-        result.passesGate =
-          keepsBookings(result.cells, baseline.cells) && keepsBookings(result.byK["0"]!.cells, baseline.byK["0"]!.cells);
-        return result;
-      })
-    : [];
-  const results = [baseline, ...scheduleResults, ...laneResults];
-  const winner = [...scheduleResults, ...laneResults]
+  const results = [baseline, ...scheduleResults];
+  const winner = scheduleResults
     .filter((r) => r.passesGate && r.overall.gapShare < baseline.overall.gapShare)
     .sort(byGapShare)[0];
   return { baseline, results, winner };
@@ -259,30 +226,12 @@ function printTournament({ baseline, results, winner }: Tournament) {
       results.map((r) => [r.name, ...impatience.map((w) => `${pct(r.byImpatience[w]!.bookingRate)} / ${pct(r.byImpatience[w]!.gapShare)}`)]),
     ),
   );
-  const lane = results.find((r) => r.name.startsWith("lane("));
-  if (lane) {
-    console.log("\nLane candidate per lane sensitivity k (booking rate / gap share, baseline in brackets)\n");
-    console.log(
-      table(
-        ["k", lane.name, "baseline", "keeps bookings"],
-        laneSensitivities.map((k) => {
-          const l = lane.byK[k]!;
-          const b = baseline.byK[k]!;
-          return [
-            String(k),
-            `${pct(l.overall.bookingRate)} / ${pct(l.overall.gapShare)}`,
-            `[${pct(b.overall.bookingRate)} / ${pct(b.overall.gapShare)}]`,
-            keepsBookings(l.cells, b.cells) ? "yes" : "no",
-          ];
-        }),
-      ),
-    );
-  }
   console.log(`\nwinner: ${winner?.name ?? "none"}`);
 }
 
-// Replays the asks carriers really made, round by round, through every schedule policy. The
-// lane candidate is left out: the offers table has no lane supply, and at zero supply it is its base.
+// Replays the asks carriers really made, round by round, through every schedule policy, and counts
+// the offers where the baseline said something other than production did. Operator authorizations
+// are not replayed, so an authorized counter shows up as a mismatch.
 async function replay() {
   const env = z.object({ HAPPYROBOT_API_KEY: z.string().min(1) }).parse(process.env);
   const twin = new TwinClient({ apiKey: env.HAPPYROBOT_API_KEY });
@@ -305,6 +254,8 @@ async function replay() {
   const groups = Map.groupBy(rows, (r) => `${r.call_id} ${r.load_id}`);
   const policies: [string, Policy][] = [["baseline", baselinePolicy], ...candidates.map((c): [string, Policy] => [c.name, schedulePolicy(c.steps, c.midpoint)])];
   console.log(`${groups.size} negotiations from ${rows.length} offers\n`);
+  let compared = 0;
+  let mismatches = 0;
   for (const [key, offers] of groups) {
     const first = offers[0]!;
     console.log(`${key}  posted ${first.posted_rate}  max buy ${first.max_buy}  asks ${offers.map((o) => o.carrier_ask).join(", ")}`);
@@ -313,9 +264,13 @@ async function replay() {
       const said: string[] = [];
       let agreed: number | undefined;
       let lastOffer = first.posted_rate;
-      for (const [i, offer] of offers.entries()) {
-        const evaluation = policy({ posted: first.posted_rate, maxBuy: first.max_buy, ask: offer.carrier_ask, round: i + 1, lastOffer, laneSupply: 0 });
+      for (const offer of offers) {
+        const evaluation = policy({ posted: first.posted_rate, maxBuy: first.max_buy, ask: offer.carrier_ask, round: offer.round, lastOffer });
         said.push(`${evaluation.decision} ${evaluation.rateToSay ?? ""}`.trim());
+        if (name === "baseline") {
+          compared += 1;
+          if (evaluation.decision !== offer.decision || evaluation.rateToSay !== offer.rate_to_say) mismatches += 1;
+        }
         if (evaluation.decision !== "counter") {
           if (evaluation.decision === "accept") agreed = evaluation.rateToSay;
           break;
@@ -325,6 +280,7 @@ async function replay() {
       console.log(`  ${name.padEnd(18)} ${said.join(", ")}  agreed: ${agreed ?? "none"}`);
     }
   }
+  console.log(`\nbaseline mismatches: ${mismatches} of ${compared} offers`);
 }
 
 if (import.meta.main) {

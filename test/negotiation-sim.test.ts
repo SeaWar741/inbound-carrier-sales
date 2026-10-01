@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { baselinePolicy, gateCells, runTournament } from "../scripts/negotiation-sim.ts";
+import { baselinePolicy, runTournament } from "../scripts/negotiation-sim.ts";
 import { evaluateOffer } from "../src/domain/negotiation.ts";
-
-// Same tolerance as the tournament's gate: float noise only.
-const bookingTolerance = 1e-9;
 
 describe("negotiation tournament", () => {
   it("plays the production schedule as its baseline", () => {
@@ -24,7 +21,6 @@ describe("negotiation tournament", () => {
         ask: input.carrierAsk,
         round: input.round,
         lastOffer: input.postedRate,
-        laneSupply: 0,
       });
       expect(sim).toEqual({ decision, rateToSay });
     }
@@ -35,11 +31,6 @@ describe("negotiation tournament", () => {
   it("keeps the baseline because no candidate books as much in every cell", () => {
     const { baseline, results, winner } = runTournament();
     expect(winner).toBeUndefined();
-    for (const result of results.filter((r) => r !== baseline)) {
-      const losesACell = gateCells.some(
-        (cell) => result.cells[cell]!.bookingRate < baseline.cells[cell]!.bookingRate - bookingTolerance,
-      );
-      expect(losesACell, result.name).toBe(true);
-    }
+    for (const result of results.filter((r) => r !== baseline)) expect(result.passesGate, result.name).toBe(false);
   });
 });

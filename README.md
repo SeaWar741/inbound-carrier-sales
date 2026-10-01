@@ -197,7 +197,7 @@ The agent counters at 35%, 60% and 80% of the posted to max gap and accepts any 
 
 ### Offline tournament (cycle 7)
 
-`npm run negotiation:sim` plays the production policy against candidate policies over a fixed grid of simulated carriers. It is deterministic: booking rate and gap share are exact expectations, with no random draws. `test/negotiation-sim.test.ts` fails if the tournament's result changes.
+`npm run negotiation:sim` plays the production policy against candidate policies over a fixed grid of simulated carriers. It is deterministic: booking rate and gap share are exact expectations, with no random draws. `test/negotiation-sim.test.ts` fails if any candidate starts passing the gate, and checks that the sim's baseline says what `evaluateOffer` says.
 
 - Loads: posted $2,000, with the posted to max gap at 7.1%, 14.8% and 23.1% of posted, the p10, p50 and p90 of (MAX_BUY - RATE) / RATE on the TMS board snapshot of 2026-09-28 (909 loads, min 5.0%, max 25.0%).
 - Carriers: reservation price at -0.1 to 1.1 of the gap. They open 0.1, 0.3 or 0.6 of the gap above it and concede toward it over four asks with a Boulware, Linear or Conceder tactic ([Faratin et al. 1998](https://spiral.imperial.ac.uk/entities/publication/591e717c-cc0e-4d61-8c68-8925b34c4b4d)). They hang up after each counter they refuse with probability w of 0, 0.1 or 0.25.
@@ -213,53 +213,53 @@ The agent counters at 35%, 60% and 80% of the posted to max gap and accepts any 
 
 | policy | booking rate | gap share | rounds | passes gate |
 |---|---|---|---|---|
-| baseline | 57.15% | 39.46% | 2.375 | yes |
-| baseline+midpoint | 54.67% | 37.11% | 2.578 | no |
-| even | 56.22% | 38.45% | 2.450 | no |
-| even+midpoint | 54.44% | 37.01% | 2.597 | no |
-| growing | 54.11% | 36.67% | 2.619 | no |
-| growing+midpoint | 53.30% | 35.98% | 2.689 | no |
+| baseline | 53.78% | 41.86% | 2.460 | yes |
+| baseline+midpoint | 51.33% | 39.60% | 2.660 | no |
+| even | 52.98% | 41.00% | 2.526 | no |
+| even+midpoint | 51.06% | 39.54% | 2.682 | no |
+| growing | 50.78% | 39.33% | 2.702 | no |
+| growing+midpoint | 50.04% | 38.61% | 2.765 | no |
 
 Booking rate per (tactic family, impatience) cell
 
 | policy | Boulware w=0 | Boulware w=0.1 | Boulware w=0.25 | Linear w=0 | Linear w=0.1 | Linear w=0.25 | Conceder w=0 | Conceder w=0.1 | Conceder w=0.25 |
 |---|---|---|---|---|---|---|---|---|---|
-| baseline | 56.44% | 50.67% | 42.70% | 64.55% | 58.50% | 50.13% | 69.84% | 64.49% | 57.05% |
-| baseline+midpoint | 56.44% | 48.28% | 37.44% | 64.55% | 56.03% | 44.57% | 69.84% | 62.44% | 52.45% |
-| even | 56.44% | 49.93% | 41.07% | 64.55% | 57.71% | 48.29% | 69.84% | 63.46% | 54.67% |
-| even+midpoint | 56.44% | 48.28% | 37.44% | 64.55% | 55.82% | 44.14% | 69.84% | 62.01% | 51.42% |
-| growing | 56.44% | 48.22% | 37.25% | 64.55% | 55.85% | 44.06% | 69.84% | 61.26% | 49.56% |
-| growing+midpoint | 56.44% | 47.65% | 36.06% | 64.55% | 54.85% | 41.96% | 69.84% | 60.45% | 47.86% |
+| baseline | 53.97% | 47.97% | 39.68% | 60.32% | 54.32% | 46.03% | 66.67% | 61.27% | 53.77% |
+| baseline+midpoint | 53.97% | 45.62% | 34.52% | 60.32% | 51.94% | 40.67% | 66.67% | 59.19% | 49.11% |
+| even | 53.97% | 47.40% | 38.49% | 60.32% | 53.71% | 44.64% | 66.67% | 60.22% | 51.39% |
+| even+midpoint | 53.97% | 45.62% | 34.52% | 60.32% | 51.65% | 40.08% | 66.67% | 58.73% | 48.02% |
+| growing | 53.97% | 45.62% | 34.52% | 60.32% | 51.76% | 40.18% | 66.67% | 57.94% | 46.03% |
+| growing+midpoint | 53.97% | 45.19% | 33.63% | 60.32% | 50.76% | 38.10% | 66.67% | 57.22% | 44.54% |
 
 Per tactic family (booking rate / gap share)
 
 | policy | Boulware | Linear | Conceder |
 |---|---|---|---|
-| baseline | 49.94% / 41.17% | 57.73% / 40.18% | 63.80% / 37.45% |
-| baseline+midpoint | 47.39% / 40.53% | 55.05% / 37.41% | 61.58% / 34.21% |
-| even | 49.14% / 40.81% | 56.85% / 39.33% | 62.66% / 35.79% |
-| even+midpoint | 47.39% / 40.53% | 54.84% / 37.30% | 61.09% / 34.01% |
-| growing | 47.30% / 40.49% | 54.82% / 37.58% | 60.22% / 32.85% |
-| growing+midpoint | 46.72% / 40.42% | 53.79% / 36.33% | 59.38% / 32.17% |
+| baseline | 47.21% / 44.43% | 53.56% / 42.11% | 60.57% / 39.63% |
+| baseline+midpoint | 44.70% / 44.07% | 50.98% / 39.32% | 58.32% / 36.41% |
+| even | 46.62% / 44.08% | 52.89% / 41.51% | 59.43% / 38.13% |
+| even+midpoint | 44.70% / 44.07% | 50.68% / 39.16% | 57.80% / 36.37% |
+| growing | 44.70% / 43.78% | 50.75% / 39.80% | 56.88% / 35.43% |
+| growing+midpoint | 44.26% / 43.84% | 49.72% / 38.34% | 56.14% / 34.73% |
 
 Per impatience (booking rate / gap share)
 
 | policy | w=0 | w=0.1 | w=0.25 |
 |---|---|---|---|
-| baseline | 63.61% / 41.37% | 57.89% / 39.66% | 49.96% / 36.78% |
-| baseline+midpoint | 63.61% / 39.01% | 55.58% / 37.30% | 44.82% / 34.18% |
-| even | 63.61% / 40.49% | 57.03% / 38.66% | 48.01% / 35.49% |
-| even+midpoint | 63.61% / 38.91% | 55.37% / 37.19% | 44.33% / 34.04% |
-| growing | 63.61% / 38.50% | 55.11% / 36.84% | 43.62% / 33.80% |
-| growing+midpoint | 63.61% / 37.71% | 54.32% / 36.14% | 41.96% / 33.16% |
+| baseline | 60.32% / 43.66% | 54.52% / 42.05% | 46.49% / 39.30% |
+| baseline+midpoint | 60.32% / 41.25% | 52.25% / 39.75% | 41.44% / 36.99% |
+| even | 60.32% / 42.93% | 53.78% / 41.20% | 44.84% / 38.17% |
+| even+midpoint | 60.32% / 41.19% | 52.00% / 39.70% | 40.87% / 36.91% |
+| growing | 60.32% / 40.91% | 51.77% / 39.47% | 40.24% / 36.81% |
+| growing+midpoint | 60.32% / 40.05% | 51.06% / 38.74% | 38.76% / 36.21% |
 
 winner: none
 
-**Result: no candidate passes, and production keeps the baseline.** With w = 0 every policy books the same, because they share the final step. Once carriers can hang up, every slower opening loses bookings in every cell. The best saving, 3.5 points of the gap with growing+midpoint, costs 3.9 points of booking rate overall and 8 points at w = 0.25. Tey et al. predict the shrinking steps should cost us; in this model the faster early concession is what keeps impatient carriers on the line. Human negotiators are not carriers, and this grid is not measured carrier behavior, so neither result is settled.
+**Result: no candidate passes, and production keeps the baseline.** With w = 0 every policy books the same, because they share the final step. Once carriers can hang up, every slower opening loses bookings in every cell. The best saving, 3.3 points of the gap with growing+midpoint, costs 3.7 points of booking rate overall and 7.7 points at w = 0.25. Tey et al. predict the shrinking steps should cost us; in this model the faster early concession is what keeps impatient carriers on the line. Human negotiators are not carriers, and this grid is not measured carrier behavior, so neither result is settled.
 
-A lane supply signal (hold firmer where Demand shows many carriers asking) was designed as a variant of the winning candidate. It did not run because nothing won. It would rest on an assumption that more supply lowers carrier reservation prices, which no data validates.
+A lane supply signal (hold firmer where Demand shows many carriers asking) was to run only as a variant of a winning candidate, so it was not built. It would rest on an assumption that more supply lowers carrier reservation prices, which no data validates.
 
-`npm run negotiation:sim -- --replay` replays the 36 recorded non demo negotiations on Twin. The baseline reproduces every counter production said. The other policies open lower but agree the same price in all 5 closed deals. The midpoint never fires, because the recorded asks sit far above our counters.
+`npm run negotiation:sim -- --replay` replays the 36 recorded non demo negotiations on Twin (70 offers) and ends with `baseline mismatches: 0 of 70 offers`: the sim's baseline says what production said. The other policies open lower but agree the same price in all 5 closed deals. The midpoint changes one counter, in a negotiation that did not close, because the recorded asks sit far above our counters.
 
 ### Next step
 
