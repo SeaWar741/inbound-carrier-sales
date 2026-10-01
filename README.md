@@ -193,7 +193,7 @@ Researched on 2026-09-30, to answer "are our margins standard?". Figures are dat
 
 A broker's gross margin is (shipper rate - carrier rate) / shipper rate. The TMS gives the posted rate and the max buy, never the shipper rate, so the tower cannot show margin. What it shows is headroom: max buy - agreed rate, labelled "Under our max". The max buy is usually set as the sell rate minus a minimum margin, or from a market rate engine: [Triumph](https://intelligencehelp.triumph.io/en/articles/8371238-triumph-rates-best-practices) uses its buy rate as the max buy and marks up 10% to 16% by confidence. If our TMS works that way, headroom is margin on top of that minimum, but that is not confirmed.
 
-Our real bookings on Twin (n=21, demo rows excluded): posted $4,558, agreed $4,912 (+6.9% over posted, 20 of 21 above it), max buy $5,243 (+15.3% over posted), headroom $331 (7.2% of the max). The agent gives away about 45% of the posted to max gap. No public data measures how far above posted carrier deals usually close, so this cannot be benchmarked yet.
+Non-demo bookings on Twin (n=21, demo rows excluded; these are simulator personas and internal test calls, not real carriers): posted $4,558, agreed $4,912 (+6.9% over posted, 20 of 21 above it), max buy $5,243 (+15.3% over posted), headroom $331 (7.2% of the max). The agent gives away about 45% of the posted to max gap. No public data measures how far above posted carrier deals usually close, so this cannot be benchmarked yet.
 
 ### Gross margin benchmarks
 

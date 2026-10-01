@@ -268,6 +268,10 @@ export function TripSection({ trip }: { trip: TripSnapshot }) {
             legal arrival {formatDateTime(trip.legalEtaAt)}
           </span>
         </Line>
+        <p className="text-[11px] text-fg-faint">
+          Estimate, not the carrier's real cost: regional diesel at ${trip.dieselPerGal.toFixed(2)}/gal, tolls from the route's toll share,
+          simplified hours of service.
+        </p>
       </div>
     </Section>
   );
