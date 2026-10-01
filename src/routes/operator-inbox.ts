@@ -4,6 +4,8 @@ import { z } from "zod";
 import {
   carrierStages,
   type CarrierStage,
+  operatorCallTranscriptParams,
+  operatorCallTranscriptResponse,
   operatorCarrierCallsParams,
   operatorCarrierCallsQuery,
   operatorCarrierCallsResponse,
@@ -332,6 +334,13 @@ export function carrierCallsQuery(key: string): SqlStatement {
   return { text };
 }
 
+const transcriptRow = z.object({
+  seq: z.coerce.number().int(),
+  role: z.enum(["agent", "carrier", "tool", "signal"]),
+  text: z.string(),
+  at: z.coerce.date(),
+});
+
 export function operatorInboxRoutes(deps: OperatorInboxDeps): FastifyPluginAsync {
   return async (plugin) => {
     const app = plugin.withTypeProvider<ZodTypeProvider>();
@@ -395,6 +404,23 @@ export function operatorInboxRoutes(deps: OperatorInboxDeps): FastifyPluginAsync
         } catch (error) {
           request.log.warn({ err: error }, "operator carrier calls unavailable");
           return reply.code(503).send({ status: "service_unavailable", message: "The call data is unavailable right now. Retry shortly." });
+        }
+      },
+    );
+
+    app.get(
+      "/operator/calls/:callId/transcript",
+      { schema: { params: operatorCallTranscriptParams, response: { 200: operatorCallTranscriptResponse, 503: operatorWallUnavailableResponse } } },
+      async (request, reply) => {
+        try {
+          const rows = await deps.twin.query(
+            sql`SELECT seq, role, text, at::timestamptz AS at FROM call_transcripts WHERE call_id = ${request.params.callId} ORDER BY seq`,
+            transcriptRow,
+          );
+          return { status: "ok" as const, entries: rows.map((row) => ({ ...row, at: row.at.toISOString() })) };
+        } catch (error) {
+          request.log.warn({ err: error }, "operator call transcript unavailable");
+          return reply.code(503).send({ status: "service_unavailable", message: "The transcript is unavailable right now. Retry shortly." });
         }
       },
     );

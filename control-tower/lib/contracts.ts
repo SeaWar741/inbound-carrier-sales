@@ -465,6 +465,13 @@ export type ReleaseHoldResponse = z.infer<typeof releaseHoldResponse>;
 
 export const idempotencyKeyInput = z.string().trim().min(1).max(128);
 
+// A stored conversation (the demo dataset), for calls with no HappyRobot session.
+export const adapterTranscriptResponse = z.object({
+  status: z.literal("ok"),
+  entries: z.array(z.object({ seq: z.number().int(), role: z.enum(["agent", "carrier", "tool", "signal"]), text: z.string(), at: z.string() })),
+});
+export type AdapterTranscriptResponse = z.infer<typeof adapterTranscriptResponse>;
+
 // Events on /api/calls/[sessionId]/stream.
 export type StreamLine = { id: string; role: "agent" | "carrier"; text: string; at: string };
 export type StreamTool = { name: string; at: string };

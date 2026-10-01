@@ -105,6 +105,16 @@ export const tableDdl = {
     notified_at timestamp,
     created_at timestamp NOT NULL DEFAULT now()
   )`,
+  // A stored conversation, for calls that have no HappyRobot session to stream (the demo dataset).
+  // role 'tool' carries the tool name as text; the tower replays the rows like a session stream.
+  call_transcripts: `CREATE TABLE IF NOT EXISTS call_transcripts (
+    call_id text NOT NULL,
+    seq int8 NOT NULL,
+    role text NOT NULL CHECK (role IN ('agent', 'carrier', 'tool', 'signal')),
+    text text NOT NULL,
+    at timestamp NOT NULL,
+    PRIMARY KEY (call_id, seq)
+  )`,
 } as const;
 
 // Changes to tables that already exist; each statement is idempotent and runs on every bootstrap.
