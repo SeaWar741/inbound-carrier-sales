@@ -143,6 +143,7 @@ export const adapterWallResponse = z.object({
     booked: z.number().int(),
     blocked: z.number().int(),
     bookedValue: z.number(),
+    capacity: z.object({ captured: z.number().int(), notified: z.number().int(), bookedAfterNotice: z.number().int() }),
   }),
   tmsHealth,
   // Defaults to the safe mode when an older adapter does not send it.

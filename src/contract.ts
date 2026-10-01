@@ -276,6 +276,52 @@ export const saveCapacityResponse = z.object({
 });
 export type SaveCapacityResponse = z.infer<typeof saveCapacityResponse>;
 
+// A load the board has open that fits a saved truck. The posted rate only; the max buy never leaves the adapter.
+const capacityLoad = z.object({
+  loadId: z.string(),
+  origin: z.string(),
+  destination: z.string(),
+  // Desk time, readable: "Oct 3, 8:00 AM".
+  pickupDateTime: z.string(),
+  equipmentType: z.string(),
+  loadboardRate: z.number(),
+  miles: z.number(),
+  // Delivers to the carrier's preferred destination state; these rank first.
+  preferred: z.boolean(),
+});
+
+export const operatorCapacityResponse = z.object({
+  status: z.literal("ok"),
+  trucks: z.array(
+    z.object({
+      id: z.string(),
+      mcNumber: z.string(),
+      carrierName: z.string().nullable(),
+      city: z.string(),
+      state: z.string(),
+      // Null means any equipment.
+      equipment: z.string().nullable(),
+      freeDate: z.iso.date(),
+      preferredDestinationState: z.string().nullable(),
+      // The channel the carrier verified on; the contact itself never leaves the adapter.
+      noticeChannel: z.enum(["email", "sms"]).nullable(),
+      notifiedLoadId: z.string().nullable(),
+      notifiedAt: z.iso.datetime().nullable(),
+      // Null when the board could not be read for this truck.
+      loads: z.array(capacityLoad).nullable(),
+    }),
+  ),
+});
+export type OperatorCapacityResponse = z.infer<typeof operatorCapacityResponse>;
+
+export const notifyCapacityParams = z.object({ id: z.uuid() });
+export const notifyCapacityBody = z.strictObject({ loadId: loadIdInput });
+export const notifyCapacityResponse = z.object({
+  status: z.enum(["sent", "already_notified", "load_unavailable", "no_contact", "failed"]),
+  message: z.string(),
+});
+export type NotifyCapacityResponse = z.infer<typeof notifyCapacityResponse>;
+
 export const confirmHoldParams = z.object({ holdId: z.uuid() });
 
 // Other headers pass through untouched; only the key is required.
@@ -439,6 +485,8 @@ export const operatorWallResponse = z.object({
     blocked: z.number().int(),
     // Sum of agreed rates on today's booked holds.
     bookedValue: z.number(),
+    // Trucks saved in the last 7 days, those sent a load, and those that then booked that load.
+    capacity: z.object({ captured: z.number().int(), notified: z.number().int(), bookedAfterNotice: z.number().int() }),
   }),
   tmsHealth,
   // "human": a rep confirms every hold. "autonomous": create_hold books right away.

@@ -11,7 +11,7 @@ import { TripEstimator } from "./infra/trip-estimator.ts";
 import { TwinClient } from "./infra/twin-client.ts";
 import { requireApiKey } from "./plugins/auth.ts";
 import { recordCallEvents, type CallEventDeps } from "./plugins/call-events.ts";
-import { capacityRoutes } from "./routes/capacity.ts";
+import { capacityRoutes, operatorCapacityRoutes } from "./routes/capacity.ts";
 import { carrierRoutes } from "./routes/carriers.ts";
 import { handoffRoutes } from "./routes/handoff.ts";
 import { healthRoutes } from "./routes/health.ts";
@@ -89,7 +89,7 @@ if (import.meta.main) {
       handoffRoutes({ twin }),
       capacityRoutes({ twin }),
     ],
-    operatorRoutes: [confirmHoldRoutes({ tms, twin, delivery }), releaseHoldRoutes({ twin, delivery }), operatorWallRoutes({ twin, tmsHealth }), operatorInboxRoutes({ twin }), operatorNetworkRoutes({ twin, tms })],
+    operatorRoutes: [confirmHoldRoutes({ tms, twin, delivery }), releaseHoldRoutes({ twin, delivery }), operatorWallRoutes({ twin, tmsHealth }), operatorInboxRoutes({ twin }), operatorNetworkRoutes({ twin, tms }), operatorCapacityRoutes({ twin, tms, delivery })],
   }, { twin });
   if (!config.EIA_API_KEY || !config.ORS_API_KEY) app.log.warn("trip estimates disabled: EIA_API_KEY/ORS_API_KEY not set");
   await app.listen({ host: "0.0.0.0", port: config.PORT });

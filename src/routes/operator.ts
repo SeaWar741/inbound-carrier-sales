@@ -62,6 +62,7 @@ export const wallCallColumns: SqlStatement = {
 // created_at comparison stays index-friendly. The day's counters come back in a single row.
 // A call counts as offered when a search returned loads or an offer was made; offers is OR'ed in
 // because the load_searches insert is fire and forget and can be missing for a call that negotiated.
+// The capacity funnel spans the last 7 desk days, today included: a saved truck takes days to match.
 export function wallQuery(): SqlStatement {
   const text = sql`WITH bounds AS (
       SELECT date_trunc('day', now() AT TIME ZONE ${operatorTimeZone}) AS local_start
@@ -72,6 +73,9 @@ export function wallQuery(): SqlStatement {
     ), today_holds AS (
       SELECT h.* FROM holds h JOIN today t ON t.call_id = h.call_id
       WHERE h.status IN ('booked', 'booked_unconfirmed')
+    ), capacity_week AS (
+      SELECT tc.* FROM truck_capacity tc, bounds b
+      WHERE tc.created_at >= ((b.local_start - interval '6 days') AT TIME ZONE ${operatorTimeZone})::timestamp
     )
     SELECT to_char((SELECT local_start FROM bounds), 'YYYY-MM-DD') AS day,
       (SELECT count(*) FROM today) AS calls_count,
@@ -80,6 +84,11 @@ export function wallQuery(): SqlStatement {
       (SELECT count(*) FROM today_holds) AS booked_count,
       (SELECT count(*) FROM today WHERE NOT eligible OR (NOT verified AND otp_attempts >= ${otpMaxAttempts})) AS blocked,
       (SELECT COALESCE(sum(agreed_rate), 0) FROM today_holds) AS booked_value,
+      (SELECT count(*) FROM capacity_week) AS capacity_captured,
+      (SELECT count(*) FROM capacity_week WHERE notified_at IS NOT NULL) AS capacity_notified,
+      (SELECT count(*) FROM capacity_week tc WHERE EXISTS (
+        SELECT 1 FROM holds h WHERE h.mc_number = tc.mc_number AND h.load_id = tc.notified_load_id
+          AND h.status IN ('booked', 'booked_unconfirmed') AND h.created_at > tc.notified_at)) AS capacity_booked_after_notice,
       COALESCE((SELECT value FROM settings WHERE key = 'autonomy'), 'human') AS autonomy`.text;
   return { text };
 }
@@ -188,6 +197,9 @@ export const wallRow = z.object({
   booked_count: count,
   blocked: count,
   booked_value: money,
+  capacity_captured: count,
+  capacity_notified: count,
+  capacity_booked_after_notice: count,
   autonomy: z.enum(autonomyModes),
 });
 export type WallRow = z.output<typeof wallRow>;
@@ -280,6 +292,11 @@ export function operatorWallRoutes(deps: OperatorRouteDeps): FastifyPluginAsync 
               booked: row.booked_count,
               blocked: row.blocked,
               bookedValue: row.booked_value,
+              capacity: {
+                captured: row.capacity_captured,
+                notified: row.capacity_notified,
+                bookedAfterNotice: row.capacity_booked_after_notice,
+              },
             },
             tmsHealth: deps.tmsHealth.snapshot(),
             autonomy: row.autonomy,
