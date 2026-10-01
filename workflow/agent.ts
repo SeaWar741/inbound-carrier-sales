@@ -117,6 +117,30 @@ const tools: ToolSpec[] = [
     body: { loadId: "load_id", agreedRate: "agreed_rate" },
   },
   {
+    name: "save_capacity",
+    exposedFields: ["status", "message"],
+    description:
+      "Keep the carrier's truck on file so we can send them a load later. Call it only after the carrier said yes to being contacted and told you where and when the truck frees up.",
+    path: "/v1/capacity",
+    waitMessage: "Okay, saving that.",
+    parameters: [
+      { name: "city", description: "City where the truck frees up, e.g. Dallas", required: true },
+      { name: "state", description: "State where the truck frees up, as a two-letter code, e.g. TX", required: true },
+      { name: "free_date", description: "Day the truck frees up as YYYY-MM-DD", required: true },
+      { name: "equipment_type", description: "The carrier's equipment as given to search_loads, or any", required: false },
+      { name: "preferred_destination_state", description: "Two-letter state the carrier wants to head to, if they said", required: false },
+      { name: "consent", description: "yes only when the carrier said yes to being contacted about a load; otherwise no", required: true },
+    ],
+    body: {
+      city: "city",
+      state: "state",
+      freeDate: "free_date",
+      equipmentType: "equipment_type",
+      preferredDestinationState: "preferred_destination_state",
+      consent: "consent",
+    },
+  },
+  {
     name: "request_human",
     exposedFields: ["status", "message"],
     description: "Hand the call to a senior rep. Call it when the carrier asks for a human or a senior rep.",

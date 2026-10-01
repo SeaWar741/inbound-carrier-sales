@@ -139,10 +139,15 @@ export const adapterWallResponse = z.object({
   day: z.iso.date(),
   counters: z.object({
     calls: z.number().int(),
+    // offered, bookedCalls, bookedValue and capacity default so an older adapter still parses.
+    offered: z.number().int().default(0),
     booked: z.number().int(),
+    bookedCalls: z.number().int().default(0),
     blocked: z.number().int(),
-    dollarsGenerated: z.number(),
-    marginSaved: z.number(),
+    bookedValue: z.number().default(0),
+    capacity: z
+      .object({ captured: z.number().int(), notified: z.number().int(), bookedAfterNotice: z.number().int() })
+      .default({ captured: 0, notified: 0, bookedAfterNotice: 0 }),
   }),
   tmsHealth,
   // Defaults to the safe mode when an older adapter does not send it.
@@ -361,6 +366,52 @@ export const adapterDemandCarriersResponse = z.object({
   pageSize: z.number().int(),
 });
 export type TowerDemandCarriers = z.infer<typeof adapterDemandCarriersResponse>;
+
+// A truck a carrier said frees up, with the open loads that fit it. Only the posted rate; the max
+// buy never leaves the adapter. pickupDateTime is already desk time, readable ("Oct 3, 8:00 AM").
+const capacityLoad = z.object({
+  loadId: z.string(),
+  origin: z.string(),
+  destination: z.string(),
+  pickupDateTime: z.string(),
+  equipmentType: z.string(),
+  loadboardRate: z.number(),
+  miles: z.number(),
+  // Delivers to the carrier's preferred destination state; the adapter ranks these first.
+  preferred: z.boolean(),
+});
+export type CapacityLoad = z.infer<typeof capacityLoad>;
+
+export const noticeChannels = ["email", "sms"] as const;
+
+const capacityTruck = z.object({
+  id: z.string(),
+  mcNumber: z.string(),
+  carrierName: z.string().nullable(),
+  city: z.string(),
+  state: z.string(),
+  // Null means any equipment.
+  equipment: z.string().nullable(),
+  freeDate: z.iso.date(),
+  preferredDestinationState: z.string().nullable(),
+  // Null when the carrier has no verified contact, so it cannot be notified.
+  noticeChannel: z.enum(noticeChannels).nullable(),
+  notifiedLoadId: z.string().nullable(),
+  notifiedAt: z.iso.datetime().nullable(),
+  // Null when the board could not be read for this truck.
+  loads: z.array(capacityLoad).nullable(),
+});
+export type CapacityTruck = z.infer<typeof capacityTruck>;
+
+export const adapterCapacityResponse = z.object({ status: z.literal("ok"), trucks: z.array(capacityTruck) });
+export type TowerCapacity = z.infer<typeof adapterCapacityResponse>;
+
+export const notifyCapacityBody = z.strictObject({ loadId: loadIdInput });
+export const notifyCapacityResponse = z.object({
+  status: z.enum(["sent", "already_notified", "load_unavailable", "no_contact", "failed"]),
+  message: z.string(),
+});
+export type NotifyCapacityResponse = z.infer<typeof notifyCapacityResponse>;
 
 export type ErrorResponse = { status: string; message: string };
 

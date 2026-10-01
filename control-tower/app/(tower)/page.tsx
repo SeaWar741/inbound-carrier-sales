@@ -3,6 +3,7 @@
 import { useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useMemo, useState } from "react";
 import { ActiveLoads } from "@/components/dashboard/active-loads";
+import { FreeTrucks } from "@/components/dashboard/free-trucks";
 import { KpiTiles } from "@/components/dashboard/kpi-tiles";
 import { LaneMap, type LaneMapLoad } from "@/components/lane-map";
 import type { TowerLoads } from "@/lib/contracts";
@@ -90,21 +91,27 @@ function Dashboard() {
         <section aria-label="Load map" className="h-full min-h-0 overflow-hidden rounded-[var(--radius-panel)] border border-line bg-panel">
           <LaneMap loads={mapLoads} selectedId={selected} onSelect={setSelectedId} overview />
         </section>
-        <ActiveLoads
-          loads={shown}
-          total={loads?.length ?? null}
-          error={error}
-          selectedId={selected}
-          onSelect={setSelectedId}
-          filters={filters}
-          sort={sort}
-          counts={counts}
-          equipments={equipments}
-          origins={origins}
-          onFilter={onFilter}
-          onSort={setSort}
-          onClear={onClear}
-        />
+        {/* Free trucks takes what it needs up to 40% of the column; the loads list keeps the rest. */}
+        <div className="flex min-h-0 flex-col gap-3">
+          <div className="min-h-0 flex-1">
+            <ActiveLoads
+              loads={shown}
+              total={loads?.length ?? null}
+              error={error}
+              selectedId={selected}
+              onSelect={setSelectedId}
+              filters={filters}
+              sort={sort}
+              counts={counts}
+              equipments={equipments}
+              origins={origins}
+              onFilter={onFilter}
+              onSort={setSort}
+              onClear={onClear}
+            />
+          </div>
+          <FreeTrucks />
+        </div>
       </div>
     </div>
   );

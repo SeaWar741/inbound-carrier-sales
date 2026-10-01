@@ -1,12 +1,17 @@
 // Fills Twin with fake carriers, calls, offers and holds so the dashboard and the inbox have
 // something to show. Every row is marked (call ids `demo-`, load ids `DM`) and the seed runs its
-// own teardown first, so a rerun never duplicates.
+// own teardown first, so a rerun never duplicates. The capacity trucks are fitted to real OPEN loads read
+// from the TMS (read only), so they need TMS_HOST/TMS_PORT/TMS_TOKEN; without them only the trucks are skipped.
+// DEMO_NOTICE_EMAIL, when set, is where those trucks' load notices go; unset, they show no contact.
 // Usage: npm run seed:demo            (teardown, then seed)
 //        npm run seed:demo -- --teardown
 import { z } from "zod";
 import { operatorTimeZone } from "../src/constants.ts";
+import { TmsClient } from "../src/infra/tms/tms-client.ts";
 import { TripEstimator } from "../src/infra/trip-estimator.ts";
 import { TwinClient, sql, type SqlStatement } from "../src/infra/twin-client.ts";
+import { deskToday, fitsTruck } from "../src/routes/capacity.ts";
+import { openBoard } from "../src/routes/operator-network.ts";
 
 const env = z
   .object({
@@ -14,6 +19,7 @@ const env = z
     // Without either key every demo hold is stored without a trip, like create_hold does.
     EIA_API_KEY: z.string().min(1).optional(),
     ORS_API_KEY: z.string().min(1).optional(),
+    DEMO_NOTICE_EMAIL: z.string().email().optional(),
   })
   .parse(process.env);
 const twin = new TwinClient({ apiKey: env.HAPPYROBOT_API_KEY });
@@ -25,6 +31,7 @@ async function teardown() {
     await run({ text: `DELETE FROM ${table} WHERE call_id LIKE 'demo-%'` });
   }
   await run({ text: "DELETE FROM holds WHERE call_id LIKE 'demo-%'" });
+  await run({ text: "DELETE FROM truck_capacity WHERE call_id LIKE 'demo-%'" });
 }
 
 await teardown();
@@ -32,7 +39,6 @@ if (process.argv.includes("--teardown")) {
   console.log("demo rows removed");
   process.exit(0);
 }
-
 type Lane = [string, string, string, string, string, string, number, string];
 const lanes: Lane[] = [
   ["Chicago", "IL", "60601", "Dallas", "TX", "75201", 925, "DRY_VAN"],
@@ -255,4 +261,83 @@ await run({
     VALUES ${searches.join(", ")}`,
 });
 await run({ text: `INSERT INTO call_events (call_id, tool, summary, status, created_at) VALUES ${events.join(", ")}` });
-console.log(`seeded ${calls.length} calls, ${offers.length} offers, ${holds.length} holds, ${searches.length} searches, ${events.length} events`);
+// Capacity: 3 trucks that fit a real OPEN load on the board and 1 in a state with none, read the way
+// openLanes reads the board. fitsTruck picks them, so the capacity page lists the same loads.
+const tmsEnv = z
+  .object({ TMS_HOST: z.string().min(1), TMS_PORT: z.coerce.number().int().positive(), TMS_TOKEN: z.string().min(1) })
+  .safeParse(process.env);
+const capacity: string[] = [];
+if (!tmsEnv.success) {
+  console.warn("TMS_HOST/TMS_PORT/TMS_TOKEN missing: capacity trucks skipped");
+} else {
+  const tms = new TmsClient({ host: tmsEnv.data.TMS_HOST, port: tmsEnv.data.TMS_PORT, token: tmsEnv.data.TMS_TOKEN });
+  const board = await openBoard(tms, console);
+  const today = deskToday(new Date());
+  const isoDay = (wire: string) => `${wire.slice(0, 4)}-${wire.slice(4, 6)}-${wire.slice(6, 8)}`;
+  const open = board.filter((load) => isoDay(load.pickupDateTime) >= today);
+  // The page hides a load with a live hold, so a truck fitted only to one would show nothing.
+  const held =
+    open.length === 0
+      ? new Set<string>()
+      : new Set(
+          (
+            await twin.query(
+              sql`SELECT load_id FROM holds WHERE load_id IN (${open.map((load) => load.loadId)}) AND status <> 'released'`,
+              z.object({ load_id: z.string() }),
+            )
+          ).map((row) => row.load_id),
+        );
+
+  type Truck = { city: string; state: string; equipment: string | null; freeDate: string; preferred: string | null };
+  const trucks: Truck[] = [];
+  for (const load of open.filter((candidate) => !held.has(candidate.loadId))) {
+    if (trucks.length === 3) break;
+    // One truck per origin state, so each row of the page shows a different board.
+    if (trucks.some((truck) => truck.state === load.origState)) continue;
+    const pickupDay = isoDay(load.pickupDateTime);
+    const truck = { city: load.origCity, state: load.origState, equipment: load.equipmentType, freeDate: pickupDay, preferred: trucks.length === 0 ? load.destState : null };
+    if (fitsTruck(truck, load)) trucks.push(truck);
+  }
+  if (trucks.length < 3) console.warn(`only ${trucks.length} capacity truck(s) fit an open load on the board`);
+  // A truck no load on the board fits, any equipment, so the page also shows the empty case.
+  const quietStates: [city: string, state: string][] = [
+    ["Burlington", "VT"],
+    ["Bangor", "ME"],
+    ["Cheyenne", "WY"],
+    ["Fargo", "ND"],
+    ["Sioux Falls", "SD"],
+    ["Billings", "MT"],
+  ];
+  const quiet = quietStates.find(([, state]) => !board.some((load) => fitsTruck({ state, equipment: null, freeDate: today }, load)));
+  if (quiet) trucks.push({ city: quiet[0], state: quiet[1], equipment: null, freeDate: today, preferred: null });
+
+  const noticeEmail = env.DEMO_NOTICE_EMAIL ?? null;
+  const capacityCalls: string[] = [];
+  trucks.forEach((truck, n) => {
+    const i = n + 1;
+    const nn = String(i).padStart(2, "0");
+    const callId = `demo-c${nn}`;
+    const mc = String(9000000 + i);
+    const hoursAgo = 2 + n * 3;
+    capacityCalls.push(
+      sql`(${callId}, ${String(8000000 + i)}, ${mc}, TRUE, TRUE, ${`Demo Freight ${nn}`}, 'email', ${noticeEmail}, `.text + ago(hoursAgo) + ")",
+    );
+    capacity.push(
+      sql`(${callId}, ${mc}, ${truck.city}, ${truck.state}, ${truck.equipment}, ${truck.freeDate}::date, ${truck.preferred}, `.text +
+        ago(hoursAgo - 0.1) +
+        ")",
+    );
+  });
+  if (capacity.length > 0) {
+    await run({
+      text: `INSERT INTO calls (call_id, dot_number, mc_number, eligible, verified, carrier_name, otp_channel, otp_destination, created_at)
+        VALUES ${capacityCalls.join(", ")}`,
+    });
+    await run({
+      text: `INSERT INTO truck_capacity (call_id, mc_number, city, state, equipment, free_date, preferred_destination_state, created_at)
+        VALUES ${capacity.join(", ")}`,
+    });
+  }
+}
+
+console.log(`seeded ${calls.length} calls, ${offers.length} offers, ${holds.length} holds, ${searches.length} searches, ${events.length} events, ${capacity.length} capacity trucks`);

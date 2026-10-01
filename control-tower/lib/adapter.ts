@@ -1,6 +1,7 @@
 import "server-only";
 import { z } from "zod";
 import {
+  adapterCapacityResponse,
   adapterCarrierCallsResponse,
   adapterCarriersResponse,
   adapterDemandCarriersResponse,
@@ -10,12 +11,15 @@ import {
   adapterWallResponse,
   autonomyModes,
   confirmHoldResponse,
+  notifyCapacityResponse,
   releaseHoldResponse,
   type AdapterCarrierCallsResponse,
   type AdapterCarriersResponse,
   type AutonomyMode,
   type ConfirmHoldResponse,
   type ErrorResponse,
+  type NotifyCapacityResponse,
+  type TowerCapacity,
   type TowerDemand,
   type TowerDemandCarriers,
   type ReleaseHoldResponse,
@@ -114,6 +118,29 @@ export async function getDemandCarriers(query: URLSearchParams): Promise<Adapter
     adapterDemandCarriersResponse,
     "The demand data is unavailable right now. Retry shortly.",
   );
+}
+
+// Saved trucks with the open loads that fit them; the adapter reads the TMS board per truck.
+export async function getCapacity(): Promise<AdapterResult<TowerCapacity>> {
+  return read("/v1/operator/capacity", adapterCapacityResponse, "The capacity data is unavailable right now. Retry shortly.");
+}
+
+// The adapter answers 200 with a typed status for every business outcome, 404 for an unknown truck.
+export async function notifyCapacity(truckId: string, loadId: string): Promise<AdapterResult<NotifyCapacityResponse>> {
+  const response = await call(`/v1/operator/capacity/${encodeURIComponent(truckId)}/notify`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ loadId }),
+    timeoutMs: readTimeoutMs,
+  });
+  if (response?.status === 404) return { ok: false, httpStatus: 404, body: { status: "not_found", message: "No saved truck with that id." } };
+  if (response?.status === 400) {
+    return { ok: false, httpStatus: 400, body: { status: "invalid_request", message: "The adapter refused this notice." } };
+  }
+  if (!response?.ok) return unavailable("The load was not sent. Retry shortly.");
+  const parsed = notifyCapacityResponse.safeParse(await json(response));
+  if (!parsed.success) return unavailable("The load was not sent. Retry shortly.");
+  return { ok: true, httpStatus: 200, body: parsed.data };
 }
 
 export type InterventionRecord =

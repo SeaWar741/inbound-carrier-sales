@@ -27,7 +27,7 @@ import {
   segmentTopMinBookings,
   segmentTopMinRate,
 } from "../constants.ts";
-import { equipmentTypes } from "../infra/tms/codec.ts";
+import { equipmentTypes, type LoadSummary } from "../infra/tms/codec.ts";
 import type { TmsClient } from "../infra/tms/tms-client.ts";
 import { sql, type SqlStatement, type TwinClient } from "../infra/twin-client.ts";
 import { carrierKey, containsPattern, windowCondition } from "./operator-inbox.ts";
@@ -40,16 +40,21 @@ const growthMinLaneBookings = 2;
 // The side panel ranks this many open lanes; ranked-map-panel.tsx shows the same number of rows.
 const openLanesShown = 5;
 
-// The board's open lanes as `ORIGIN|DESTINATION|EQUIPMENT`, one LOAD_QUERY per equipment type. Null when any
-// query fails: a partial board would tag growth on some lanes and silently not on others.
+// The board's OPEN loads, one LOAD_QUERY per equipment type. Throws when any query fails.
+export async function openBoard(tms: Pick<TmsClient, "queryLoads">, log: Pick<FastifyBaseLogger, "warn">): Promise<LoadSummary[]> {
+  const boards = await Promise.all(
+    equipmentTypes.map((equipmentType) => tms.queryLoads({ equipmentType, maxResults: openLanesPerEquipment })),
+  );
+  // LOAD_QUERY has no status filter, so a full answer may have left open loads out.
+  if (boards.some((board) => board.length === openLanesPerEquipment)) log.warn("open board may be partial: an equipment type filled the TMS cap");
+  return boards.flat().filter((load) => load.status === "OPEN");
+}
+
+// The board's open lanes as `ORIGIN|DESTINATION|EQUIPMENT`. Null when any query fails: a partial board would
+// tag growth on some lanes and silently not on others.
 export async function openLanes(tms: Pick<TmsClient, "queryLoads">, log: Pick<FastifyBaseLogger, "warn">): Promise<Set<string> | null> {
   try {
-    const boards = await Promise.all(
-      equipmentTypes.map((equipmentType) => tms.queryLoads({ equipmentType, maxResults: openLanesPerEquipment })),
-    );
-    // LOAD_QUERY has no status filter, so a full answer may have left open loads out.
-    if (boards.some((board) => board.length === openLanesPerEquipment)) log.warn("open lanes may be partial: an equipment type filled the TMS cap");
-    return new Set(boards.flat().filter((load) => load.status === "OPEN").map((load) => `${load.origState}|${load.destState}|${load.equipmentType}`));
+    return new Set((await openBoard(tms, log)).map((load) => `${load.origState}|${load.destState}|${load.equipmentType}`));
   } catch (error) {
     log.warn({ err: error }, "open lanes unavailable, growth tags skipped");
     return null;

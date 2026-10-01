@@ -255,6 +255,73 @@ export const createHoldResponse = z.object({
 });
 export type CreateHoldResponse = z.infer<typeof createHoldResponse>;
 
+// Flat fields like searchLoadsBody. Consent is a tool string: only an explicit yes counts.
+export const saveCapacityBody = z.object({
+  callId,
+  city: cityInput,
+  state: stateInput,
+  freeDate: z.iso.date(),
+  equipmentType: optionalEquipment,
+  preferredDestinationState: optionalField(stateInput),
+  consent: z.preprocess(
+    (value) => value === true || (typeof value === "string" && /^\s*(yes|true)\s*$/i.test(value)),
+    z.boolean(),
+  ),
+});
+export type SaveCapacityBody = z.output<typeof saveCapacityBody>;
+
+export const saveCapacityResponse = z.object({
+  status: z.enum(["ok", "not_verified", "no_consent", "invalid_request", "service_unavailable"]),
+  message: z.string(),
+});
+export type SaveCapacityResponse = z.infer<typeof saveCapacityResponse>;
+
+// A load the board has open that fits a saved truck. The posted rate only; the max buy never leaves the adapter.
+const capacityLoad = z.object({
+  loadId: z.string(),
+  origin: z.string(),
+  destination: z.string(),
+  // Desk time, readable: "Oct 3, 8:00 AM".
+  pickupDateTime: z.string(),
+  equipmentType: z.string(),
+  loadboardRate: z.number(),
+  miles: z.number(),
+  // Delivers to the carrier's preferred destination state; these rank first.
+  preferred: z.boolean(),
+});
+
+export const operatorCapacityResponse = z.object({
+  status: z.literal("ok"),
+  trucks: z.array(
+    z.object({
+      id: z.string(),
+      mcNumber: z.string(),
+      carrierName: z.string().nullable(),
+      city: z.string(),
+      state: z.string(),
+      // Null means any equipment.
+      equipment: z.string().nullable(),
+      freeDate: z.iso.date(),
+      preferredDestinationState: z.string().nullable(),
+      // The channel the carrier verified on; the contact itself never leaves the adapter.
+      noticeChannel: z.enum(["email", "sms"]).nullable(),
+      notifiedLoadId: z.string().nullable(),
+      notifiedAt: z.iso.datetime().nullable(),
+      // Null when the board could not be read for this truck.
+      loads: z.array(capacityLoad).nullable(),
+    }),
+  ),
+});
+export type OperatorCapacityResponse = z.infer<typeof operatorCapacityResponse>;
+
+export const notifyCapacityParams = z.object({ id: z.uuid() });
+export const notifyCapacityBody = z.strictObject({ loadId: loadIdInput });
+export const notifyCapacityResponse = z.object({
+  status: z.enum(["sent", "already_notified", "load_unavailable", "no_contact", "failed"]),
+  message: z.string(),
+});
+export type NotifyCapacityResponse = z.infer<typeof notifyCapacityResponse>;
+
 export const confirmHoldParams = z.object({ holdId: z.uuid() });
 
 // Other headers pass through untouched; only the key is required.
@@ -411,11 +478,17 @@ export const operatorWallResponse = z.object({
   day: z.iso.date(),
   counters: z.object({
     calls: z.number().int(),
+    // Calls that got a load offered: an offer row, or a search that returned loads.
+    offered: z.number().int(),
     booked: z.number().int(),
+    // Today's calls with at least one booked hold: the win rate's numerator, so it never passes offered.
+    bookedCalls: z.number().int(),
     // Refused at verification: not eligible, or OTP locked. A fact, not a fraud verdict.
     blocked: z.number().int(),
-    dollarsGenerated: z.number(),
-    marginSaved: z.number(),
+    // Sum of agreed rates on today's booked holds.
+    bookedValue: z.number(),
+    // Trucks saved in the last 7 days, those sent a load, and those that then booked that load.
+    capacity: z.object({ captured: z.number().int(), notified: z.number().int(), bookedAfterNotice: z.number().int() }),
   }),
   tmsHealth,
   // "human": a rep confirms every hold. "autonomous": create_hold books right away.

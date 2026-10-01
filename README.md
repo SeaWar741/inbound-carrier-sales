@@ -42,7 +42,7 @@ npm run push:workflow -- inbound-carrier-sales  # the voice agent (needs ADAPTER
 Pushing the agent generates each tool's result once, which calls the adapter with blank input, so the adapter must be running at `ADAPTER_URL`.
 
 Twin tables are created with `npm run bootstrap:twin` (idempotent; also applies migrations and prints SQL latency).
-Fake demo data for the dashboard and inbox: `npm run seed:demo` (24 carriers marked `demo-` / `DM`, reseeds from scratch); `npm run seed:demo -- --teardown` removes only those rows.
+Fake demo data for the dashboard and inbox: `npm run seed:demo` (24 carriers marked `demo-` / `DM`, reseeds from scratch); `npm run seed:demo -- --teardown` removes only those rows. The seed also saves 4 capacity trucks: 3 fitted to real OPEN loads it reads from the TMS (read only, so they need `TMS_HOST`/`TMS_PORT`/`TMS_TOKEN`; without them the seed skips only the trucks) and 1 in a state with no fit. Their load notices go to `DEMO_NOTICE_EMAIL`; unset, the trucks show no contact and cannot be notified.
 
 ## Simulated calls
 
@@ -161,6 +161,29 @@ There is no booked column. A search has no id that follows it to an offer and a 
 - The board is read with one LOAD_QUERY per equipment type, capped at `openLanesPerEquipment` (50) loads each and cached `openLanesCacheMs` (10 minutes) in memory. LOAD_QUERY has no status filter, so a type that fills the cap may hide open lanes, and the adapter logs it. When the TMS cannot be read, no lane shows as open and the page says so.
 - Lanes are matched at the state level, not the city.
 - Zip-only searches have no origin state and do not appear on the Demand page.
+
+## Capacity capture
+
+When a verified carrier finds no load it can take, the agent offers to keep the truck on file: city, state, the day it frees up, equipment (or any) and an optional preferred destination state, saved only with the carrier's consent (`POST /v1/capacity`, table `truck_capacity`). The Dashboard's Free trucks panel lists the saved trucks with the OPEN loads that fit each one, and a rep sends one load to the carrier with a click (`GET /v1/operator/capacity`, `POST /v1/operator/capacity/:id/notify`, in `src/routes/capacity.ts`). Nothing is sent automatically.
+
+Match rule (`fitsTruck`): the load picks up in the truck's state, with its equipment (any when the carrier said any), from the free date through `capacityWindowDays` (2) days after. A load with a live hold is hidden. A load to the preferred destination state ranks first but never filters. The panel shows the newest `capacityTrucksShown` (20) trucks still inside their window. The board is read the way Demand reads its open lanes, one LOAD_QUERY per equipment type cached `openLanesCacheMs` (10 minutes), and every truck is matched against it in memory; when the TMS cannot be read, every truck shows its loads as unavailable. A truck gets one notice; the notice quotes the posted rate only and goes to the email or phone verified on the call, which the panel never shows. If the send fails partway the truck stays notified, since the notice may already be out; the rep checks with the carrier rather than sending again.
+
+KPIs on the wall:
+- **Booked load value**: sum of agreed rates on today's booked holds (desk day, `America/Chicago`).
+- **Win rate on offered**: today's calls that booked a load over today's calls that were offered a load (a search returned loads or an offer was made).
+- **Trucks captured funnel**, over the last 7 desk days: trucks captured, then notified, then booked after notice (the same carrier booked the notified load after the notice went out).
+
+### Prior art
+
+- [Parade](https://parade.ai/) matches carrier-posted capacity to open loads and puts the offer in front of a rep. DAT [truck posting](https://www.dat.com/) lists a truck by origin, equipment and available date. [Loadsmart](https://loadsmart.com/) keeps carriers' preferred lanes.
+- We took the per-truck match on lane, equipment and date, and an offer a human sends.
+- We dropped auto-send (a wrong load sent in our name costs more than a click), radius and geocoding matching (it needs a geocoder and is not free; state level is enough for a demo board), and several notices per load (one notice per truck keeps the carrier from being spammed).
+
+### Known limits
+
+- States, not distance: a truck near a state border never sees a load across it.
+- The board is capped at `openLanesPerEquipment` (50) loads per equipment type, with no status filter, so a type that fills the cap may leave open loads out; the adapter logs it.
+- Booked after notice is a correlation: the carrier may have booked that load without the notice.
 
 ## Margin and negotiation research
 

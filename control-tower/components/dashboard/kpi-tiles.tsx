@@ -102,19 +102,30 @@ function TripSplit({ counts }: { counts: Record<TripStatus | "all", number> | nu
 export function KpiTiles({ loads, counters }: { loads: TowerLoad[] | null; counters: TowerWall["counters"] | null }) {
   const counts = loads && statusCounts(loads, emptyLoadFilters);
   const dollarsInMotion = (loads ?? []).reduce((sum, load) => sum + (load.status === "in_transit" ? load.agreedRate : 0), 0);
-  const winRate = counters && counters.calls > 0 ? `${Math.round((counters.booked / counters.calls) * 100)}%` : "-";
+  const winRate = counters && counters.offered > 0 ? `${Math.round((counters.bookedCalls / counters.offered) * 100)}%` : "-";
 
   return (
     <section aria-label="Key numbers" aria-live="polite">
-      <dl className="grid grid-cols-[repeat(4,minmax(0,1fr))_minmax(0,1.6fr)] gap-3">
+      <dl className="grid grid-cols-[repeat(5,minmax(0,1fr))_minmax(0,1.6fr)] gap-3">
         <Tile label="Dollars in motion" value={loads === null ? "-" : formatUsd(dollarsInMotion)} hint="Agreed rate of loads in transit" />
         <Tile label="Loads in motion" value={counts === null ? "-" : String(counts.in_transit)} hint={`${counts?.upcoming ?? 0} more picking up soon`} />
         <Tile
           label="Booked today"
           value={counters === null ? "-" : String(counters.booked)}
-          hint={counters === null ? "" : `${formatUsd(counters.dollarsGenerated)} generated`}
+          hint={counters === null ? "" : `${formatUsd(counters.bookedValue)} booked load value`}
         />
-        <Tile label="Win rate today" value={winRate} hint={counters === null ? "" : `${counters.booked} booked of ${counters.calls} calls`} />
+        <Tile
+          label="Win rate today"
+          value={winRate}
+          hint={counters === null ? "" : `${counters.bookedCalls} of ${counters.offered} offered calls booked · ${counters.calls} calls`}
+        />
+        <Tile
+          label="Trucks captured · 7d"
+          value={counters === null ? "-" : String(counters.capacity.captured)}
+          hint={
+            counters === null ? "" : `${counters.capacity.notified} notified · ${counters.capacity.bookedAfterNotice} booked after notice`
+          }
+        />
         <TripSplit counts={counts} />
       </dl>
     </section>

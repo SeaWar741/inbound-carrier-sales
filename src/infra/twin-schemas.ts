@@ -90,6 +90,21 @@ export const tableDdl = {
     dropped_impossible int8 NOT NULL DEFAULT 0,
     created_at timestamp NOT NULL DEFAULT now()
   )`,
+  // One truck per call that agreed to be contacted: where and when it frees up (NULL equipment means any).
+  // notified_* is set once a matching load is sent, so a carrier is never told twice.
+  truck_capacity: `CREATE TABLE IF NOT EXISTS truck_capacity (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    call_id text NOT NULL UNIQUE,
+    mc_number text NOT NULL,
+    city text NOT NULL,
+    state text NOT NULL,
+    equipment text,
+    free_date date NOT NULL,
+    preferred_destination_state text,
+    notified_load_id text,
+    notified_at timestamp,
+    created_at timestamp NOT NULL DEFAULT now()
+  )`,
 } as const;
 
 // Changes to tables that already exist; each statement is idempotent and runs on every bootstrap.
