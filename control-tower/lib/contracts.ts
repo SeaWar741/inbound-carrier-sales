@@ -139,11 +139,15 @@ export const adapterWallResponse = z.object({
   day: z.iso.date(),
   counters: z.object({
     calls: z.number().int(),
-    offered: z.number().int(),
+    // offered, bookedCalls, bookedValue and capacity default so an older adapter still parses.
+    offered: z.number().int().default(0),
     booked: z.number().int(),
+    bookedCalls: z.number().int().default(0),
     blocked: z.number().int(),
-    bookedValue: z.number(),
-    capacity: z.object({ captured: z.number().int(), notified: z.number().int(), bookedAfterNotice: z.number().int() }),
+    bookedValue: z.number().default(0),
+    capacity: z
+      .object({ captured: z.number().int(), notified: z.number().int(), bookedAfterNotice: z.number().int() })
+      .default({ captured: 0, notified: 0, bookedAfterNotice: 0 }),
   }),
   tmsHealth,
   // Defaults to the safe mode when an older adapter does not send it.

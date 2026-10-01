@@ -102,7 +102,7 @@ function TripSplit({ counts }: { counts: Record<TripStatus | "all", number> | nu
 export function KpiTiles({ loads, counters }: { loads: TowerLoad[] | null; counters: TowerWall["counters"] | null }) {
   const counts = loads && statusCounts(loads, emptyLoadFilters);
   const dollarsInMotion = (loads ?? []).reduce((sum, load) => sum + (load.status === "in_transit" ? load.agreedRate : 0), 0);
-  const winRate = counters && counters.offered > 0 ? `${Math.round((counters.booked / counters.offered) * 100)}%` : "-";
+  const winRate = counters && counters.offered > 0 ? `${Math.round((counters.bookedCalls / counters.offered) * 100)}%` : "-";
 
   return (
     <section aria-label="Key numbers" aria-live="polite">
@@ -117,7 +117,7 @@ export function KpiTiles({ loads, counters }: { loads: TowerLoad[] | null; count
         <Tile
           label="Win rate today"
           value={winRate}
-          hint={counters === null ? "" : `${counters.booked} booked of ${counters.offered} offered · ${counters.calls} calls`}
+          hint={counters === null ? "" : `${counters.bookedCalls} of ${counters.offered} offered calls booked · ${counters.calls} calls`}
         />
         <Tile
           label="Trucks captured · 7d"

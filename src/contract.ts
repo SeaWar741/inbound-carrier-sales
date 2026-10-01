@@ -481,6 +481,8 @@ export const operatorWallResponse = z.object({
     // Calls that got a load offered: an offer row, or a search that returned loads.
     offered: z.number().int(),
     booked: z.number().int(),
+    // Today's calls with at least one booked hold: the win rate's numerator, so it never passes offered.
+    bookedCalls: z.number().int(),
     // Refused at verification: not eligible, or OTP locked. A fact, not a fraud verdict.
     blocked: z.number().int(),
     // Sum of agreed rates on today's booked holds.

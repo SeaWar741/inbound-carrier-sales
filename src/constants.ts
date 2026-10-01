@@ -107,6 +107,6 @@ export const tollsSpokenFloorUsd = 20;
 
 // Capacity capture: a truck fits loads picking up from its free date through this many days after (JC's number).
 export const capacityWindowDays = 2;
-// The capacity page lists the newest active trucks only. Each one reads the board once per day of its window:
-// 20 trucks x 3 days = 60 LOAD_QUERY calls on a cold cache, ~15 s at the TMS's 4 rps, then cached.
+// The capacity page lists the newest active trucks only. The board read is shared by all of them, so this
+// bounds the panel and the holds lookup, not the TMS calls.
 export const capacityTrucksShown = 20;

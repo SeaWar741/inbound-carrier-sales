@@ -17,7 +17,7 @@ import { capacityTrucksShown, capacityWindowDays, openLanesCacheMs, openLanesPer
 import { dollars } from "../domain/negotiation.ts";
 import { tmsWallClockToDate } from "../domain/trip.ts";
 import type { CarrierMessage, OtpDeliveryClient } from "../infra/otp-delivery-client.ts";
-import type { LoadSummary } from "../infra/tms/codec.ts";
+import { equipmentTypes, type LoadSummary } from "../infra/tms/codec.ts";
 import { TmsBusinessError } from "../infra/tms/errors.ts";
 import type { TmsClient } from "../infra/tms/tms-client.ts";
 import { sql, type TwinClient } from "../infra/twin-client.ts";
@@ -38,7 +38,7 @@ const saveMessages = {
 const reply = (status: SaveCapacityResponse["status"], message: string): SaveCapacityResponse => ({ status, message });
 
 // The desk's calendar day as YYYY-MM-DD; en-CA formats dates in that order.
-const deskToday = (now: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: operatorTimeZone }).format(now);
+export const deskToday = (now: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: operatorTimeZone }).format(now);
 
 const callRow = z.object({ verified: z.boolean(), mc_number: z.string().nullable() });
 
@@ -84,13 +84,11 @@ type TruckFit = { state: string; equipment: string | null; freeDate: string };
 type LoadFit = Pick<LoadSummary, "origState" | "equipmentType" | "pickupDateTime">;
 
 // YYYY-MM-DD plus whole days, on the calendar alone.
-const addDays = (isoDate: string, days: number) => {
+export const addDays = (isoDate: string, days: number) => {
   const date = new Date(`${isoDate}T00:00:00Z`);
   date.setUTCDate(date.getUTCDate() + days);
   return date.toISOString().slice(0, 10);
 };
-
-const windowDays = (freeDate: string) => Array.from({ length: capacityWindowDays + 1 }, (_, i) => addDays(freeDate, i));
 
 // A load fits a truck that frees up in its origin state with its equipment (or any), picking up from
 // the free date through capacityWindowDays after. The preferred destination only ranks, never filters.
@@ -151,7 +149,6 @@ const activeTruckRow = z.object({
   notified_load_id: z.string().nullable(),
   notified_at: z.coerce.date().nullable(),
 });
-type ActiveTruck = z.output<typeof activeTruckRow>;
 
 const notifyTruckRow = z.object({
   state: z.string(),
@@ -171,6 +168,7 @@ const notifyMessages = {
   loadUnavailable: "That load is no longer open or does not fit this truck.",
   noContact: "This carrier has no verified email or phone to send the load to.",
   failed: "The load was not sent. Retry shortly.",
+  sendUncertain: "The notice may not have gone out. Check with the carrier before contacting them again.",
 } as const;
 
 const notified = (status: NotifyCapacityResponse["status"], message: string): NotifyCapacityResponse => ({ status, message });
@@ -191,36 +189,26 @@ const toCapacityLoad = (load: LoadSummary, preferredState: string | null): NonNu
 export function operatorCapacityRoutes(deps: OperatorCapacityRouteDeps): FastifyPluginAsync {
   return async (plugin) => {
     const app = plugin.withTypeProvider<ZodTypeProvider>();
-    // One board read per origin state, equipment and pickup day. Only a read that answered is kept;
-    // after a TMS failure the next request tries again.
-    const boards = new Map<string, { loads: LoadSummary[]; readAt: number }>();
+    // The same board read as the Demand page's open lanes: one LOAD_QUERY per equipment type, shared by
+    // every truck. Only a read that answered is kept; after a TMS failure the next request tries again.
+    let board: { loads: LoadSummary[]; readAt: number } | undefined;
 
-    async function boardFor(key: string, log: FastifyBaseLogger): Promise<LoadSummary[] | null> {
-      const cached = boards.get(key);
-      if (cached && Date.now() - cached.readAt < openLanesCacheMs) return cached.loads;
-      const [origState = "", equipment = "", day = ""] = key.split("|");
+    async function currentBoard(log: FastifyBaseLogger): Promise<LoadSummary[] | null> {
+      if (board && Date.now() - board.readAt < openLanesCacheMs) return board.loads;
       try {
-        const loads = await deps.tms.queryLoads({
-          origState,
-          ...(equipment && { equipmentType: equipment }),
-          pickupDate: day.replaceAll("-", ""),
-          maxResults: openLanesPerEquipment,
-        });
+        const reads = await Promise.all(
+          equipmentTypes.map((equipmentType) => deps.tms.queryLoads({ equipmentType, maxResults: openLanesPerEquipment })),
+        );
         // LOAD_QUERY has no status filter, so a full answer may have left open loads out.
-        if (loads.length === openLanesPerEquipment) log.warn({ key }, "capacity board may be partial: the query filled the TMS cap");
-        boards.set(key, { loads, readAt: Date.now() });
+        if (reads.some((read) => read.length === openLanesPerEquipment)) log.warn("capacity board may be partial: an equipment type filled the TMS cap");
+        const loads = reads.flat().filter((load) => load.status === "OPEN");
+        board = { loads, readAt: Date.now() };
         return loads;
       } catch (error) {
-        log.warn({ err: error, key }, "capacity board unavailable");
+        log.warn({ err: error }, "capacity board unavailable");
         return null;
       }
     }
-
-    // Days already past in the desk's zone are skipped: no load picks up there anymore.
-    const keysFor = (truck: ActiveTruck, today: string) =>
-      windowDays(truck.free_date)
-        .filter((day) => day >= today)
-        .map((day) => `${truck.state}|${truck.equipment ?? ""}|${day}`);
 
     // The operator's screen, not the voice agent, reads these, so a bad request is a plain 400.
     app.setErrorHandler((error, _request, reply) => {
@@ -243,16 +231,15 @@ export function operatorCapacityRoutes(deps: OperatorCapacityRouteDeps): Fastify
                 ORDER BY tc.created_at DESC LIMIT ${capacityTrucksShown}`,
             activeTruckRow,
           );
-          const today = deskToday(new Date());
-          const keys = [...new Set(trucks.flatMap((truck) => keysFor(truck, today)))];
-          const read = new Map(await Promise.all(keys.map(async (key) => [key, await boardFor(key, request.log)] as const)));
+          const loadsOnBoard = trucks.length === 0 ? [] : await currentBoard(request.log);
 
-          // A truck whose board read failed shows no loads at all rather than a partial list.
+          // Without a board every truck shows no loads at all rather than an empty list. Pickups on days
+          // already past in the desk's zone are skipped.
+          const today = deskToday(new Date()).replaceAll("-", "");
           const fits = trucks.map((truck) => {
-            const boardsRead = keysFor(truck, today).map((key) => read.get(key) ?? null);
-            if (boardsRead.some((loads) => loads === null)) return null;
+            if (loadsOnBoard === null) return null;
             const truckFit = { state: truck.state, equipment: truck.equipment, freeDate: truck.free_date };
-            return boardsRead.flatMap((loads) => loads ?? []).filter((load) => load.status === "OPEN" && fitsTruck(truckFit, load));
+            return loadsOnBoard.filter((load) => load.pickupDateTime.slice(0, 8) >= today && fitsTruck(truckFit, load));
           });
 
           const loadIds = [...new Set(fits.flatMap((loads) => (loads ?? []).map((load) => load.loadId)))];
@@ -303,7 +290,7 @@ export function operatorCapacityRoutes(deps: OperatorCapacityRouteDeps): Fastify
     );
 
     // Sends one open load to a saved truck's carrier, once: only the request whose UPDATE claims the
-    // truck sends, and a failed send gives the claim back so the operator can retry.
+    // truck sends. A send that throws keeps the claim, since the notice may already be on its way.
     app.post(
       "/operator/capacity/:id/notify",
       {
@@ -355,10 +342,8 @@ export function operatorCapacityRoutes(deps: OperatorCapacityRouteDeps): Fastify
             await deps.delivery.send(truck.otp_channel, truck.otp_destination, capacityNotice(load, truck.created_at));
           } catch (error) {
             request.log.warn({ err: error, id, loadId }, "capacity notice failed");
-            await deps.twin
-              .query(sql`UPDATE truck_capacity SET notified_load_id = NULL, notified_at = NULL WHERE id = ${id}`, z.unknown())
-              .catch((unclaimError: unknown) => request.log.warn({ err: unclaimError, id }, "capacity notice claim not released"));
-            return notified("failed", notifyMessages.failed);
+            // The send may have started before it threw, so the claim stays: a retry could reach the carrier twice.
+            return notified("failed", notifyMessages.sendUncertain);
           }
           return notified("sent", notifyMessages.sent);
         } catch (error) {

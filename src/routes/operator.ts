@@ -82,6 +82,7 @@ export function wallQuery(): SqlStatement {
       (SELECT count(*) FROM today t WHERE EXISTS (SELECT 1 FROM offers o WHERE o.call_id = t.call_id)
         OR EXISTS (SELECT 1 FROM load_searches ls WHERE ls.call_id = t.call_id AND ls.results > 0)) AS offered_count,
       (SELECT count(*) FROM today_holds) AS booked_count,
+      (SELECT count(DISTINCT call_id) FROM today_holds) AS booked_calls,
       (SELECT count(*) FROM today WHERE NOT eligible OR (NOT verified AND otp_attempts >= ${otpMaxAttempts})) AS blocked,
       (SELECT COALESCE(sum(agreed_rate), 0) FROM today_holds) AS booked_value,
       (SELECT count(*) FROM capacity_week) AS capacity_captured,
@@ -195,6 +196,7 @@ export const wallRow = z.object({
   calls_count: count,
   offered_count: count,
   booked_count: count,
+  booked_calls: count,
   blocked: count,
   booked_value: money,
   capacity_captured: count,
@@ -290,6 +292,7 @@ export function operatorWallRoutes(deps: OperatorRouteDeps): FastifyPluginAsync 
               calls: row.calls_count,
               offered: row.offered_count,
               booked: row.booked_count,
+              bookedCalls: row.booked_calls,
               blocked: row.blocked,
               bookedValue: row.booked_value,
               capacity: {

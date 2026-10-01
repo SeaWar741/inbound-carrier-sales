@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { LuArrowRight, LuChevronDown, LuMail, LuMessageSquareText, LuSend, LuStar, LuTriangleAlert, LuTruck } from "react-icons/lu";
 import { EmptyState } from "@/components/empty-state";
-import type { CapacityLoad, CapacityTruck, NotifyCapacityResponse, TowerCapacity } from "@/lib/contracts";
+import type { CapacityLoad, CapacityTruck, ErrorResponse, NotifyCapacityResponse, TowerCapacity } from "@/lib/contracts";
 import { carrierName, equipmentLabel, formatClock, formatUsd, plural } from "@/lib/format";
 import { fetchTower, usePollWith } from "@/lib/use-poll";
 
@@ -28,6 +28,9 @@ const noticeTones: Record<NotifyCapacityResponse["status"], string> = {
   failed: "text-warn",
 };
 
+// A 400 or 404 from the tower carries a status the notice tones do not list.
+const isNoticeStatus = (status: string): status is NotifyCapacityResponse["status"] => Object.hasOwn(noticeTones, status);
+
 async function postNotice(truckId: string, loadId: string): Promise<Notice | null> {
   const res = await fetch(`/api/capacity/${encodeURIComponent(truckId)}/notify`, {
     method: "POST",
@@ -38,9 +41,9 @@ async function postNotice(truckId: string, loadId: string): Promise<Notice | nul
     window.location.assign("/login");
     return null;
   }
-  const body = (await res.json().catch(() => null)) as { status: string; message: string } | null;
+  const body = (await res.json().catch(() => null)) as NotifyCapacityResponse | ErrorResponse | null;
   if (!body) return { tone: "text-warn", text: `The tower answered ${res.status}` };
-  return { tone: noticeTones[body.status as NotifyCapacityResponse["status"]] ?? "text-warn", text: body.message };
+  return { tone: isNoticeStatus(body.status) ? noticeTones[body.status] : "text-warn", text: body.message };
 }
 
 function FitBadge({ truck }: { truck: CapacityTruck }) {

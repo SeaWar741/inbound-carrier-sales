@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { z } from "zod";
 import type { CarrierMessage } from "../src/infra/otp-delivery-client.ts";
-import type { LoadDetail, LoadQueryFilters, LoadSummary } from "../src/infra/tms/codec.ts";
+import { equipmentTypes, type LoadDetail, type LoadQueryFilters, type LoadSummary } from "../src/infra/tms/codec.ts";
 import type { SqlStatement, TwinClient } from "../src/infra/twin-client.ts";
 import { capacityNotice, capacityRoutes, fitsTruck, operatorCapacityRoutes } from "../src/routes/capacity.ts";
 import { buildServer } from "../src/server.ts";
@@ -192,11 +192,6 @@ function capacityTwin(contact: { otp_channel: string | null; otp_destination: st
       truck.notified_load_id = "L100";
       return parse([{ id: truckId }]);
     }
-    if (text.startsWith("UPDATE truck_capacity SET notified_load_id = NULL")) {
-      truck.notified_at = null;
-      truck.notified_load_id = null;
-      return [];
-    }
     if (text.includes("FROM truck_capacity tc LEFT JOIN calls c")) {
       return parse([
         {
@@ -266,15 +261,20 @@ describe("POST /v1/operator/capacity/:id/notify", () => {
     expect(twin.truck.notified_at).toBeNull();
   });
 
-  it("gives the claim back when the send fails", async () => {
+  it("keeps the claim when the send throws, so a retry cannot send twice", async () => {
     const twin = capacityTwin();
     const send = vi.fn(async (): Promise<string> => {
       throw new Error("workflow down");
     });
     app = operatorServer(twin, {}, send).app;
-    expect((await notify(app)).json()).toMatchObject({ status: "failed" });
-    expect(twin.statements.some((text) => text.startsWith("UPDATE truck_capacity SET notified_load_id = NULL, notified_at = NULL"))).toBe(true);
-    expect(twin.truck.notified_at).toBeNull();
+    expect((await notify(app)).json()).toEqual({
+      status: "failed",
+      message: "The notice may not have gone out. Check with the carrier before contacting them again.",
+    });
+    expect(twin.statements.filter((text) => text.startsWith("UPDATE truck_capacity"))).toHaveLength(1);
+    expect(twin.truck).toMatchObject({ notified_at: "2099-01-12T10:00:00Z", notified_load_id: "L100" });
+    expect((await notify(app)).json()).toMatchObject({ status: "already_notified" });
+    expect(send).toHaveBeenCalledTimes(1);
   });
 
   it("does not send without a verified contact", async () => {
@@ -300,14 +300,18 @@ describe("GET /v1/operator/capacity", () => {
   it("lists open fitting loads, preferred first, without held loads, the contact or the max buy", async () => {
     const twin = capacityTwin();
     const queryLoads = vi.fn(async (filters: LoadQueryFilters) =>
-      filters.pickupDate === "20990115"
+      filters.equipmentType === "DRY_VAN"
         ? [
-            summary("L200", { destState: "OK", pickupDateTime: "20990115090000" }),
+            summary("L200", { destState: "OK", pickupDateTime: "20990117090000" }),
             summary("L100", { pickupDateTime: "20990115100000" }),
             summary("L300", { pickupDateTime: "20990115110000" }),
             summary("L400", { status: "BOOKED", pickupDateTime: "20990115120000" }),
+            summary("L500", { pickupDateTime: "20990118090000" }),
+            summary("L600", { origState: "OK", pickupDateTime: "20990115090000" }),
           ]
-        : [],
+        : filters.equipmentType === "REEFER"
+          ? [summary("L700", { equipmentType: "REEFER", pickupDateTime: "20990115090000" })]
+          : [],
     );
     app = operatorServer(twin, { queryLoads }).app;
     const res = await getCapacity(app);
@@ -319,15 +323,12 @@ describe("GET /v1/operator/capacity", () => {
     expect(truck).toMatchObject({ id: truckId, carrierName: "Acme Freight", noticeChannel: "email", notifiedAt: null });
     expect(truck.loads.map((load: { loadId: string }) => load.loadId)).toEqual(["L100", "L200"]);
     expect(truck.loads[0]).toMatchObject({ origin: "Dallas, TX", destination: "Atlanta, GA", loadboardRate: 2150, preferred: true });
-    expect(queryLoads.mock.calls.map(([filters]) => filters)).toEqual([
-      { origState: "TX", equipmentType: "DRY_VAN", pickupDate: "20990115", maxResults: 50 },
-      { origState: "TX", equipmentType: "DRY_VAN", pickupDate: "20990116", maxResults: 50 },
-      { origState: "TX", equipmentType: "DRY_VAN", pickupDate: "20990117", maxResults: 50 },
-    ]);
+    // One board read per equipment type, whatever the trucks are.
+    expect(queryLoads.mock.calls.map(([filters]) => filters)).toEqual(equipmentTypes.map((equipmentType) => ({ equipmentType, maxResults: 50 })));
 
     // The second read comes from the cache.
     await getCapacity(app);
-    expect(queryLoads).toHaveBeenCalledTimes(3);
+    expect(queryLoads).toHaveBeenCalledTimes(equipmentTypes.length);
   });
 
   it("shows null loads for a truck whose board read failed", async () => {

@@ -172,33 +172,3 @@ export const holdRowSchema = z
     updatedAt: r.updated_at,
   }));
 export type HoldRow = z.output<typeof holdRowSchema>;
-
-export const truckCapacityRowSchema = z
-  .object({
-    id: z.string(),
-    call_id: z.string(),
-    mc_number: z.string(),
-    city: z.string(),
-    state: z.string(),
-    equipment: z.string().nullable(),
-    // Read as the calendar day YYYY-MM-DD, never as a Date, so no time zone can shift it.
-    free_date: z.string().transform((value) => value.slice(0, 10)),
-    preferred_destination_state: z.string().nullable(),
-    notified_load_id: z.string().nullable(),
-    notified_at: timestamp.nullable(),
-    created_at: timestamp,
-  })
-  .transform((r) => ({
-    id: r.id,
-    callId: r.call_id,
-    mcNumber: r.mc_number,
-    city: r.city,
-    state: r.state,
-    equipment: r.equipment,
-    freeDate: r.free_date,
-    preferredDestinationState: r.preferred_destination_state,
-    notifiedLoadId: r.notified_load_id,
-    notifiedAt: r.notified_at,
-    createdAt: r.created_at,
-  }));
-export type TruckCapacityRow = z.output<typeof truckCapacityRowSchema>;

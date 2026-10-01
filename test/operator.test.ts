@@ -12,7 +12,9 @@ const wallRow = {
   day: "2026-09-29",
   calls_count: "2",
   offered_count: "1",
-  booked_count: "1",
+  // Two holds booked on one call: the win rate counts the call once.
+  booked_count: "2",
+  booked_calls: "1",
   blocked: "1",
   booked_value: "2300",
   capacity_captured: "4",
@@ -158,6 +160,7 @@ describe("GET /v1/operator/wall", () => {
     expect(res.statusCode).toBe(200);
     expect(statements).toHaveLength(1);
     expect(statements[0]).toContain("AT TIME ZONE E'America/Chicago'");
+    expect(statements[0]).toContain("count(DISTINCT call_id) FROM today_holds");
 
     const wall = operatorWallResponse.parse(res.json());
     expect(wall.day).toBe("2026-09-29");
@@ -165,7 +168,8 @@ describe("GET /v1/operator/wall", () => {
     expect(wall.counters).toEqual({
       calls: 2,
       offered: 1,
-      booked: 1,
+      booked: 2,
+      bookedCalls: 1,
       blocked: 1,
       bookedValue: 2300,
       capacity: { captured: 4, notified: 2, bookedAfterNotice: 1 },
