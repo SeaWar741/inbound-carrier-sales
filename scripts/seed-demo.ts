@@ -6,12 +6,12 @@
 // Usage: npm run seed:demo            (teardown, then seed)
 //        npm run seed:demo -- --teardown
 import { z } from "zod";
-import { openLanesPerEquipment, operatorTimeZone } from "../src/constants.ts";
-import { equipmentTypes } from "../src/infra/tms/codec.ts";
+import { operatorTimeZone } from "../src/constants.ts";
 import { TmsClient } from "../src/infra/tms/tms-client.ts";
 import { TripEstimator } from "../src/infra/trip-estimator.ts";
 import { TwinClient, sql, type SqlStatement } from "../src/infra/twin-client.ts";
 import { deskToday, fitsTruck } from "../src/routes/capacity.ts";
+import { openBoard } from "../src/routes/operator-network.ts";
 
 const env = z
   .object({
@@ -271,12 +271,10 @@ if (!tmsEnv.success) {
   console.warn("TMS_HOST/TMS_PORT/TMS_TOKEN missing: capacity trucks skipped");
 } else {
   const tms = new TmsClient({ host: tmsEnv.data.TMS_HOST, port: tmsEnv.data.TMS_PORT, token: tmsEnv.data.TMS_TOKEN });
-  const board = (
-    await Promise.all(equipmentTypes.map((equipmentType) => tms.queryLoads({ equipmentType, maxResults: openLanesPerEquipment })))
-  ).flat();
+  const board = await openBoard(tms, console);
   const today = deskToday(new Date());
   const isoDay = (wire: string) => `${wire.slice(0, 4)}-${wire.slice(4, 6)}-${wire.slice(6, 8)}`;
-  const open = board.filter((load) => load.status === "OPEN" && isoDay(load.pickupDateTime) >= today);
+  const open = board.filter((load) => isoDay(load.pickupDateTime) >= today);
   // The page hides a load with a live hold, so a truck fitted only to one would show nothing.
   const held =
     open.length === 0

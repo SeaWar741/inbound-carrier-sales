@@ -13,15 +13,16 @@ import {
   type OperatorCapacityResponse,
   type SaveCapacityResponse,
 } from "../contract.ts";
-import { capacityTrucksShown, capacityWindowDays, openLanesCacheMs, openLanesPerEquipment, operatorTimeZone } from "../constants.ts";
+import { capacityTrucksShown, capacityWindowDays, openLanesCacheMs, operatorTimeZone } from "../constants.ts";
 import { dollars } from "../domain/negotiation.ts";
 import { tmsWallClockToDate } from "../domain/trip.ts";
 import type { CarrierMessage, OtpDeliveryClient } from "../infra/otp-delivery-client.ts";
-import { equipmentTypes, type LoadSummary } from "../infra/tms/codec.ts";
+import type { LoadSummary } from "../infra/tms/codec.ts";
 import { TmsBusinessError } from "../infra/tms/errors.ts";
 import type { TmsClient } from "../infra/tms/tms-client.ts";
 import { sql, type TwinClient } from "../infra/twin-client.ts";
 import { invalidRequestHandler } from "../plugins/invalid-request.ts";
+import { openBoard } from "./operator-network.ts";
 
 export type CapacityRouteDeps = { twin: Pick<TwinClient, "query"> };
 
@@ -195,12 +196,7 @@ export function operatorCapacityRoutes(deps: OperatorCapacityRouteDeps): Fastify
     async function currentBoard(log: FastifyBaseLogger): Promise<LoadSummary[] | null> {
       if (board && Date.now() - board.readAt < openLanesCacheMs) return board.loads;
       try {
-        const reads = await Promise.all(
-          equipmentTypes.map((equipmentType) => deps.tms.queryLoads({ equipmentType, maxResults: openLanesPerEquipment })),
-        );
-        // LOAD_QUERY has no status filter, so a full answer may have left open loads out.
-        if (reads.some((read) => read.length === openLanesPerEquipment)) log.warn("capacity board may be partial: an equipment type filled the TMS cap");
-        const loads = reads.flat().filter((load) => load.status === "OPEN");
+        const loads = await openBoard(deps.tms, log);
         board = { loads, readAt: Date.now() };
         return loads;
       } catch (error) {
