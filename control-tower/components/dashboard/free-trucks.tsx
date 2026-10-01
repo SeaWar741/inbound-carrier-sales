@@ -86,7 +86,7 @@ function FitLoad({
   blocked: boolean;
   onNotify: (loadId: string) => void;
 }) {
-  const equipment = truck.equipment === null ? equipmentLabel(load.equipmentType) : truckEquipment(truck);
+  const equipment = equipmentLabel(load.equipmentType);
   return (
     <li className="flex min-w-0 flex-col gap-1 border-t border-line px-4 py-2.5 first:border-t-0">
       <div className="flex min-w-0 items-center gap-2">

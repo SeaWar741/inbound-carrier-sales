@@ -84,7 +84,7 @@ type TruckFit = { state: string; equipment: string | null; freeDate: string };
 type LoadFit = Pick<LoadSummary, "origState" | "equipmentType" | "pickupDateTime">;
 
 // YYYY-MM-DD plus whole days, on the calendar alone.
-export const addDays = (isoDate: string, days: number) => {
+const addDays = (isoDate: string, days: number) => {
   const date = new Date(`${isoDate}T00:00:00Z`);
   date.setUTCDate(date.getUTCDate() + days);
   return date.toISOString().slice(0, 10);
@@ -133,7 +133,6 @@ export function capacityNotice(load: NoticeLoad, capturedOn: Date): CarrierMessa
   };
 }
 
-const isoDay = z.string().transform((value) => value.slice(0, 10));
 const noticeChannel = z.enum(["email", "sms"]).nullable();
 
 const activeTruckRow = z.object({
@@ -143,7 +142,7 @@ const activeTruckRow = z.object({
   city: z.string(),
   state: z.string(),
   equipment: z.string().nullable(),
-  free_date: isoDay,
+  free_date: z.string(),
   preferred_destination_state: z.string().nullable(),
   notice_channel: noticeChannel,
   notified_load_id: z.string().nullable(),
@@ -153,7 +152,7 @@ const activeTruckRow = z.object({
 const notifyTruckRow = z.object({
   state: z.string(),
   equipment: z.string().nullable(),
-  free_date: isoDay,
+  free_date: z.string(),
   notified_at: z.coerce.date().nullable(),
   created_at: z.coerce.date(),
   otp_channel: noticeChannel,
@@ -258,7 +257,6 @@ export function operatorCapacityRoutes(deps: OperatorCapacityRouteDeps): Fastify
           const response: OperatorCapacityResponse = {
             status: "ok",
             trucks: trucks.map((truck, i) => {
-              const loads = fits[i];
               return {
                 id: truck.id,
                 mcNumber: truck.mc_number,
@@ -272,12 +270,10 @@ export function operatorCapacityRoutes(deps: OperatorCapacityRouteDeps): Fastify
                 notifiedLoadId: truck.notified_load_id,
                 notifiedAt: truck.notified_at?.toISOString() ?? null,
                 loads:
-                  loads === null || loads === undefined
-                    ? null
-                    : loads
-                        .filter((load) => !held.has(load.loadId))
-                        .map((load) => toCapacityLoad(load, truck.preferred_destination_state))
-                        .sort((a, b) => Number(b.preferred) - Number(a.preferred)),
+                  fits[i]
+                    ?.filter((load) => !held.has(load.loadId))
+                    .map((load) => toCapacityLoad(load, truck.preferred_destination_state))
+                    .sort((a, b) => Number(b.preferred) - Number(a.preferred)) ?? null,
               };
             }),
           };

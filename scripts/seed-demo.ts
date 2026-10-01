@@ -11,7 +11,7 @@ import { equipmentTypes } from "../src/infra/tms/codec.ts";
 import { TmsClient } from "../src/infra/tms/tms-client.ts";
 import { TripEstimator } from "../src/infra/trip-estimator.ts";
 import { TwinClient, sql, type SqlStatement } from "../src/infra/twin-client.ts";
-import { addDays, deskToday, fitsTruck } from "../src/routes/capacity.ts";
+import { deskToday, fitsTruck } from "../src/routes/capacity.ts";
 
 const env = z
   .object({
@@ -297,10 +297,7 @@ if (!tmsEnv.success) {
     // One truck per origin state, so each row of the page shows a different board.
     if (trucks.some((truck) => truck.state === load.origState)) continue;
     const pickupDay = isoDay(load.pickupDateTime);
-    // Every other truck frees up the day before pickup, never before today.
-    const dayBefore = addDays(pickupDay, -1);
-    const freeDate = trucks.length % 2 === 1 && dayBefore >= today ? dayBefore : pickupDay;
-    const truck = { city: load.origCity, state: load.origState, equipment: load.equipmentType, freeDate, preferred: trucks.length === 0 ? load.destState : null };
+    const truck = { city: load.origCity, state: load.origState, equipment: load.equipmentType, freeDate: pickupDay, preferred: trucks.length === 0 ? load.destState : null };
     if (fitsTruck(truck, load)) trucks.push(truck);
   }
   if (trucks.length < 3) console.warn(`only ${trucks.length} capacity truck(s) fit an open load on the board`);
