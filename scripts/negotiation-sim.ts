@@ -134,7 +134,7 @@ const metrics = (tally: Tally): Metrics => ({
 });
 
 const cellKey = (family: Family, w: number) => `${family} w=${w}`;
-export const gateCells = tactics.flatMap(({ family }) => impatience.map((w) => cellKey(family, w)));
+const gateCells = tactics.flatMap(({ family }) => impatience.map((w) => cellKey(family, w)));
 
 type PolicyResult = {
   name: string;
