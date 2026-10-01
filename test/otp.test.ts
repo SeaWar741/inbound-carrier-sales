@@ -97,7 +97,8 @@ function fakeTwin(calls: Map<string, CallState>) {
       }
     } else if (text.includes("FROM truck_capacity")) {
       const mc = /mc_number = E'([^']*)'/.exec(text)?.[1] ?? "";
-      rows.push(...(notices.get(mc) ?? []).map((id) => ({ notified_load_id: id })));
+      const limit = Number(/LIMIT (\d+)/.exec(text)?.[1]);
+      rows.push(...(notices.get(mc) ?? []).slice(0, limit).map((id) => ({ notified_load_id: id })));
     } else if (text.includes("FROM holds")) {
       const ids = [...(/IN \(([^)]*)\)/.exec(text)?.[1] ?? "").matchAll(/E'([^']*)'/g)].map((m) => m[1] ?? "");
       rows.push(...ids.filter((id) => heldElsewhere.has(id)).map((id) => ({ load_id: id })));
@@ -255,18 +256,24 @@ describe("OTP routes", () => {
   });
 
   it("returns the loads we notified this MC about that are still open and unheld, newest first", async () => {
-    notices.set("123456", ["LD00005", "LD00004", "LD00005", "LD00003", "LD00002"]);
-    heldElsewhere.add("LD00004");
-    getLoad.mockImplementation(async (loadId) => {
-      if (loadId === "LD00002") throw new TmsBusinessError("LOAD_GET", 1, false, "NOT_FOUND", "Load not found");
-      return { loadId, status: loadId === "LD00003" ? "BOOKED" : "OPEN" } as LoadDetail;
-    });
-    expect(await verifiedWith()).toMatchObject({ status: "ok", notifiedLoadIds: ["LD00005"] });
-    expect(getLoad.mock.calls.map(([id]) => id)).toEqual(["LD00005", "LD00004", "LD00003", "LD00002"]);
+    // The newest three notices, deduped, are read once each; the fourth is past the cap.
+    notices.set("123456", ["LD00006", "LD00005", "LD00006", "LD00004"]);
+    heldElsewhere.add("LD00005");
+    expect(await verifiedWith()).toMatchObject({ status: "ok", notifiedLoadIds: ["LD00006"] });
+    expect(getLoad.mock.calls.map(([id]) => id)).toEqual(["LD00006", "LD00005"]);
     const lookup = statements.find((text) => text.includes("FROM truck_capacity")) ?? "";
     expect(lookup).toContain("mc_number = E'123456'");
     expect(lookup).toContain("now() - 3 * interval '1 day'");
     expect(lookup).toContain("ORDER BY notified_at DESC LIMIT 3");
+  });
+
+  it("drops a notified load the board no longer has open", async () => {
+    notices.set("123456", ["LD00003", "LD00002"]);
+    getLoad.mockImplementation(async (loadId) => {
+      if (loadId === "LD00002") throw new TmsBusinessError("LOAD_GET", 1, false, "NOT_FOUND", "Load not found");
+      return { loadId, status: "BOOKED" } as LoadDetail;
+    });
+    expect(await verifiedWith()).toMatchObject({ status: "ok", notifiedLoadIds: [] });
   });
 
   it("still verifies, with no notified loads, when the board is unavailable", async () => {

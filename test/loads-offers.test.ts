@@ -521,7 +521,7 @@ describe("POST /v1/loads/search", () => {
         const res = await search({ callId: "call-ok", loadId }, target);
         expect(res.json()).toEqual({
           status: "no_loads",
-          message: `Load ${loadId} isn't available anymore. Where are you empty, and what are you running?`,
+          message: `Load ${loadId} isn't available. Where are you empty?`,
           loads: [],
         });
       }

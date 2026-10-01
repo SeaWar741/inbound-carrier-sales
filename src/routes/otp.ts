@@ -8,11 +8,10 @@ import { checkCode, generateCode, hashCode } from "../domain/otp.ts";
 import { maskEmail, maskPhone } from "../domain/verification.ts";
 import type { CensusClient } from "../infra/census-client.ts";
 import type { OtpChannel, OtpDeliveryClient } from "../infra/otp-delivery-client.ts";
-import { TmsBusinessError } from "../infra/tms/errors.ts";
 import type { TmsClient } from "../infra/tms/tms-client.ts";
 import { sql, type TwinClient } from "../infra/twin-client.ts";
 import { invalidRequestHandler } from "../plugins/invalid-request.ts";
-import { loadsHeldByOtherCalls } from "./loads.ts";
+import { findLoad, isOpen, loadsHeldByOtherCalls } from "./loads.ts";
 
 export type OtpRouteDeps = {
   config: Pick<Config, "OTP_DELIVERY_MODE" | "OTP_DEMO_EMAIL" | "OTP_DEMO_PHONE" | "OTP_HASH_SECRET" | "OTP_FIXED_CODE">;
@@ -93,15 +92,8 @@ async function notifiedLoadIds(deps: OtpRouteDeps, callId: string, mcNumber: str
       z.object({ notified_load_id: z.string() }),
     );
     const ids = [...new Set(rows.map((row) => row.notified_load_id))];
-    const loads = await Promise.all(
-      ids.map((id) =>
-        deps.tms.getLoad(id).catch((error: unknown) => {
-          if (error instanceof TmsBusinessError) return undefined;
-          throw error;
-        }),
-      ),
-    );
-    const open = ids.filter((_, i) => loads[i]?.status === "OPEN");
+    const loads = await Promise.all(ids.map((id) => findLoad(deps.tms, id)));
+    const open = ids.filter((_, i) => isOpen(loads[i]?.status ?? ""));
     const held = await loadsHeldByOtherCalls(deps.twin, callId, open);
     return open.filter((id) => !held.has(id));
   } catch (error) {

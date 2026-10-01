@@ -26,7 +26,7 @@ const messages = {
   tmsUnavailable: "I can't reach our load board right now. Please give me a moment and try again.",
   serviceUnavailable: "I'm having trouble on my end right now. Please give me a moment and try again.",
   invalid: "I need at least a pickup city, state or zip to search for loads.",
-  loadGone: (loadId: string) => `Load ${loadId} isn't available anymore. Where are you empty, and what are you running?`,
+  loadGone: (loadId: string) => `Load ${loadId} isn't available. Where are you empty?`,
 } as const;
 
 const found = (count: number) => (count === 1 ? "I found one open load that fits." : `I found ${count} open loads that fit.`);
@@ -38,7 +38,14 @@ const noLoads = (status: Exclude<SearchLoadsResponse["status"], "ok">, message: 
 });
 
 // Only OPEN is offered; any other or future status is treated as not bookable.
-const isOpen = (status: string) => status === "OPEN";
+export const isOpen = (status: string) => status === "OPEN";
+
+// A load the board no longer knows is undefined; an outage still throws.
+export const findLoad = (tms: Pick<TmsClient, "getLoad">, loadId: string) =>
+  tms.getLoad(loadId).catch((error: unknown) => {
+    if (error instanceof TmsBusinessError) return undefined;
+    throw error;
+  });
 
 async function isCallVerified(twin: TwinClient, callId: string): Promise<boolean> {
   const rows = await twin.query(sql`SELECT verified FROM calls WHERE call_id = ${callId}`, z.object({ verified: z.boolean() }));
@@ -109,10 +116,7 @@ function toPitchedLoad(load: LoadDetail, feasibility: Feasibility | null): Pitch
 // A load the carrier named, usually one we notified them about: the same checks and shape as a lane search.
 // Not recorded as a search, since a named load says nothing about the lanes the board is missing.
 async function searchByLoadId(deps: LoadRouteDeps, callId: string, loadId: string, log: FastifyBaseLogger): Promise<SearchLoadsResponse> {
-  const load = await deps.tms.getLoad(loadId).catch((error: unknown) => {
-    if (error instanceof TmsBusinessError) return undefined;
-    throw error;
-  });
+  const load = await findLoad(deps.tms, loadId);
   if (!load || !isOpen(load.status) || (await loadsHeldByOtherCalls(deps.twin, callId, [loadId])).size > 0) {
     return noLoads("no_loads", messages.loadGone(loadId));
   }
