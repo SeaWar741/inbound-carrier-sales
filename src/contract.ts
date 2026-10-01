@@ -411,11 +411,13 @@ export const operatorWallResponse = z.object({
   day: z.iso.date(),
   counters: z.object({
     calls: z.number().int(),
+    // Calls that got a load offered: an offer row, or a search that returned loads.
+    offered: z.number().int(),
     booked: z.number().int(),
     // Refused at verification: not eligible, or OTP locked. A fact, not a fraud verdict.
     blocked: z.number().int(),
-    dollarsGenerated: z.number(),
-    marginSaved: z.number(),
+    // Sum of agreed rates on today's booked holds.
+    bookedValue: z.number(),
   }),
   tmsHealth,
   // "human": a rep confirms every hold. "autonomous": create_hold books right away.

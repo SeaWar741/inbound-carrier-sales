@@ -60,6 +60,8 @@ export const wallCallColumns: SqlStatement = {
 
 // Stored timestamps are session-zone wall clock; bounds are converted back to that clock so the
 // created_at comparison stays index-friendly. The day's counters come back in a single row.
+// A call counts as offered when a search returned loads or an offer was made; offers is OR'ed in
+// because the load_searches insert is fire and forget and can be missing for a call that negotiated.
 export function wallQuery(): SqlStatement {
   const text = sql`WITH bounds AS (
       SELECT date_trunc('day', now() AT TIME ZONE ${operatorTimeZone}) AS local_start
@@ -73,10 +75,11 @@ export function wallQuery(): SqlStatement {
     )
     SELECT to_char((SELECT local_start FROM bounds), 'YYYY-MM-DD') AS day,
       (SELECT count(*) FROM today) AS calls_count,
+      (SELECT count(*) FROM today t WHERE EXISTS (SELECT 1 FROM offers o WHERE o.call_id = t.call_id)
+        OR EXISTS (SELECT 1 FROM load_searches ls WHERE ls.call_id = t.call_id AND ls.results > 0)) AS offered_count,
       (SELECT count(*) FROM today_holds) AS booked_count,
       (SELECT count(*) FROM today WHERE NOT eligible OR (NOT verified AND otp_attempts >= ${otpMaxAttempts})) AS blocked,
-      (SELECT COALESCE(sum(agreed_rate), 0) FROM today_holds) AS dollars_generated,
-      (SELECT COALESCE(sum(max_buy - agreed_rate), 0) FROM today_holds) AS margin_saved,
+      (SELECT COALESCE(sum(agreed_rate), 0) FROM today_holds) AS booked_value,
       COALESCE((SELECT value FROM settings WHERE key = 'autonomy'), 'human') AS autonomy`.text;
   return { text };
 }
@@ -181,10 +184,10 @@ type CallRow = z.output<typeof callRow>;
 export const wallRow = z.object({
   day: z.string(),
   calls_count: count,
+  offered_count: count,
   booked_count: count,
   blocked: count,
-  dollars_generated: money,
-  margin_saved: money,
+  booked_value: money,
   autonomy: z.enum(autonomyModes),
 });
 export type WallRow = z.output<typeof wallRow>;
@@ -273,10 +276,10 @@ export function operatorWallRoutes(deps: OperatorRouteDeps): FastifyPluginAsync 
             day: row.day,
             counters: {
               calls: row.calls_count,
+              offered: row.offered_count,
               booked: row.booked_count,
               blocked: row.blocked,
-              dollarsGenerated: row.dollars_generated,
-              marginSaved: row.margin_saved,
+              bookedValue: row.booked_value,
             },
             tmsHealth: deps.tmsHealth.snapshot(),
             autonomy: row.autonomy,

@@ -139,10 +139,10 @@ export const adapterWallResponse = z.object({
   day: z.iso.date(),
   counters: z.object({
     calls: z.number().int(),
+    offered: z.number().int(),
     booked: z.number().int(),
     blocked: z.number().int(),
-    dollarsGenerated: z.number(),
-    marginSaved: z.number(),
+    bookedValue: z.number(),
   }),
   tmsHealth,
   // Defaults to the safe mode when an older adapter does not send it.

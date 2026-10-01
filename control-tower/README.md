@@ -7,7 +7,7 @@ It is a Next.js app. Every secret stays on the server; the browser only holds a 
 ## What it shows
 
 - **Call wall**: every call of the day with its stage (connecting, verifying, OTP, searching, negotiating, holding, booked, released, ended) and a risk color (green, amber, red) with the reason.
-- **Day counters**: calls, loads booked, blocked at verification (not eligible or OTP locked), dollars generated and margin saved.
+- **Day counters**: calls, loads booked, blocked at verification (not eligible or OTP locked), booked load value (sum of agreed rates) and win rate over calls that got a load offered.
 - **TMS health**: attempts, retries, faults absorbed and p50 / p95 latency of the legacy TMS since the adapter started.
 - **Live transcript**: the agent and carrier lines of the selected call, plus the tools the agent calls. The transcript stays readable after the call ends.
 - **Listen / whisper / take over**: listen plays the call audio; take over puts the rep on the line in place of the agent; a whisper sends a private instruction to the agent mid-call. Authorize +$50 lets the agent go that much higher on the current load.

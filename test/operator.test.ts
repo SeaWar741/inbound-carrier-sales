@@ -11,10 +11,10 @@ import { testConfig } from "./test-config.ts";
 const wallRow = {
   day: "2026-09-29",
   calls_count: "2",
+  offered_count: "1",
   booked_count: "1",
   blocked: "1",
-  dollars_generated: "2300",
-  margin_saved: "200",
+  booked_value: "2300",
   autonomy: "human",
 };
 
@@ -159,7 +159,7 @@ describe("GET /v1/operator/wall", () => {
     const wall = operatorWallResponse.parse(res.json());
     expect(wall.day).toBe("2026-09-29");
     expect(wall.autonomy).toBe("human");
-    expect(wall.counters).toEqual({ calls: 2, booked: 1, blocked: 1, dollarsGenerated: 2300, marginSaved: 200 });
+    expect(wall.counters).toEqual({ calls: 2, offered: 1, booked: 1, blocked: 1, bookedValue: 2300 });
     expect(wall.tmsHealth).toEqual({
       since: "2026-09-29T12:00:00.000Z",
       attempts: 2,
