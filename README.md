@@ -170,7 +170,7 @@ Researched on 2026-09-30, to answer "are our margins standard?". Figures are dat
 
 A broker's gross margin is (shipper rate - carrier rate) / shipper rate. The TMS gives the posted rate and the max buy, never the shipper rate, so the tower cannot show margin. What it shows is headroom: max buy - agreed rate, labelled "Under our max". The max buy is usually set as the sell rate minus a minimum margin, or from a market rate engine: [Triumph](https://intelligencehelp.triumph.io/en/articles/8371238-triumph-rates-best-practices) uses its buy rate as the max buy and marks up 10% to 16% by confidence. If our TMS works that way, headroom is margin on top of that minimum, but that is not confirmed.
 
-Our real bookings on Twin (n=21, demo rows excluded): posted $4,558, agreed $4,912 (+6.9% over posted, 20 of 21 above it), max buy $5,243 (+15.3% over posted), headroom $331 (7.2% of the max). The agent gives away about 45% of the posted to max gap. No public data measures how far above posted carrier deals usually close, so this cannot be benchmarked yet.
+Bookings on Twin (n=21, demo rows excluded; these are simulator personas and our own test calls, not real carriers): posted $4,558, agreed $4,912 (+6.9% over posted, 20 of 21 above it), max buy $5,243 (+15.3% over posted), headroom $331 (7.2% of the max). The agent gives away about 45% of the posted to max gap against those personas, which says how the personas behave, not how carriers do. No public data measures how far above posted carrier deals usually close, so this cannot be benchmarked yet.
 
 ### Gross margin benchmarks
 
@@ -195,12 +195,75 @@ The agent counters at 35%, 60% and 80% of the posted to max gap and accepts any 
 - Vendor claims, no method published: Parade reports $154 saved per load with AI against $115 rep only ([Parade](https://www.parade.ai/resources/ai-amplifies-carrier-negotiation-performance)); HappyRobot reports 10% higher margins at Circle Logistics ([case study](https://happyrobot.ai/blog/circle-logistics-x-happyrobot-case-study)).
 - No published work covers dynamic reservation prices for carrier negotiation, or accept against counter on a broker desk.
 
+### Offline tournament (cycle 7)
+
+`npm run negotiation:sim` plays the production policy against candidate policies over a fixed grid of simulated carriers. It is deterministic: booking rate and gap share are exact expectations, with no random draws. `test/negotiation-sim.test.ts` fails if the tournament's result changes.
+
+- Loads: posted $2,000, with the posted to max gap at 7.1%, 14.8% and 23.1% of posted, the p10, p50 and p90 of (MAX_BUY - RATE) / RATE on the TMS board snapshot of 2026-09-28 (909 loads, min 5.0%, max 25.0%).
+- Carriers: reservation price at -0.1 to 1.1 of the gap. They open 0.1, 0.3 or 0.6 of the gap above it and concede toward it over four asks with a Boulware, Linear or Conceder tactic ([Faratin et al. 1998](https://spiral.imperial.ac.uk/entities/publication/591e717c-cc0e-4d61-8c68-8925b34c4b4d)). They hang up after each counter they refuse with probability w of 0, 0.1 or 0.25.
+- A carrier takes our counter when it is at or above its own next ask.
+- Candidates:
+  - baseline: the production steps, 0.35, 0.6 and 0.8 of the gap;
+  - even: 0.27, 0.53, 0.8;
+  - growing: 0.15, 0.4, 0.8;
+  - each of the three with a midpoint counter, which offers halfway between our last offer and the ask when that is below the scheduled step.
+
+  All candidates keep 0.8 as the final step, so no carrier we can book today becomes unbookable.
+- Gate: a candidate replaces the baseline only if it pays less of the gap and books at least as often in every tactic and impatience cell.
+
+| policy | booking rate | gap share | rounds | passes gate |
+|---|---|---|---|---|
+| baseline | 57.15% | 39.46% | 2.375 | yes |
+| baseline+midpoint | 54.67% | 37.11% | 2.578 | no |
+| even | 56.22% | 38.45% | 2.450 | no |
+| even+midpoint | 54.44% | 37.01% | 2.597 | no |
+| growing | 54.11% | 36.67% | 2.619 | no |
+| growing+midpoint | 53.30% | 35.98% | 2.689 | no |
+
+Booking rate per (tactic family, impatience) cell
+
+| policy | Boulware w=0 | Boulware w=0.1 | Boulware w=0.25 | Linear w=0 | Linear w=0.1 | Linear w=0.25 | Conceder w=0 | Conceder w=0.1 | Conceder w=0.25 |
+|---|---|---|---|---|---|---|---|---|---|
+| baseline | 56.44% | 50.67% | 42.70% | 64.55% | 58.50% | 50.13% | 69.84% | 64.49% | 57.05% |
+| baseline+midpoint | 56.44% | 48.28% | 37.44% | 64.55% | 56.03% | 44.57% | 69.84% | 62.44% | 52.45% |
+| even | 56.44% | 49.93% | 41.07% | 64.55% | 57.71% | 48.29% | 69.84% | 63.46% | 54.67% |
+| even+midpoint | 56.44% | 48.28% | 37.44% | 64.55% | 55.82% | 44.14% | 69.84% | 62.01% | 51.42% |
+| growing | 56.44% | 48.22% | 37.25% | 64.55% | 55.85% | 44.06% | 69.84% | 61.26% | 49.56% |
+| growing+midpoint | 56.44% | 47.65% | 36.06% | 64.55% | 54.85% | 41.96% | 69.84% | 60.45% | 47.86% |
+
+Per tactic family (booking rate / gap share)
+
+| policy | Boulware | Linear | Conceder |
+|---|---|---|---|
+| baseline | 49.94% / 41.17% | 57.73% / 40.18% | 63.80% / 37.45% |
+| baseline+midpoint | 47.39% / 40.53% | 55.05% / 37.41% | 61.58% / 34.21% |
+| even | 49.14% / 40.81% | 56.85% / 39.33% | 62.66% / 35.79% |
+| even+midpoint | 47.39% / 40.53% | 54.84% / 37.30% | 61.09% / 34.01% |
+| growing | 47.30% / 40.49% | 54.82% / 37.58% | 60.22% / 32.85% |
+| growing+midpoint | 46.72% / 40.42% | 53.79% / 36.33% | 59.38% / 32.17% |
+
+Per impatience (booking rate / gap share)
+
+| policy | w=0 | w=0.1 | w=0.25 |
+|---|---|---|---|
+| baseline | 63.61% / 41.37% | 57.89% / 39.66% | 49.96% / 36.78% |
+| baseline+midpoint | 63.61% / 39.01% | 55.58% / 37.30% | 44.82% / 34.18% |
+| even | 63.61% / 40.49% | 57.03% / 38.66% | 48.01% / 35.49% |
+| even+midpoint | 63.61% / 38.91% | 55.37% / 37.19% | 44.33% / 34.04% |
+| growing | 63.61% / 38.50% | 55.11% / 36.84% | 43.62% / 33.80% |
+| growing+midpoint | 63.61% / 37.71% | 54.32% / 36.14% | 41.96% / 33.16% |
+
+winner: none
+
+**Result: no candidate passes, and production keeps the baseline.** With w = 0 every policy books the same, because they share the final step. Once carriers can hang up, every slower opening loses bookings in every cell. The best saving, 3.5 points of the gap with growing+midpoint, costs 3.9 points of booking rate overall and 8 points at w = 0.25. Tey et al. predict the shrinking steps should cost us; in this model the faster early concession is what keeps impatient carriers on the line. Human negotiators are not carriers, and this grid is not measured carrier behavior, so neither result is settled.
+
+A lane supply signal (hold firmer where Demand shows many carriers asking) was designed as a variant of the winning candidate. It did not run because nothing won. It would rest on an assumption that more supply lowers carrier reservation prices, which no data validates.
+
+`npm run negotiation:sim -- --replay` replays the 36 recorded non demo negotiations on Twin. The baseline reproduces every counter production said. The other policies open lower but agree the same price in all 5 closed deals. The midpoint never fires, because the recorded asks sit far above our counters.
+
 ### Next step
 
-A negotiation cycle, tested before it ships:
-- Candidate rules: even or growing concession steps, a counter at the midpoint when an acceptable ask sits well above posted, and a first counter anchored on our target.
-- A lane signal, holding firmer where Demand shows many carriers asking.
-- Test first by replaying recorded asks and simulating carrier personas that concede fast, hold out, or probe for our floor. Then A/B test per call on booked rate, paid over posted, share of the gap used, walk-away per round, and rounds to a deal. At n=21 no difference in booked rate is detectable.
+Real carrier calls. With them, estimate the reservation price distribution per lane from asks and walk-aways as censored data (Turnbull estimator), calibrate the carrier grid to it, and rerun the tournament. Until then, changing the concession policy trades bookings for rate on an assumption, not a measurement.
 
 ## Deploy
 
