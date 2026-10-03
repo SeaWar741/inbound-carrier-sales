@@ -85,15 +85,15 @@ function Dashboard() {
   );
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 overflow-hidden p-3">
+    <div className="flex h-full min-h-0 flex-col gap-3 overflow-hidden p-3 max-md:overflow-y-auto">
       <KpiTiles loads={loads} counters={wall?.counters ?? null} />
-      <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_380px] gap-3">
-        <section aria-label="Load map" className="h-full min-h-0 overflow-hidden rounded-[var(--radius-panel)] border border-line bg-panel">
+      <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_380px] gap-3 max-md:flex max-md:flex-none max-md:flex-col">
+        <section aria-label="Load map" className="h-full min-h-0 overflow-hidden rounded-[var(--radius-panel)] border border-line bg-panel max-md:h-[360px] max-md:shrink-0">
           <LaneMap loads={mapLoads} selectedId={selected} onSelect={setSelectedId} overview />
         </section>
         {/* Free trucks takes what it needs up to 40% of the column; the loads list keeps the rest. */}
         <div className="flex min-h-0 flex-col gap-3">
-          <div className="min-h-0 flex-1">
+          <div className="min-h-0 flex-1 max-md:h-[560px] max-md:flex-none">
             <ActiveLoads
               loads={shown}
               total={loads?.length ?? null}

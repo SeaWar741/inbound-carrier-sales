@@ -29,17 +29,17 @@ export default function TowerLayout({ children }: { children: React.ReactNode })
 
   return (
     <WallContext value={wallState}>
-      <div className="flex h-[100dvh] min-w-[1280px] flex-col overflow-hidden">
-        <header className="flex h-12 shrink-0 items-center gap-6 border-b border-line bg-panel px-4">
+      <div className="flex h-[100dvh] flex-col overflow-hidden md:min-w-[1280px]">
+        <header className="flex h-12 shrink-0 items-center gap-6 border-b border-line bg-panel px-4 max-md:gap-3 max-md:px-3">
           <div className="flex shrink-0 items-center gap-2">
             <span className="grid size-6 place-items-center rounded-full bg-accent-soft text-accent">
               <LuRadioTower size={13} aria-hidden />
             </span>
-            <span className="text-sm font-semibold tracking-tight">Control Tower</span>
+            <span className="text-sm font-semibold tracking-tight max-md:hidden">Control Tower</span>
           </div>
 
           {/* The active tab sits on the bar's bottom border, like the tab strips inside the pages. */}
-          <nav aria-label="Tower" className="flex h-full items-stretch gap-1">
+          <nav aria-label="Tower" className="flex h-full items-stretch gap-1 max-md:hidden">
             {nav.map(({ href, label, icon: Icon }) => {
               const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
               return (
@@ -58,13 +58,13 @@ export default function TowerLayout({ children }: { children: React.ReactNode })
             })}
           </nav>
 
-          <div className="ml-auto flex min-w-0 items-center gap-4">
+          <div className="ml-auto flex min-w-0 items-center gap-4 max-md:gap-2.5">
             <span className="flex shrink-0 items-center gap-2 text-xs">
               <span className="flex items-center gap-1.5 font-medium uppercase tracking-wide">
                 {stale ? <span className="inline-flex size-2 rounded-full bg-warn" aria-hidden /> : <PulseDot tone="ok" />}
                 <span className={stale ? "text-warn" : "text-ok"}>{stale ? "Stale" : "Live"}</span>
               </span>
-              {wall && <span className="tabular text-fg-muted">{formatDay(wall.day)}</span>}
+              {wall && <span className="tabular text-fg-muted max-md:hidden">{formatDay(wall.day)}</span>}
             </span>
             <AutonomySwitch mode={wall?.autonomy ?? null} />
             <TmsHealth health={wall?.tmsHealth ?? null} />
@@ -84,6 +84,26 @@ export default function TowerLayout({ children }: { children: React.ReactNode })
         )}
 
         <main className="min-h-0 flex-1 overflow-hidden">{children}</main>
+
+        {/* On a phone the nav moves to a bottom tab bar, in thumb reach. */}
+        <nav aria-label="Tower" className="flex shrink-0 border-t border-line bg-panel pb-[env(safe-area-inset-bottom)] md:hidden">
+          {nav.map(({ href, label, icon: Icon }) => {
+            const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
+            return (
+              <Link
+                key={href}
+                href={href}
+                aria-current={active ? "page" : undefined}
+                className={`flex h-14 flex-1 flex-col items-center justify-center gap-1 text-[11px] outline-none focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:ring-inset ${
+                  active ? "font-medium text-accent" : "text-fg-muted"
+                }`}
+              >
+                <Icon size={20} aria-hidden />
+                {label}
+              </Link>
+            );
+          })}
+        </nav>
       </div>
     </WallContext>
   );

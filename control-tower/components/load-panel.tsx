@@ -79,7 +79,12 @@ export function LoadPanel({
   const standingHold = hold && hold.status !== "released" && hold.loadId === offer?.loadId ? hold : null;
   const trip = nextTrip && loadId !== null && latestBookedLoad(history) === loadId ? nextTrip : null;
   const openHold = hold && (hold.status === "held" || hold.status === "confirming") ? hold : null;
-  const openHoldCard = selectedCall && openHold && <HoldCard key={openHold.holdId} call={selectedCall} hold={openHold} />;
+  // On a phone the card moves above the call (see CarrierDetail), so here it shows from md up only.
+  const openHoldCard = selectedCall && openHold && (
+    <div className="contents max-md:hidden">
+      <HoldCard key={openHold.holdId} call={selectedCall} hold={openHold} />
+    </div>
+  );
 
   if (selectedCall === null) {
     return <EmptyState className="py-10" icon={<LuMousePointerClick size={20} />} title="Select a call to see its load" hint="Map, pricing and hold follow the selection" />;
@@ -111,7 +116,7 @@ export function LoadPanel({
   return (
     <>
       {/* A hold on a load that has no offer on this call still needs its buttons. */}
-      {openHold && openHold.loadId !== offer.loadId && <div className="p-4 pb-0">{openHoldCard}</div>}
+      {openHold && openHold.loadId !== offer.loadId && <div className="p-4 pb-0 max-md:hidden">{openHoldCard}</div>}
       <DealCard
         key={offer.loadId}
         call={selectedCall}

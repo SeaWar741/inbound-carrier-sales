@@ -240,7 +240,7 @@ export function CarrierList({
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden border-r border-line bg-panel">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden border-r border-line bg-panel max-md:border-r-0">
       <div className="shrink-0 border-b border-line px-4 py-3">
         <div className="mb-3 flex items-center justify-between gap-2">
           <h2 className="truncate font-semibold text-fg">{title}</h2>

@@ -406,16 +406,18 @@ export function CarrierDetail({
   const numbers = [mc && `MC ${mc}`, dot && `DOT ${dot}`].filter((part) => part && part !== name).join(" · ");
   // The selected load's standing hold carries a legal (HOS) ETA; the carrier's next trip only a flat-speed one.
   const selectedHold = selected?.hold && selected.hold.status !== "released" ? selected.hold : null;
+  // The hold waiting on the desk, whose card a phone shows above the call instead of in the Deal.
+  const selectedOpenHold = selected?.hold && (selected.hold.status === "held" || selected.hold.status === "confirming") ? selected.hold : null;
   const eta = selectedHold?.trip?.legalEtaAt ?? carrier?.nextTrip?.etaAt ?? null;
   const callsCount = carrier?.callsCount ?? calls.length;
   const loadsCount = carrier?.loadsCount ?? null;
 
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-1 overflow-hidden">
-      <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-panel">
+    <div className="flex h-full min-h-0 min-w-0 flex-1 overflow-hidden max-md:h-auto max-md:flex-col max-md:overflow-y-auto max-md:bg-panel">
+      <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-panel max-md:contents">
         <div className="shrink-0 border-b border-line px-4 py-3">
-          <div className="flex min-w-0 items-center gap-2">
-            <h2 className="min-w-0 truncate font-semibold text-fg">{name}</h2>
+          <div className="flex min-w-0 items-center gap-2 max-md:flex-wrap max-md:gap-y-1">
+            <h2 className="min-w-0 truncate font-semibold text-fg max-md:basis-full">{name}</h2>
             {carrier && <CarrierStagePill stage={carrier.carrierStage} size="md" />}
             <span className="min-w-0 flex-1" />
             <span className="flex shrink-0 items-center gap-2 text-xs text-fg-muted">
@@ -431,7 +433,7 @@ export function CarrierDetail({
               )}
             </span>
           </div>
-          <div className="mt-1.5 flex min-w-0 items-center gap-2 overflow-hidden">
+          <div className="mt-1.5 flex min-w-0 items-center gap-2 overflow-hidden max-md:flex-wrap max-md:gap-y-1.5">
             {numbers && <span className="tabular min-w-0 shrink-[3] truncate text-sm text-fg-muted">{numbers}</span>}
             {carrier?.needsHuman && (
               <Badge tone={carrierStageStyle.needs_approval.tone.pill}>
@@ -462,22 +464,32 @@ export function CarrierDetail({
 
         {selected ? (
           <>
-            <div className="shrink-0 border-b border-line bg-bg px-4 py-2.5">
+            <div className="shrink-0 border-b border-line bg-bg px-4 py-2.5 max-md:order-2">
               <LoadSelector calls={calls} selected={selected} takenOverCallId={takenOverCallId} now={now} onSelect={onSelectCall} />
             </div>
-            <section aria-label="Call" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+            <section aria-label="Call" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden max-md:order-2 max-md:h-[75dvh] max-md:flex-none">
               <CallDetail key={selected.callId} call={selected} voice={voice} now={now} />
             </section>
           </>
         ) : (
-          <div className="grid flex-1 place-items-center text-sm text-fg-muted">{loading ? "Loading calls..." : "No calls for this carrier"}</div>
+          <div className="grid flex-1 place-items-center text-sm text-fg-muted max-md:order-2 max-md:py-10">{loading ? "Loading calls..." : "No calls for this carrier"}</div>
         )}
       </div>
 
-      <aside aria-label="Carrier and load" className="h-full min-h-0 w-[340px] shrink-0 overflow-y-auto border-l border-line bg-panel pb-6">
-        <NeedsYou calls={calls} selected={selected} voice={voice} now={now} onSelectCall={onSelectCall} />
-        <LoadPanel selectedCall={selected} history={calls} nextTrip={carrier?.nextTrip ?? null} />
-        <CarrierRecord carrier={carrier} calls={calls} />
+      <aside aria-label="Carrier and load" className="h-full min-h-0 w-[340px] shrink-0 overflow-y-auto border-l border-line bg-panel pb-6 max-md:contents">
+        {/* On a phone the panes flatten into one column: what needs you sits above the call, the rest below it. */}
+        <div className="contents max-md:order-1 max-md:block max-md:[&:not(:empty)]:border-b max-md:border-line">
+          {selected && selectedOpenHold && (
+            <div className="p-4 md:hidden">
+              <HoldCard key={selectedOpenHold.holdId} call={selected} hold={selectedOpenHold} />
+            </div>
+          )}
+          <NeedsYou calls={calls} selected={selected} voice={voice} now={now} onSelectCall={onSelectCall} />
+        </div>
+        <div className="contents max-md:order-3 max-md:block max-md:border-t max-md:border-line max-md:pb-6">
+          <LoadPanel selectedCall={selected} history={calls} nextTrip={carrier?.nextTrip ?? null} />
+          <CarrierRecord carrier={carrier} calls={calls} />
+        </div>
       </aside>
     </div>
   );

@@ -73,7 +73,7 @@ const barOrder: TripStatus[] = ["upcoming", "in_transit", "arrived"];
 function TripSplit({ counts }: { counts: Record<TripStatus | "all", number> | null }) {
   const total = counts?.all ?? 0;
   return (
-    <div className="flex min-w-0 flex-col gap-2.5 rounded-[var(--radius-panel)] border border-line bg-panel px-4 py-3">
+    <div className="flex min-w-0 flex-col gap-2.5 rounded-[var(--radius-panel)] border border-line bg-panel px-4 py-3 max-md:col-span-2">
       <div className="flex items-baseline justify-between gap-2">
         <span className="truncate text-xs text-fg-muted">Booked loads</span>
         <span className="tabular text-xs text-fg-faint">{counts === null ? "-" : total}</span>
@@ -106,7 +106,7 @@ export function KpiTiles({ loads, counters }: { loads: TowerLoad[] | null; count
 
   return (
     <section aria-label="Key numbers" aria-live="polite">
-      <dl className="grid grid-cols-[repeat(5,minmax(0,1fr))_minmax(0,1.6fr)] gap-3">
+      <dl className="grid grid-cols-[repeat(5,minmax(0,1fr))_minmax(0,1.6fr)] gap-3 max-md:grid-cols-2 max-md:[&>:first-child]:col-span-2">
         <Tile label="Dollars in motion" value={loads === null ? "-" : formatUsd(dollarsInMotion)} hint="Agreed rate of loads in transit" />
         <Tile label="Loads in motion" value={counts === null ? "-" : String(counts.in_transit)} hint={`${counts?.upcoming ?? 0} more picking up soon`} />
         <Tile

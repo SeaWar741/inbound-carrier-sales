@@ -217,6 +217,7 @@ export function Network() {
       key: "mc",
       title: "MC",
       width: 96,
+      responsive: ["md"],
       sorter: true,
       sortOrder: sorted("mc"),
       sortDirections: textDirections,
@@ -229,13 +230,22 @@ export function Network() {
       sortOrder: sorted("carrier"),
       sortDirections: textDirections,
       ellipsis: true,
-      render: (_, carrier) => <span className="font-medium text-fg">{carrierName(carrier)}</span>,
+      render: (_, carrier) => (
+        <>
+          <span className="font-medium text-fg">{carrierName(carrier)}</span>
+          {/* On a phone the hidden columns fold into one line under the name. */}
+          <span className="block truncate text-xs text-fg-muted md:hidden">
+            {[carrier.mcNumber && `MC ${carrier.mcNumber}`, shortReason(carrier, now)].filter(Boolean).join(" · ")}
+          </span>
+        </>
+      ),
     },
     { key: "status", title: "Status", width: 88, render: (_, carrier) => <StatusIcons carrier={carrier} /> },
     {
       key: "why",
       title: "Why",
       ellipsis: { showTitle: false },
+      responsive: ["md"],
       render: (_, carrier) => {
         const reason = shortReason(carrier, now);
         return (
@@ -249,6 +259,7 @@ export function Network() {
       key: "lastCall",
       title: "Last call",
       width: 112,
+      responsive: ["md"],
       sorter: true,
       sortOrder: sorted("lastCall"),
       sortDirections: numberDirections,
@@ -265,6 +276,7 @@ export function Network() {
       key: "calls",
       title: "Calls 30 d",
       width: 104,
+      responsive: ["md"],
       align: "right",
       sorter: true,
       sortOrder: sorted("calls"),
@@ -275,6 +287,7 @@ export function Network() {
       key: "bookings",
       title: "Booked",
       width: 92,
+      responsive: ["md"],
       align: "right",
       sorter: true,
       sortOrder: sorted("bookings"),
@@ -330,14 +343,14 @@ export function Network() {
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="mx-auto flex max-w-[1480px] flex-col gap-4 px-8 py-8">
+      <div className="mx-auto flex max-w-[1480px] flex-col gap-4 px-8 py-8 max-md:px-3 max-md:py-4">
         <header>
           <h1 className="text-2xl font-semibold tracking-tight text-fg">Carriers</h1>
           <p className="mt-1 text-sm text-fg-muted">How the network is doing, and who needs a call</p>
         </header>
 
         <section aria-label="Key numbers" aria-live="polite">
-          <dl className="grid grid-cols-4 gap-3">
+          <dl className="grid grid-cols-4 gap-3 max-md:grid-cols-2">
             <Tile label="Carriers" icon={LuUsers} value={data ? String(data.counts.all) : "-"} hint={kpis ? `${kpis.called} called in the last 30 days` : ""} />
             <Tile label="Loads booked" icon={LuCircleCheck} iconTone="text-tone-emerald" value={kpis ? String(kpis.booked) : "-"} hint={kpis ? bookedShare : ""} />
             <Tile
@@ -357,7 +370,7 @@ export function Network() {
           </dl>
         </section>
 
-        <div className="grid grid-cols-[minmax(0,2.4fr)_minmax(0,1fr)] items-start gap-4">
+        <div className="grid grid-cols-[minmax(0,2.4fr)_minmax(0,1fr)] items-start gap-4 max-md:grid-cols-1">
           <section aria-label="Carriers" className="min-w-0 overflow-hidden rounded-lg border border-line bg-panel">
             <div className="flex items-center gap-2 border-b border-line px-4 py-3 text-sm font-semibold text-fg">
               <LuUsers size={15} className="text-fg-muted" aria-hidden />
@@ -366,8 +379,8 @@ export function Network() {
             </div>
             {/* The theme's small controls are the search box's height, so the row lines up. */}
             <ConfigProvider componentSize="small">
-              <div className="flex items-center gap-1.5 border-b border-line px-4 py-3">
-                <SearchInput q={q} onSearch={onSearch} placeholder="MC, DOT or name" label="Search carriers" className="min-w-0 flex-[2]" />
+              <div className="flex items-center gap-1.5 border-b border-line px-4 py-3 max-md:flex-wrap max-md:gap-y-2">
+                <SearchInput q={q} onSearch={onSearch} placeholder="MC, DOT or name" label="Search carriers" className="min-w-0 flex-[2] max-md:basis-full" />
                 <HeaderSelect
                   label="Status"
                   placeholder="All statuses"

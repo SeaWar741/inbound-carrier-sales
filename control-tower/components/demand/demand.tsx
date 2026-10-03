@@ -14,6 +14,7 @@ import { RankedMapPanel } from "@/components/ranked-map-panel";
 import { demandSorts, type DemandLane, type TowerDemand } from "@/lib/contracts";
 import {
   defaultDemandSort,
+  demandEquipmentLabel,
   demandKey,
   demandFilterKeys,
   demandQuery,
@@ -107,12 +108,21 @@ export function Demand() {
       sorter: true,
       sortOrder: sorted("lane"),
       sortDirections: textDirections,
-      render: (_, lane) => <span className="font-medium whitespace-nowrap text-fg">{laneLabel(lane)}</span>,
+      render: (_, lane) => (
+        <>
+          <span className="font-medium whitespace-nowrap text-fg">{laneLabel(lane)}</span>
+          {/* On a phone the hidden columns fold into one line under the lane. */}
+          <span className="block text-xs whitespace-nowrap text-fg-muted md:hidden">
+            {demandUnmet(lane)} unmet · {demandEquipmentLabel(lane.equipment)}
+          </span>
+        </>
+      ),
     },
     {
       key: "equipment",
       title: "Equipment",
       width: 136,
+      responsive: ["md"],
       sorter: true,
       sortOrder: sorted("equipment"),
       sortDirections: textDirections,
@@ -122,6 +132,7 @@ export function Demand() {
       key: "unmet",
       title: "Unmet",
       width: 124,
+      responsive: ["md"],
       sorter: true,
       sortOrder: sorted("unmet"),
       sortDirections: numberDirections,
@@ -141,6 +152,7 @@ export function Demand() {
       key: "thisWeek",
       title: "Last → this wk",
       width: 136,
+      responsive: ["md"],
       sorter: true,
       sortOrder: sorted("thisWeek"),
       sortDirections: numberDirections,
@@ -161,6 +173,7 @@ export function Demand() {
       key: "said",
       title: "What happened",
       ellipsis: { showTitle: false },
+      responsive: ["md"],
       render: (_, lane) => {
         const said = demandSaid(lane);
         return (
@@ -174,6 +187,7 @@ export function Demand() {
       key: "carriers",
       title: "Carriers",
       width: 96,
+      responsive: ["md"],
       align: "right",
       sorter: true,
       sortOrder: sorted("carriers"),
@@ -242,14 +256,14 @@ export function Demand() {
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="mx-auto flex max-w-[1480px] flex-col gap-4 px-8 py-8">
+      <div className="mx-auto flex max-w-[1480px] flex-col gap-4 px-8 py-8 max-md:px-3 max-md:py-4">
         <header>
           <h1 className="text-2xl font-semibold tracking-tight text-fg">Demand</h1>
           <p className="mt-1 text-sm text-fg-muted">What carriers asked for in the last 4 weeks that we could not cover</p>
         </header>
 
         <section aria-label="Key numbers" aria-live="polite">
-          <dl className="grid grid-cols-4 gap-3">
+          <dl className="grid grid-cols-4 gap-3 max-md:grid-cols-2">
             <Tile label="Unmet this week" icon={LuRadar} iconTone="text-tone-amber" value={totals ? String(totals.thisWeek) : "-"} hint={totals ? weekChange(totals) : ""} />
             <Tile label="Carriers waiting" icon={LuUsers} value={totals ? String(totals.carriers) : "-"} hint="Asked and left without a load" />
             <Tile label="Board had nothing" icon={LuSearchX} iconTone="text-tone-blue" value={totals ? String(totals.noMatch) : "-"} hint="Fix: find loads on those lanes" />
@@ -257,7 +271,7 @@ export function Demand() {
           </dl>
         </section>
 
-        <div className="grid grid-cols-[minmax(0,2.4fr)_minmax(0,1fr)] items-start gap-4">
+        <div className="grid grid-cols-[minmax(0,2.4fr)_minmax(0,1fr)] items-start gap-4 max-md:grid-cols-1">
           <section aria-label="Lanes" className="min-w-0 overflow-hidden rounded-lg border border-line bg-panel">
             <div className="flex items-center gap-2 border-b border-line px-4 py-3 text-sm font-semibold text-fg">
               <LuRadar size={15} className="text-fg-muted" aria-hidden />
@@ -266,8 +280,8 @@ export function Demand() {
             </div>
             {/* The theme's small controls are the search box's height, so the row lines up. */}
             <ConfigProvider componentSize="small">
-              <div className="flex items-center gap-1.5 border-b border-line px-4 py-3">
-                <SearchInput q={q} onSearch={onSearch} placeholder="Search lane, state, carrier or MC" label="Search lanes" className="min-w-0 flex-[2]" />
+              <div className="flex items-center gap-1.5 border-b border-line px-4 py-3 max-md:flex-wrap max-md:gap-y-2">
+                <SearchInput q={q} onSearch={onSearch} placeholder="Search lane, state, carrier or MC" label="Search lanes" className="min-w-0 flex-[2] max-md:basis-full" />
                 <HeaderSelect label="Next step" placeholder="Any next step" icon={LuFlag} tone="text-accent" value={next} onChange={(v) => onFilter("next", v)} options={nextOptions} />
                 <HeaderSelect label="Equipment" icon={LuContainer} tone="text-accent" value={equipment} onChange={(v) => onFilter("equipment", v)} options={equipmentOptions} />
                 <HeaderSelect label="From" icon={LuRoute} tone="text-ok" value={origin} onChange={(v) => onFilter("origin", v)} options={stateOptions} />

@@ -227,7 +227,7 @@ export function FreeTrucks() {
   return (
     <section
       aria-label="Free trucks"
-      className="flex max-h-[40%] shrink-0 flex-col overflow-hidden rounded-[var(--radius-panel)] border border-line bg-panel"
+      className="flex max-h-[40%] shrink-0 flex-col max-md:max-h-[480px] overflow-hidden rounded-[var(--radius-panel)] border border-line bg-panel"
     >
       <div className="flex shrink-0 items-center justify-between gap-2 border-b border-line px-4 py-2.5">
         <h2 className="flex items-center gap-1.5 text-sm font-medium text-fg">
