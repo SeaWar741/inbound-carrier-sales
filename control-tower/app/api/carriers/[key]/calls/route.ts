@@ -8,6 +8,10 @@ import { liveRuns } from "@/lib/happyrobot";
 // the adapter validates); the tower adds the running calls as `live`. Next decodes the tagged key ("mc:123"); getCarrierCalls encodes it again for the adapter.
 export async function GET(request: Request, context: { params: Promise<{ key: string }> }) {
   const { key } = await context.params;
+  // A tagged key only: a bare "." or ".." would walk the adapter path once it is built into a URL.
+  if (!/^(mc|dot|call):[^/]{1,120}$/.test(key)) {
+    return NextResponse.json({ status: "invalid_request", message: "Unknown carrier key." }, { status: 400 });
+  }
   const query = new URLSearchParams();
   const incoming = new URL(request.url).searchParams;
   for (const key of ["since", "from", "to"]) {
