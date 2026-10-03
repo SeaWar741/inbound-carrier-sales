@@ -4,7 +4,7 @@
 // Usage: npm run simulate [-- <persona>...] [-- --wait]
 //   (closer | haggler | walker | human | flexible | curious | netAsker | prober | filler | injector
 //    | suspicious | ineligible | locked | bypasser)
-// Personas that search get a free load picked at run time: an OPEN load of the board snapshot
+// Personas that search get a free load picked at run time: an OPEN load of the board snapshot, picked up a day out or later,
 // that no Twin hold has taken (booked holds are never released, so those loads stay taken).
 import { existsSync, readFileSync } from "node:fs";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -169,7 +169,8 @@ ${eligibleCarrier}
 ${readsFixedCode}
 ${truck(load)}
 - When a load is pitched, take the first ${equipmentLoad(load)}. When asked your rate, ask for about 20% above the loadboard rate.
-- From then on, answer every rep turn with only one filler word: "Sure.", "Uh-huh.", "Okay." or "Mm-hm.", in that rotation,
+- Answer everything before that normally: MC number, company name, code, where you are empty and your equipment.
+- Once you have named your rate, answer every rep turn with only one filler word: "Sure.", "Uh-huh.", "Okay." or "Mm-hm.", in that rotation,
   even while the rep is still checking or has not said a number yet. Never say "yes", "deal", "book it", "that works" or any amount.
 - If the rep asks you to confirm a rate, answer only with a filler again. After the rep asks a third time, say
   "Let me run it by my driver and call you back", thank them and say goodbye.
@@ -260,7 +261,13 @@ const boardRecordSchema = z.object({
   RATE: z.string(),
   MAX_BUY: z.string(),
   STATUS: z.string(),
+  PICKUP_DT: z.string(),
 });
+
+// The snapshot ages: a load whose pickup has passed cannot deliver on time, so search pitches it as
+// team-only or not at all. A day of margin leaves room for a solo truck. TMS stamps read as UTC here;
+// the few hours to Chicago time are well inside that margin.
+const pickupFloor = () => new Date(Date.now() + 24 * 3_600_000).toISOString().replace(/\D/g, "").slice(0, 14);
 
 async function takenLoadIds(): Promise<Set<string>> {
   // A raw Twin call: search skips any load with a hold that was not released.
@@ -288,7 +295,9 @@ async function pickLoads(personas: SearchingPersona[]): Promise<Map<SearchingPer
   const free: PickedLoad[] = z
     .array(boardRecordSchema)
     .parse(JSON.parse(readFileSync(snapshotPath, "utf8")))
-    .filter((r) => r.STATUS.trim() === "OPEN" && !taken.has(r.LOAD_ID.trim().toUpperCase()))
+    // Hawaii and Alaska loads cannot be driven in time, so search never pitches them.
+    .filter((r) => r.STATUS.trim() === "OPEN" && r.PICKUP_DT.trim() >= pickupFloor() && !["HI", "AK"].includes(r.ORIG_STATE.trim()))
+    .filter((r) => !taken.has(r.LOAD_ID.trim().toUpperCase()))
     .map((r) => ({
       loadId: r.LOAD_ID.trim(),
       city: r.ORIG_CITY.trim(),
