@@ -1,4 +1,5 @@
-import Fastify, { type FastifyPluginAsync } from "fastify";
+import rateLimit from "@fastify/rate-limit";
+import Fastify, { type FastifyError, type FastifyPluginAsync } from "fastify";
 import { serializerCompiler, validatorCompiler } from "fastify-type-provider-zod";
 import { loadConfig, type Config } from "./config.ts";
 import { HappyRobotClient } from "@happyrobot-ai/sdk";
@@ -9,7 +10,7 @@ import { TmsClient } from "./infra/tms/tms-client.ts";
 import { TmsHealthRecorder } from "./infra/tms/tms-health.ts";
 import { TripEstimator } from "./infra/trip-estimator.ts";
 import { TwinClient } from "./infra/twin-client.ts";
-import { requireApiKey } from "./plugins/auth.ts";
+import { keyMatches, requireApiKey } from "./plugins/auth.ts";
 import { recordCallEvents, type CallEventDeps } from "./plugins/call-events.ts";
 import { capacityRoutes, operatorCapacityRoutes } from "./routes/capacity.ts";
 import { carrierRoutes } from "./routes/carriers.ts";
@@ -29,13 +30,55 @@ export type RouteSets = {
   operatorRoutes: FastifyPluginAsync[];
 };
 
+function principalOf(presented: unknown, config: Config): "agent" | "operator" | null {
+  if (typeof presented !== "string") return null;
+  if (keyMatches(presented, config.AGENT_API_KEY)) return "agent";
+  if (keyMatches(presented, config.OPERATOR_API_KEY)) return "operator";
+  return null;
+}
+
 // Call events are recorded only when a Twin is given, so route tests can leave them out.
 export function buildServer(config: Config, routes: RouteSets, callEvents?: CallEventDeps) {
   const app = Fastify({
     logger: { redact: ["req.headers[\"x-api-key\"]", "req.headers.authorization"] },
+    // Every body is a small JSON object; a hold confirm, the slowest call, answers within 30 s.
+    bodyLimit: 64 * 1024,
+    requestTimeout: 60_000,
+    // Render's proxy is the one hop in front, so request.ip is the address it saw.
+    trustProxy: (_address: string, hop: number) => hop === 0,
   });
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
+  app.addHook("onSend", async (_request, reply) => {
+    reply.header("x-content-type-options", "nosniff").header("cache-control", "no-store");
+  });
+  // A 5xx message can carry a Twin or TMS error (SQL text included), so callers only get a generic body.
+  app.setErrorHandler<FastifyError>((error, request, reply) => {
+    const statusCode = error.statusCode ?? 500;
+    if (statusCode < 500) {
+      return reply.code(statusCode).send({ status: statusCode === 429 ? "too_many_requests" : "invalid_request", message: error.message });
+    }
+    request.log.error({ err: error }, "unhandled error");
+    return reply.code(500).send({ status: "internal_error", message: "Unexpected error." });
+  });
+
+  // Per principal and minute: the agent serves every concurrent call, the operator is the tower polling.
+  // A request with no valid key is limited by address, so guessing keys stays slow.
+  // A root hook, so it runs before each scope's key check and a key guesser is limited too.
+  app.register(rateLimit, { global: false });
+  app.after(() => {
+    app.addHook(
+      "onRequest",
+      app.rateLimit({
+        timeWindow: 60_000,
+        keyGenerator: (request) => principalOf(request.headers["x-api-key"], config) ?? request.ip,
+        max: (_request, key) => (key === "agent" ? 1200 : key === "operator" ? 600 : 60),
+        allowList: (request) => request.url === "/healthz",
+        // Thrown to the error handler, which answers it as too_many_requests.
+        errorResponseBuilder: (_request, context) => ({ statusCode: context.statusCode, message: `Rate limit exceeded, retry in ${context.after}.` }),
+      }),
+    );
+  });
 
   app.register(healthRoutes);
 
