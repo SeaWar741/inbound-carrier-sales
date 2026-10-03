@@ -40,3 +40,34 @@ services:
         sync: false
       - key: HAPPYROBOT_ENVIRONMENT
         value: development
+
+  # The operator UI. Deployed here, next to the adapter, because importing it as a HappyRobot App was
+  # refused (403) and HappyRobot advised an external deploy. One long-lived process keeps the live
+  # transcript streams open as long as a call lasts.
+  - type: web
+    name: control-tower
+    runtime: node
+    plan: free
+    rootDir: control-tower
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /login
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      - key: ADAPTER_URL
+        value: https://inbound-carrier-sales-27mq.onrender.com
+      - key: OPERATOR_PASSCODE
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: OPERATOR_API_KEY
+        sync: false
+      # Its own key: the public API allows 300 requests per minute per key.
+      - key: HAPPYROBOT_API_KEY
+        sync: false
+      - key: WORKFLOW_ID
+        sync: false
+      - key: HAPPYROBOT_ENVIRONMENT
+        value: development
+

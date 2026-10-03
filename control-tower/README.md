@@ -72,7 +72,13 @@ Use a separate HappyRobot API key for the tower. The public API allows 300 reque
 - **Signals carry whispers.** The adapter records the whisper first, then the tower publishes it to the session. HappyRobot answers only once the running agent has taken it, about 11 s today, so the UI shows Sending and then Delivered.
 - **Voice tokens** power listen and take over. They work on voice web calls only; simulator runs are text sessions, so those buttons stay disabled for them.
 
+## Deploy
+
+The tower is deployed on Render as the `control-tower` service of the root `render.yaml`. See the root README, section Deploy.
+
 ## Import into HappyRobot Apps
+
+Not used today: the import API answered 403 for this account. Kept for when it is enabled.
 
 HappyRobot Apps imports a Next.js project from its own GitHub repository, so split the tower out of this repo first:
 
