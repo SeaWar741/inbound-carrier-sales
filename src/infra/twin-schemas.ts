@@ -115,6 +115,13 @@ export const tableDdl = {
     at timestamp NOT NULL,
     PRIMARY KEY (call_id, seq)
   )`,
+  // Rate-limit hits per key and fixed window, shared by every adapter and tower instance.
+  rate_limits: `CREATE TABLE IF NOT EXISTS rate_limits (
+    key text NOT NULL,
+    window_start timestamptz NOT NULL,
+    hits int8 NOT NULL,
+    PRIMARY KEY (key, window_start)
+  )`,
 } as const;
 
 // Changes to tables that already exist; each statement is idempotent and runs on every bootstrap.

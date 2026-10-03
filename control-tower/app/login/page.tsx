@@ -21,7 +21,7 @@ export default function LoginPage() {
     }).catch(() => null);
     setPending(false);
     if (res?.ok) return router.replace("/");
-    setError(res?.status === 401 ? "That passcode is not right." : "Could not reach the tower. Try again.");
+    setError(res?.status === 401 ? "That passcode is not right." : res?.status === 429 ? "Too many attempts. Try again in 15 minutes." : "Could not reach the tower. Try again.");
   }
 
   return (
