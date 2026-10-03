@@ -8,14 +8,17 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 describe("SharedCounter", () => {
   it("blocks once the shared total passes the limit", async () => {
     const rows = new Map<string, number>();
-    const store = async (key: string) => {
-      rows.set(key, (rows.get(key) ?? 0) + 1);
+    let writes = 0;
+    const store = async (key: string, _windowStart: number, hits: number) => {
+      writes += 1;
+      rows.set(key, (rows.get(key) ?? 0) + hits);
       return rows.get(key)!;
     };
-    const a = new SharedCounter(store, now);
-    const b = new SharedCounter(store, now);
+    const a = new SharedCounter(store, now, 0);
+    const b = new SharedCounter(store, now, 0);
     for (let i = 0; i < 3; i++) a.take("k", 4, 60_000);
     await flush();
+    assert.equal(writes, 1);
     assert.ok(b.take("k", 4, 60_000).count <= 4);
     await flush();
     assert.equal(b.take("k", 4, 60_000).count, 5);

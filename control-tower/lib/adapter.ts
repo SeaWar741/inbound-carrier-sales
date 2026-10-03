@@ -223,11 +223,11 @@ export async function setAutonomy(mode: AutonomyMode): Promise<AdapterResult<{ m
 const hitAnswer = z.object({ hits: z.number().int() });
 
 // One rate-limit hit counted in Twin by the adapter, shared by every tower instance. Throws when it cannot.
-export async function hitRateLimit(key: string, windowSeconds: number): Promise<number> {
+export async function hitRateLimit(key: string, windowStartSeconds: number, hits: number): Promise<number> {
   const response = await call("/v1/operator/rate-limits/hit", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ key, windowSeconds }),
+    body: JSON.stringify({ key, windowStartSeconds, hits }),
     timeoutMs: readTimeoutMs,
   });
   if (!response?.ok) throw new Error(`rate-limit hit failed (${response?.status ?? "no answer"})`);
