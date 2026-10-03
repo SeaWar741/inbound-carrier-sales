@@ -1,0 +1,22 @@
+# Both services with one command: `docker compose up --build`.
+# Secrets come from the same files local development uses (.env and control-tower/.env.local).
+services:
+  adapter:
+    build: .
+    env_file: .env
+    environment:
+      PORT: "8080"
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+  control-tower:
+    build: ./control-tower
+    env_file: control-tower/.env.local
+    environment:
+      ADAPTER_URL: http://adapter:8080
+    ports:
+      - "3000:3000"
+    depends_on:
+      - adapter
+    restart: unless-stopped
