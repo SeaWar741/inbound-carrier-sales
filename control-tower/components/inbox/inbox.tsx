@@ -2,7 +2,7 @@
 
 import { useSearchParams } from "next/navigation";
 import { useCallback, useMemo, useState } from "react";
-import { LuInbox } from "react-icons/lu";
+import { LuChevronLeft, LuInbox } from "react-icons/lu";
 import { CarrierDetail } from "@/components/inbox/carrier-detail";
 import { CarrierList, type CarrierPages } from "@/components/inbox/carrier-list";
 import { FilterBar, type InboxFilters } from "@/components/inbox/filter-bar";
@@ -110,16 +110,18 @@ export function Inbox() {
   const onWindow = useCallback((next: InboxWindow) => updateSearch(next), []);
   const onSelect = useCallback((key: string) => updateSearch({ carrier: key, call: null }), []);
   const onSelectCall = useCallback((callId: string) => updateSearch({ call: callId }), []);
+  const onBack = useCallback(() => updateSearch({ carrier: null, call: null }), []);
   const onClearFilters = useCallback(() => updateSearch(Object.fromEntries(filterKeys.map((key) => [key, null]))), []);
   const dateWindow: InboxWindow = { since: filters.since, from: filters.from, to: filters.to };
 
   return (
-    <div className="flex h-full min-h-0 overflow-hidden">
-      <div className="h-full min-h-0 w-56 shrink-0">
+    // On a phone the panes stack and a picked carrier takes the whole screen, with a way back.
+    <div className="flex h-full min-h-0 overflow-hidden max-md:flex-col">
+      <div className={`h-full min-h-0 w-56 shrink-0 max-md:h-auto max-md:w-full ${selectedKey ? "max-md:hidden" : ""}`}>
         <InboxRail data={data} selected={railItem} dateWindow={dateWindow} today={deskDayKey(now)} onSelect={onRail} onWindow={onWindow} />
       </div>
 
-      <div className="h-full min-h-0 w-[360px] shrink-0">
+      <div className={`h-full min-h-0 w-[360px] shrink-0 max-md:w-full max-md:flex-1 ${selectedKey ? "max-md:hidden" : ""}`}>
         <CarrierList
           data={data}
           loading={loading}
@@ -138,10 +140,20 @@ export function Inbox() {
       </div>
 
       {selectedKey ? (
-        // Keyed so a new carrier starts with an empty call list instead of the last carrier's.
-        <CarrierDetail key={selectedKey} carrierKey={selectedKey} dateWindow={dateWindow} selectedCallId={selectedCallId} now={now} onSelectCall={onSelectCall} />
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col md:contents">
+          <button
+            type="button"
+            onClick={onBack}
+            className="flex h-10 shrink-0 cursor-pointer items-center gap-1 border-b border-line bg-panel px-2 text-sm font-medium text-accent md:hidden"
+          >
+            <LuChevronLeft size={18} aria-hidden />
+            {railItem?.label ?? "Carriers"}
+          </button>
+          {/* Keyed so a new carrier starts with an empty call list instead of the last carrier's. */}
+          <CarrierDetail key={selectedKey} carrierKey={selectedKey} dateWindow={dateWindow} selectedCallId={selectedCallId} now={now} onSelectCall={onSelectCall} />
+        </div>
       ) : (
-        <div className="grid h-full min-w-0 flex-1 place-items-center bg-bg">
+        <div className="grid h-full min-w-0 flex-1 place-items-center bg-bg max-md:hidden">
           <div className="text-center text-fg-muted">
             <LuInbox size={48} className="mx-auto mb-3 opacity-50" aria-hidden />
             <p>Select a carrier to see its calls</p>

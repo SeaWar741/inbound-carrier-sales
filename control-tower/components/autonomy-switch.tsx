@@ -50,12 +50,13 @@ export function AutonomySwitch({ mode }: { mode: AutonomyMode | null }) {
               title={option.hint}
               disabled={mode === null}
               onClick={() => void choose(option.mode)}
-              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs transition active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-40 ${
+              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs transition max-md:px-2.5 active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-40 ${
                 active ? (option.mode === "autonomous" ? "bg-accent text-white" : "bg-panel-raised text-fg") : "text-fg-muted hover:text-fg"
               }`}
             >
-              <Icon size={13} />
-              {option.label}
+              <Icon size={13} aria-hidden />
+              {/* On a phone only the active mode names itself; the other keeps its icon. */}
+              <span className={active ? undefined : "max-md:sr-only"}>{option.label}</span>
             </button>
           );
         })}

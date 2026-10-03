@@ -55,7 +55,7 @@ export function TmsHealth({ health }: { health: Health | null }) {
         <span role="img" aria-label={statusLabel} className={`size-2 rounded-full ${noTraffic ? "bg-fg-faint" : healthy ? "bg-ok" : "bg-warn"}`} />
         <LuPlug size={14} aria-hidden />
         <span className="font-medium uppercase tracking-wide">TMS</span>
-        <span className="tabular text-fg">{noTraffic ? "-" : `p95 ${ms(health.latencyP95Ms)}`}</span>
+        <span className="tabular text-fg max-md:hidden">{noTraffic ? "-" : `p95 ${ms(health.latencyP95Ms)}`}</span>
       </button>
       <div
         id="tms-health-detail"

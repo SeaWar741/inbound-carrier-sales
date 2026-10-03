@@ -63,7 +63,7 @@ export function StageRail({ call }: { call: TowerCall }) {
   const riskTone = call.risk === "red" ? "text-risk" : "text-warn";
 
   return (
-    <ol aria-label="Call progress" className="grid grid-cols-6 gap-1.5">
+    <ol aria-label="Call progress" className="grid grid-cols-6 gap-1.5 max-md:grid-cols-3 max-md:gap-y-3">
       {steps.map((step: Step, i) => {
         // Booked is an outcome, never work in progress, so reaching it reads as done.
         const done = i < current || (i === current && step === "Booked");

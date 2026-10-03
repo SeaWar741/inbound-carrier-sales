@@ -69,12 +69,12 @@ function RailRow({ item, data, selected, onSelect }: { item: RailItem; data: Tow
       type="button"
       onClick={onSelect}
       aria-pressed={selected}
-      className={`flex w-full cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent/40 ${
+      className={`flex w-full cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-left max-md:w-auto max-md:shrink-0 max-md:gap-2 max-md:rounded-full max-md:border max-md:border-line max-md:py-1.5 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent/40 ${
         selected ? "bg-accent-soft" : "hover:bg-panel-raised"
       }`}
     >
       <Icon size={18} className={`shrink-0 ${item.tone.icon}`} aria-hidden />
-      <span className={`min-w-0 flex-1 truncate text-sm ${selected ? "font-semibold text-accent" : "font-medium text-fg"}`}>{item.label}</span>
+      <span className={`min-w-0 flex-1 truncate text-sm max-md:flex-none ${selected ? "font-semibold text-accent" : "font-medium text-fg"}`}>{item.label}</span>
       <span
         className={`tabular min-w-7 shrink-0 rounded-full px-2 py-0.5 text-center text-xs font-semibold ${
           // A quiet zero keeps an empty "Needs you" from reading as an alarm.
@@ -89,9 +89,9 @@ function RailRow({ item, data, selected, onSelect }: { item: RailItem; data: Tow
 
 function Group({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div>
-      <div className="mb-1.5 px-1 text-[11px] font-semibold tracking-wide text-fg-faint uppercase">{title}</div>
-      <div className="flex flex-col gap-0.5">{children}</div>
+    <div className="max-md:flex max-md:shrink-0 max-md:items-center max-md:gap-2">
+      <div className="mb-1.5 px-1 text-[11px] font-semibold tracking-wide text-fg-faint uppercase max-md:mb-0 max-md:whitespace-nowrap">{title}</div>
+      <div className="flex flex-col gap-0.5 max-md:flex-row max-md:gap-1.5">{children}</div>
     </div>
   );
 }
@@ -168,10 +168,16 @@ export function InboxRail({
     <RailRow key={item.id} item={item} data={data} selected={selected?.id === item.id} onSelect={() => onSelect(item)} />
   );
   return (
-    <nav aria-label="Carrier stages" className="flex h-full min-h-0 flex-col gap-5 overflow-y-auto border-r border-line bg-panel p-3">
+    <nav
+      aria-label="Carrier stages"
+      className="flex h-full min-h-0 flex-col gap-5 overflow-y-auto border-r border-line bg-panel p-3 max-md:h-auto max-md:gap-3 max-md:overflow-visible max-md:border-r-0 max-md:border-b"
+    >
       <DateRange dateWindow={current} today={today} onWindow={onWindow} />
-      <Group title="Needs you">{needsYou.map(row)}</Group>
-      <Group title="Pipeline">{pipeline.map(row)}</Group>
+      {/* On a phone both groups share one row of chips that scrolls sideways. */}
+      <div className="contents max-md:-mx-3 max-md:flex max-md:gap-4 max-md:overflow-x-auto max-md:px-3 max-md:[scrollbar-width:none]">
+        <Group title="Needs you">{needsYou.map(row)}</Group>
+        <Group title="Pipeline">{pipeline.map(row)}</Group>
+      </div>
     </nav>
   );
 }

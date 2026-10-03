@@ -411,11 +411,11 @@ export function CarrierDetail({
   const loadsCount = carrier?.loadsCount ?? null;
 
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-1 overflow-hidden">
-      <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-panel">
+    <div className="flex h-full min-h-0 min-w-0 flex-1 overflow-hidden max-md:h-auto max-md:flex-col max-md:overflow-y-auto">
+      <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-panel max-md:h-auto max-md:flex-none max-md:overflow-visible">
         <div className="shrink-0 border-b border-line px-4 py-3">
-          <div className="flex min-w-0 items-center gap-2">
-            <h2 className="min-w-0 truncate font-semibold text-fg">{name}</h2>
+          <div className="flex min-w-0 items-center gap-2 max-md:flex-wrap max-md:gap-y-1">
+            <h2 className="min-w-0 truncate font-semibold text-fg max-md:basis-full">{name}</h2>
             {carrier && <CarrierStagePill stage={carrier.carrierStage} size="md" />}
             <span className="min-w-0 flex-1" />
             <span className="flex shrink-0 items-center gap-2 text-xs text-fg-muted">
@@ -431,7 +431,7 @@ export function CarrierDetail({
               )}
             </span>
           </div>
-          <div className="mt-1.5 flex min-w-0 items-center gap-2 overflow-hidden">
+          <div className="mt-1.5 flex min-w-0 items-center gap-2 overflow-hidden max-md:flex-wrap max-md:gap-y-1.5">
             {numbers && <span className="tabular min-w-0 shrink-[3] truncate text-sm text-fg-muted">{numbers}</span>}
             {carrier?.needsHuman && (
               <Badge tone={carrierStageStyle.needs_approval.tone.pill}>
@@ -465,7 +465,7 @@ export function CarrierDetail({
             <div className="shrink-0 border-b border-line bg-bg px-4 py-2.5">
               <LoadSelector calls={calls} selected={selected} takenOverCallId={takenOverCallId} now={now} onSelect={onSelectCall} />
             </div>
-            <section aria-label="Call" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+            <section aria-label="Call" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden max-md:h-[75dvh] max-md:flex-none">
               <CallDetail key={selected.callId} call={selected} voice={voice} now={now} />
             </section>
           </>
@@ -474,7 +474,7 @@ export function CarrierDetail({
         )}
       </div>
 
-      <aside aria-label="Carrier and load" className="h-full min-h-0 w-[340px] shrink-0 overflow-y-auto border-l border-line bg-panel pb-6">
+      <aside aria-label="Carrier and load" className="h-full min-h-0 w-[340px] shrink-0 overflow-y-auto border-l border-line bg-panel pb-6 max-md:h-auto max-md:w-full max-md:overflow-visible max-md:border-t max-md:border-l-0">
         <NeedsYou calls={calls} selected={selected} voice={voice} now={now} onSelectCall={onSelectCall} />
         <LoadPanel selectedCall={selected} history={calls} nextTrip={carrier?.nextTrip ?? null} />
         <CarrierRecord carrier={carrier} calls={calls} />
