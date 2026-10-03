@@ -15,7 +15,7 @@ import {
   type ReleaseHoldResponse,
 } from "../contract.ts";
 import { operatorTimeZone } from "../constants.ts";
-import { resolveBooking, type BookingAttempt } from "../domain/holds.ts";
+import { rateAgreement, resolveBooking, type BookingAttempt } from "../domain/holds.ts";
 import { dollars } from "../domain/negotiation.ts";
 import { tmsWallClockToDate } from "../domain/trip.ts";
 import type { CarrierMessage, OtpDeliveryClient } from "../infra/otp-delivery-client.ts";
@@ -50,6 +50,9 @@ const windowTooTight = (lateHours: number) =>
   `I can't hold that one: even running team it would deliver about ${Math.round(lateHours)} hours after the appointment. ` +
   "A rep can check whether the receiver will move it.";
 
+// Said back word for word, so the carrier hears the exact rate before anything is held.
+const confirmRate = (rate: number) => `Just to confirm, I can do ${dollars(rate)} on this load. Does that work for you?`;
+
 const noHold = (status: Exclude<CreateHoldResponse["status"], "ok">, message: string): CreateHoldResponse => ({
   status,
   message,
@@ -68,7 +71,9 @@ const holdPlaced = (hold: HoldRow): CreateHoldResponse => ({
 const agreementRow = z.object({
   verified: z.boolean(),
   mc_number: z.string().nullable(),
-  agreed: z.boolean(),
+  accepted: z.boolean(),
+  // Twin returns numerics as strings; null first, since coercing null would read as 0 seconds.
+  counter_age_seconds: z.union([z.null(), z.coerce.number()]),
   autonomy: z.enum(autonomyModes).nullable(),
 });
 
@@ -181,18 +186,22 @@ export function holdRoutes(deps: HoldRouteDeps): FastifyPluginAsync {
       try {
         // Only a rate the negotiation itself produced can be held: one evaluate_offer accepted, or
         // our latest counter on this load, which the carrier took. The agent cannot invent one.
+        // The counter's age, on the twin's own clock, tells whether the carrier could have heard it.
         const [call] = await deps.twin.query(
           sql`SELECT c.verified, c.mc_number,
                 EXISTS (SELECT 1 FROM offers o WHERE o.call_id = c.call_id AND o.load_id = ${loadId}
-                  AND o.decision = 'accept' AND o.rate_to_say = ${agreedRate})
-                OR COALESCE((SELECT o.decision = 'counter' AND o.rate_to_say = ${agreedRate} FROM offers o
-                  WHERE o.call_id = c.call_id AND o.load_id = ${loadId} ORDER BY o.round DESC LIMIT 1), false) AS agreed,
+                  AND o.decision = 'accept' AND o.rate_to_say = ${agreedRate}) AS accepted,
+                (SELECT CASE WHEN o.decision = 'counter' AND o.rate_to_say = ${agreedRate}
+                    THEN EXTRACT(EPOCH FROM now()::timestamp - o.created_at) END FROM offers o
+                  WHERE o.call_id = c.call_id AND o.load_id = ${loadId} ORDER BY o.round DESC LIMIT 1) AS counter_age_seconds,
                 (SELECT value FROM settings WHERE key = 'autonomy') AS autonomy
               FROM calls c WHERE c.call_id = ${callId}`,
           agreementRow,
         );
         if (call?.verified !== true) return noHold("not_verified", createMessages.notVerified);
-        if (!call.agreed) return noHold("no_agreement", createMessages.noAgreement);
+        const agreement = rateAgreement(call.accepted, call.counter_age_seconds);
+        if (agreement === "none") return noHold("no_agreement", createMessages.noAgreement);
+        if (agreement === "unheard") return noHold("confirm_rate", confirmRate(agreedRate));
         if (call.mc_number === null) return noHold("mc_number_required", createMessages.mcRequired);
 
         const existing = await activeHold(loadId);

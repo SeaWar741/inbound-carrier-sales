@@ -246,6 +246,7 @@ export const createHoldResponse = z.object({
     "ok",
     "not_verified",
     "no_agreement",
+    "confirm_rate",
     "mc_number_required",
     "load_unavailable",
     "load_on_hold",

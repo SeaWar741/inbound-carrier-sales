@@ -109,12 +109,13 @@ const tools: ToolSpec[] = [
   {
     name: "create_hold",
     exposedFields: ["status", "message", "holdStatus"],
-    description: "Put the agreed load on hold for a senior rep to confirm. Call it right after evaluate_offer accepts.",
+    description:
+      "Put the agreed load on hold for a senior rep to confirm. Call it right after evaluate_offer accepts, or after the carrier clearly said yes to a counter you said out loud; a filler like sure or okay before the rate was said is not a yes.",
     path: "/v1/holds",
     waitMessage: "Perfect, locking that in for you.",
     parameters: [
       { name: "load_id", description: "The load number", required: true },
-      { name: "agreed_rate", description: "The rate evaluate_offer accepted, in whole US dollars", required: true },
+      { name: "agreed_rate", description: "The exact rate the carrier said yes to: the one evaluate_offer accepted or its latest counter, in whole US dollars", required: true },
     ],
     body: { loadId: "load_id", agreedRate: "agreed_rate" },
   },

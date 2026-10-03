@@ -5,6 +5,10 @@
 export const concessionSchedule = [0.35, 0.6, 0.8] as const;
 // Counters round down to $25 so the agent never speaks cents and never exceeds the schedule.
 export const counterRoundingUsd = 25;
+// Saying a counter ("I can do twenty-two twenty-five on this load. Does that work for you?") takes ~3 s,
+// and the carrier's answer plus speech-to-text and the agent's turn add at least ~1 s more. A hold at
+// that counter sooner than this answered something said before it (QA F1: a "sure" to the wait line).
+export const counterAnswerMinSeconds = 4;
 
 // Load search: a voice pitch cannot hold more than ~3 options before the caller loses track.
 export const loadsPitchedPerSearch = 3;

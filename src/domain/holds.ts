@@ -1,5 +1,19 @@
 // Holds block a load for one call until an operator books it in the TMS.
 
+import { counterAnswerMinSeconds } from "../constants.ts";
+
+// "unheard": the rate is our latest counter, but too fresh for the carrier to have heard and taken it.
+export type RateAgreement = "agreed" | "unheard" | "none";
+
+// The carrier said an accepted ask themselves, so it holds at once. Our counter holds only once
+// it was on the table long enough to be said and answered; counterAgeSeconds is null when the
+// latest offer on the load is not a counter at that rate.
+export function rateAgreement(accepted: boolean, counterAgeSeconds: number | null): RateAgreement {
+  if (accepted) return "agreed";
+  if (counterAgeSeconds === null) return "none";
+  return counterAgeSeconds >= counterAnswerMinSeconds ? "agreed" : "unheard";
+}
+
 export type BookingAttempt =
   | { outcome: "booked"; bookingRef: string }
   | { outcome: "rejected"; code: string; ambiguous: boolean }
