@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 import { setImmediate as yieldTurn } from "node:timers/promises";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { z } from "zod";
-import { resolveBooking } from "../src/domain/holds.ts";
+import { counterAnswerMinSeconds } from "../src/constants.ts";
+import { rateAgreement, resolveBooking } from "../src/domain/holds.ts";
 import type { TripSnapshot } from "../src/domain/trip-estimate.ts";
 import { TmsClient } from "../src/infra/tms/tms-client.ts";
 import type { CarrierMessage } from "../src/infra/otp-delivery-client.ts";
@@ -43,8 +44,18 @@ describe("resolveBooking", () => {
   });
 });
 
+describe("rateAgreement", () => {
+  it("takes an accepted ask at once and a counter only once it could have been said and answered", () => {
+    expect(rateAgreement(true, null)).toBe("agreed");
+    expect(rateAgreement(false, null)).toBe("none");
+    expect(rateAgreement(false, counterAnswerMinSeconds - 0.1)).toBe("unheard");
+    expect(rateAgreement(false, counterAnswerMinSeconds)).toBe("agreed");
+  });
+});
+
 type Call = { verified: boolean; mcNumber: string | null };
-type Offer = { callId: string; loadId: string; round: number; decision: string; rateToSay: number | null };
+// ageSeconds: how long ago evaluate_offer recorded the offer, as the twin's clock sees it.
+type Offer = { callId: string; loadId: string; round: number; decision: string; rateToSay: number | null; ageSeconds: number };
 type Hold = {
   hold_id: string;
   call_id: string;
@@ -101,10 +112,15 @@ function fakeTwin() {
       if (call) {
         const onLoad = offers.filter((o) => o.callId === callId && o.loadId === loadId);
         const latest = onLoad.reduce<(typeof onLoad)[number] | undefined>((a, o) => (a && a.round > o.round ? a : o), undefined);
-        const agreed =
-          onLoad.some((o) => o.decision === "accept" && o.rateToSay === rate) ||
-          (latest?.decision === "counter" && latest.rateToSay === rate);
-        rows.push({ verified: call.verified, mc_number: call.mcNumber, agreed, autonomy: settings.autonomy });
+        const accepted = onLoad.some((o) => o.decision === "accept" && o.rateToSay === rate);
+        const counterAge = latest?.decision === "counter" && latest.rateToSay === rate ? String(latest.ageSeconds) : null;
+        rows.push({
+          verified: call.verified,
+          mc_number: call.mcNumber,
+          accepted,
+          counter_age_seconds: counterAge,
+          autonomy: settings.autonomy,
+        });
       }
     } else if (sql.startsWith("SELECT * FROM holds WHERE load_id")) {
       const loadId = text(/load_id = E'([^']*)'/, sql);
@@ -223,8 +239,16 @@ describe("hold routes", () => {
     await fake.close();
   });
 
-  const offer = (callId: string, loadId: string, decision: string, rateToSay: number) =>
-    state.offers.push({ callId, loadId, round: state.offers.filter((o) => o.callId === callId && o.loadId === loadId).length + 1, decision, rateToSay });
+  // Offers default to well in the past, as when the carrier heard the rate and answered it.
+  const offer = (callId: string, loadId: string, decision: string, rateToSay: number, ageSeconds = 30) =>
+    state.offers.push({
+      callId,
+      loadId,
+      round: state.offers.filter((o) => o.callId === callId && o.loadId === loadId).length + 1,
+      decision,
+      rateToSay,
+      ageSeconds,
+    });
   const accept = (callId: string, loadId: string, rateToSay: number) => offer(callId, loadId, "accept", rateToSay);
 
   const createHold = (payload: object, key = agentKey) =>
@@ -375,6 +399,34 @@ describe("hold routes", () => {
       offer("call-a", "LD00881", "counter", 2350);
       expect((await createHold({ callId: "call-a", loadId: "LD00881", agreedRate: 2225 })).json()).toMatchObject({ status: "no_agreement" });
       expect((await createHold({ callId: "call-a", loadId: "LD00881", agreedRate: 2350 })).json()).toMatchObject({ status: "ok", holdStatus: "held" });
+    });
+
+    it("asks for a read-back instead of holding a counter the carrier had no time to hear", async () => {
+      // QA F1: the carrier's "sure" landed while the agent was still about to say the counter.
+      offer("call-a", "LD00881", "counter", 2225, 1);
+      const res = await createHold({ callId: "call-a", loadId: "LD00881", agreedRate: 2225 });
+      expect(res.json()).toEqual({
+        status: "confirm_rate",
+        message: "Just to confirm, I can do $2,225 on this load. Does that work for you?",
+        holdId: null,
+        holdStatus: null,
+      });
+      expect(state.holds).toEqual([]);
+
+      // After the read-back and an explicit yes, the same counter holds.
+      const counter = state.offers[0];
+      if (counter) counter.ageSeconds = 9;
+      expect((await createHold({ callId: "call-a", loadId: "LD00881", agreedRate: 2225 })).json()).toMatchObject({
+        status: "ok",
+        holdStatus: "held",
+      });
+    });
+
+    it("holds the carrier's own accepted ask at once: they said that rate themselves", async () => {
+      accept("call-a", "LD00881", 2300);
+      const latest = state.offers[0];
+      if (latest) latest.ageSeconds = 0;
+      expect((await createHold({ callId: "call-a", loadId: "LD00881", agreedRate: 2300 })).json()).toMatchObject({ status: "ok" });
     });
 
     it("refuses a rate above the max buy even with a recorded accept", async () => {
