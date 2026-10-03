@@ -1,4 +1,5 @@
 import rateLimit from "@fastify/rate-limit";
+import { Redis } from "ioredis";
 import Fastify, { type FastifyError, type FastifyPluginAsync } from "fastify";
 import { serializerCompiler, validatorCompiler } from "fastify-type-provider-zod";
 import { loadConfig, type Config } from "./config.ts";
@@ -65,7 +66,16 @@ export function buildServer(config: Config, routes: RouteSets, callEvents?: Call
   // Per principal and minute: the agent serves every concurrent call, the operator is the tower polling.
   // A request with no valid key is limited by address, so guessing keys stays slow.
   // A root hook, so it runs before each scope's key check and a key guesser is limited too.
-  app.register(rateLimit, { global: false });
+  // With REDIS_URL the counters are shared by every instance. A Redis outage lets requests through
+  // (skipOnError): the keys still gate every route, only the slowdown for key guessers pauses.
+  const redis = config.REDIS_URL
+    ? new Redis(config.REDIS_URL, { connectTimeout: 2_000, commandTimeout: 500, maxRetriesPerRequest: 1 })
+    : undefined;
+  if (redis) {
+    redis.on("error", (err) => app.log.warn({ err }, "rate-limit redis unavailable"));
+    app.addHook("onClose", async () => void redis.disconnect());
+  }
+  app.register(rateLimit, { global: false, ...(redis && { redis, nameSpace: "adapter-rl:", skipOnError: true }) });
   app.after(() => {
     app.addHook(
       "onRequest",

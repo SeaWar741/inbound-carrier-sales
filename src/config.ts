@@ -27,6 +27,8 @@ const configSchema = z
     // Trip estimates need both; without either one the estimator answers null and calls go on without them.
     EIA_API_KEY: z.string().min(1).optional(),
     ORS_API_KEY: z.string().min(1).optional(),
+    // Shared rate-limit counters (Render Key Value) so every instance counts together; without it each counts alone.
+    REDIS_URL: z.url({ protocol: /^rediss?$/ }).optional(),
   })
   .refine((c) => c.AGENT_API_KEY !== c.OPERATOR_API_KEY, {
     message: "AGENT_API_KEY and OPERATOR_API_KEY must differ",
