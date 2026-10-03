@@ -40,16 +40,3 @@ services:
         sync: false
       - key: HAPPYROBOT_ENVIRONMENT
         value: development
-      # Shared rate-limit counters, so any number of instances count together.
-      - key: REDIS_URL
-        fromService:
-          type: keyvalue
-          name: rate-limits
-          property: connectionString
-  # Free Key Value (Valkey): rate-limit counters only, nothing that must survive a restart.
-  # The tower sets its own REDIS_URL to this instance's internal URL.
-  - type: keyvalue
-    name: rate-limits
-    plan: free
-    maxmemoryPolicy: allkeys-lru
-    ipAllowList: []
